@@ -1,0 +1,11924 @@
+import cors from "cors";
+import dotenv from "dotenv";
+import express from "express";
+import { ImapFlow } from "imapflow";
+import { execFile, spawn } from "node:child_process";
+import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { handleInboundMessage, fulfillPaidOrder, formatRupiah, buildOrderCreatedReply, buildDepositCreatedReply, createDepositTopupOrder } from "./auto-order.js";
+import {
+  clearAccountsInGoogleSheets,
+  ensureGoogleSheetsTemplate,
+  ensureNetflixSheetsTemplate,
+  googleSheetsConfigured,
+  googleSheetsPublicSettings,
+  previewAccountSheetMapping,
+  pushAccountsToGoogleSheets,
+  pushFulfilledOrderToGoogleSheets,
+  syncAccountCredentialsToGoogleSheets,
+  syncGoogleSheetsStock,
+} from "./google-sheets.js";
+import { applyWaPriceSync, findWaPriceSource, previewWaPriceSync } from "./price-sync.js";
+import { mergeGoogleSheetsSettings } from "./settings-merge.js";
+import { databasePath, ensureDb, getDbVersion, makeId, nowText, onDbChange, readDb, todayText, updateDb, writeDb } from "./store.js";
+import {
+  isCanvaProduct,
+  isLinkPoolProduct,
+  isNetflixSemiPrivateVariant,
+  isVariantOrderable,
+  durationAllowedForVariant,
+  isVidioProduct,
+  isViuProduct,
+  linkPoolAvailableCount,
+  linkPoolsForVariant,
+  normalizeDurationLabel,
+  normalizeDurationModes,
+  priceForDuration,
+  pricesAllowedForVariant,
+  stockForVariant,
+  subscriptionDurationDays,
+  variantStockGroupKey,
+} from "./stock-groups.js";
+
+const STORED_SECRET_PLACEHOLDER = "[stored]";
+
+const app = express();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const distDir = path.join(__dirname, "..", "dist");
+const legacyRootDir = path.resolve(__dirname, "..", "..");
+
+dotenv.config({ path: path.join(legacyRootDir, ".env") });
+
+const whatsappDatabaseDir = path.resolve(
+  process.env.WHATSAPP_DATABASE_DIR || path.join(legacyRootDir, "apps", "bot", "database"),
+);
+const configuredPort = process.env.DASHBOARD_API_PORT || process.env.API_PORT || process.env.SERVER_PORT || process.env.PORT;
+const configuredHost = process.env.DASHBOARD_API_HOST || process.env.API_HOST;
+const port = Number(configuredPort || 4174);
+const host = configuredHost || "127.0.0.1";
+const paymentTtlMinutes = Math.max(1, Math.floor(Number(process.env.PAYMENT_TTL_MINUTES || 15) || 15));
+const resellerRequiredMessage = "Nomor WhatsApp ini belum terdaftar sebagai reseller Kavya. Pembelian hanya untuk reseller aktif. Hubungi owner untuk daftar atau aktivasi reseller.";
+
+app.use(cors());
+app.use(express.json({ limit: "1mb" }));
+app.use("/api", (req, res, next) => {
+  res.setHeader("Cache-Control", "private, no-store, no-cache, max-age=0, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  next();
+});
+
+function getProduct(db, productId) {
+  return db.products.find((product) => product.id === productId);
+}
+
+function getVariant(db, productId, variantId) {
+  return getProduct(db, productId)?.variants?.find((variant) => variant.id === variantId);
+}
+
+function whatsappNumberCandidates(...values) {
+  const candidates = new Set();
+  for (const value of values.flat(Infinity)) {
+    for (const part of String(value || "").split(/[,\s]+/)) {
+      const digits = part.replace(/[^\d]/g, "");
+      const normalized = normalizeWhatsappNumber(digits);
+      if (digits) candidates.add(digits);
+      if (normalized) candidates.add(normalized);
+    }
+  }
+  candidates.delete("");
+  return candidates;
+}
+
+function safeResellerRecord(reseller) {
+  return reseller && typeof reseller === "object" ? reseller : {};
+}
+
+function resellerNumberCandidates(reseller = {}) {
+  const source = safeResellerRecord(reseller);
+  return whatsappNumberCandidates(
+    source.whatsapp,
+    source.phone,
+    source.telepon,
+    source.telp,
+    source.contact,
+    source.contactOwner,
+    source.ownerNumber,
+    source.number,
+    source.whatsappNumber,
+  );
+}
+
+function primaryResellerWhatsapp(reseller = {}) {
+  const source = safeResellerRecord(reseller);
+  return (
+    normalizeWhatsappNumber(source.whatsapp) ||
+    normalizeWhatsappNumber(source.phone) ||
+    normalizeWhatsappNumber(source.telepon) ||
+    normalizeWhatsappNumber(source.telp) ||
+    normalizeWhatsappNumber(source.contact) ||
+    [...resellerNumberCandidates(source)][0] ||
+    ""
+  );
+}
+
+function activeResellerByWhatsapp(db, whatsapp) {
+  const candidates = whatsappNumberCandidates(whatsapp);
+  if (!candidates.size) return null;
+  return (
+    (db.resellers || []).find((reseller) => {
+      if (reseller.isActive === false) return false;
+      return [...resellerNumberCandidates(reseller)].some((number) => candidates.has(number));
+    }) || null
+  );
+}
+
+function resellerById(db, resellerId) {
+  const id = String(resellerId || "").trim();
+  if (!id) return null;
+  return (db.resellers || []).find((reseller) => reseller.id === id && reseller.isActive !== false) || null;
+}
+
+function normalizeSellerNameKey(value = "") {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/@.*$/, "")
+    .replace(/\b(reseller|ress|seller|store|shop|official|admin)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function compactSellerNameKey(value = "") {
+  return normalizeSellerNameKey(value).replace(/\s+/g, "");
+}
+
+function resellerNameCandidates(reseller = {}) {
+  const source = safeResellerRecord(reseller);
+  return [
+    source.name,
+    source.username,
+    source.email,
+    source.displayName,
+    source.storeName,
+    source.shopName,
+    source.id,
+  ]
+    .map(normalizeSellerNameKey)
+    .filter(Boolean);
+}
+
+function sellerTextMatchesReseller(seller = "", reseller = {}) {
+  const wanted = normalizeSellerNameKey(seller);
+  if (!wanted) return false;
+  const wantedCompact = compactSellerNameKey(seller);
+  return resellerNameCandidates(reseller).some((candidate) => (
+    candidate === wanted
+    || candidate.replace(/\s+/g, "") === wantedCompact
+    || (candidate.length >= 3 && wanted.split(" ").includes(candidate))
+  ));
+}
+
+function sheetResellerAliasEntries(db) {
+  return Array.isArray(db?.settings?.googleSheetsResellerAliases) ? db.settings.googleSheetsResellerAliases : [];
+}
+
+function mappedSheetResellerByAlias(db, seller = "") {
+  const aliasKey = normalizeSellerNameKey(seller);
+  const aliasCompact = compactSellerNameKey(seller);
+  if (!aliasKey) return null;
+  const matches = sheetResellerAliasEntries(db).filter((entry) => (
+    normalizeSellerNameKey(entry.alias || "") === aliasKey
+    || String(entry.aliasKey || "") === aliasKey
+    || (entry.aliasCompact && String(entry.aliasCompact) === aliasCompact)
+  ));
+  const phones = [...new Set(matches.map((entry) => normalizeWhatsappNumber(entry.whatsapp || "")).filter(Boolean))];
+  if (phones.length !== 1) return null;
+  return matches.find((entry) => normalizeWhatsappNumber(entry.whatsapp || "") === phones[0]) || null;
+}
+
+function resellerBySellerText(db, seller = "") {
+  const mapped = mappedSheetResellerByAlias(db, seller);
+  if (mapped?.whatsapp) {
+    const viaWhatsapp = activeResellerByWhatsapp(db, mapped.whatsapp);
+    if (viaWhatsapp) return viaWhatsapp;
+  }
+  const matches = (db.resellers || []).filter((item) => item.isActive !== false && sellerTextMatchesReseller(seller, item));
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function assertResellerCanOrder(db, whatsapp) {
+  const reseller = activeResellerByWhatsapp(db, whatsapp);
+  if (reseller) return reseller;
+  const error = new Error(resellerRequiredMessage);
+  error.status = 403;
+  throw error;
+}
+
+function sheetSyncKeyForProduct(product = {}) {
+  if (!product) return "";
+  if (isCanvaProduct(product)) return "canva";
+  if (isViuProduct(product)) return "viu";
+  if (isVidioProduct(product)) return "vidio";
+  if (isNetflixOrderProduct(product)) return "netflix";
+  return "";
+}
+
+function isGoogleSheetsBackedStock(stock = {}) {
+  return String(stock?.sheetSource || "").toLowerCase() === "google_sheets";
+}
+
+function isGoogleSheetsQuotaError(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  return message.includes("quota exceeded") || message.includes("read requests") || message.includes("rate limit") || message.includes("429");
+}
+
+function friendlyGoogleSheetsError(error) {
+  if (isGoogleSheetsQuotaError(error)) {
+    const friendly = new Error("Stok sedang disinkronkan dengan Google Sheets. Coba lagi dalam 1 menit.");
+    friendly.status = 429;
+    friendly.code = "google_sheets_rate_limited";
+    friendly.cause = error;
+    return friendly;
+  }
+  return error;
+}
+
+async function syncGoogleSheetsStockSafely(db, options = {}) {
+  if (!googleSheetsConfigured(db)) return null;
+  // Sync mutates the DB object passed by updateDb. Reusing a cached result here
+  // used to report success without applying Sheet changes to a newly-read DB.
+  // updateDb already serializes writes, so a process-level result cache is both
+  // unnecessary and unsafe.
+  try {
+    return await syncGoogleSheetsStock(db, options);
+  } catch (error) {
+    throw friendlyGoogleSheetsError(error);
+  }
+}
+
+async function syncSheetsForProductOrThrow(db, product, reason = "stock_precheck", options = {}) {
+  if (!googleSheetsConfigured(db)) return null;
+  let result;
+  try {
+    result = await syncGoogleSheetsStockSafely(db, { silent: true, reason, force: options.force === true });
+  } catch (error) {
+    const friendly = friendlyGoogleSheetsError(error);
+    if (friendly.code !== "google_sheets_rate_limited") {
+      enableMaintenanceMode(db, `Google Sheets gagal sync: ${friendly.message || "unknown_error"}`, "google_sheets");
+      friendly.maintenance = { reason: `Google Sheets gagal sync: ${friendly.message || "unknown_error"}`, source: "google_sheets" };
+      throw friendly;
+    }
+    return null;
+  }
+  const syncKey = sheetSyncKeyForProduct(product);
+  const section = syncKey ? result?.[syncKey] : null;
+  if (section && section.ok === false) {
+    const sectionMessage = section.error || section.reason || "unknown_error";
+    if (isGoogleSheetsQuotaError(sectionMessage)) {
+      return result;
+    }
+    const error = new Error(`Sync Google Sheets ${syncKey} gagal: ${sectionMessage}`);
+    error.status = 503;
+    enableMaintenanceMode(db, error.message, "google_sheets");
+    error.maintenance = { reason: error.message, source: "google_sheets" };
+    throw error;
+  }
+  return result;
+}
+
+function availableStockCount(db, product, variant) {
+  let availableCount = 0;
+  if (product && variant && isVariantOrderable(product, variant)) {
+    if (isLinkPoolProduct(db, product, variant)) {
+      availableCount = linkPoolsForVariant(db, product, variant).reduce((total, pool) => total + linkPoolAvailableCount(db, pool), 0);
+      if (availableCount <= 0 && isCanvaProduct(product)) {
+        availableCount = stockForVariant(db, product, variant, "available").length;
+      }
+    } else {
+      availableCount = stockForVariant(db, product, variant, "available").length;
+    }
+  }
+  return availableCount;
+}
+
+function availableStockOrThrow(db, product, variant, qty = 1) {
+  const availableCount = availableStockCount(db, product, variant);
+  if (availableCount < qty) {
+    const error = new Error(`Stok ${product?.name || "produk"} ${variant?.name || ""} tidak cukup. Tersedia ${availableCount}, diminta ${qty}.`);
+    error.status = 409;
+    throw error;
+  }
+  return availableCount;
+}
+
+async function ensureWebOrderStock(db, order, product, variant, qty = 1) {
+  const requestedQty = Math.max(1, Number(qty || 1));
+  const linkPoolOrder = isLinkPoolProduct(db, product, variant);
+  await syncSheetsForProductOrThrow(db, product, "web_order_stock_authority", { force: true });
+  async function retryAfterSync() {
+    await syncGoogleSheetsStockSafely(db, { silent: true, reason: "web_order_stock_recheck", force: true });
+  }
+
+  if (linkPoolOrder) {
+    let availableCount = availableStockCount(db, product, variant);
+    if (availableCount < requestedQty) {
+      try {
+        await retryAfterSync();
+        availableCount = availableStockCount(db, product, variant);
+      } catch {}
+    }
+    if (availableCount < requestedQty) {
+      const error = new Error(`Stok ${product?.name || "produk"} ${variant?.name || ""} tidak cukup. Tersedia ${availableCount}, diminta ${requestedQty}.`);
+      error.status = 409;
+      throw error;
+    }
+    return [];
+  }
+
+  let reservedStocks = reserveAvailableStocksForOrder(db, order, product, variant, requestedQty);
+  if (reservedStocks.length < requestedQty) {
+    try {
+      await retryAfterSync();
+      reservedStocks = reserveAvailableStocksForOrder(db, order, product, variant, requestedQty);
+    } catch {}
+  }
+  if (reservedStocks.length < requestedQty) {
+    const error = new Error(`Stok ${product?.name || "produk"} ${variant?.name || ""} tidak cukup. Tersedia ${reservedStocks.length}, diminta ${requestedQty}.`);
+    error.status = 409;
+    throw error;
+  }
+  return reservedStocks;
+}
+
+function clearReservedStockState(stock) {
+  stock.status = "available";
+  delete stock.reservedFor;
+  delete stock.reservedAccountId;
+  delete stock.reservedUntil;
+  delete stock.reservedAt;
+}
+
+function reserveAvailableStocksForOrder(db, order, product, variant, qty = 1) {
+  if (isLinkPoolProduct(db, product, variant)) return [];
+  const blockedStockIds = new Set((db.managedAccounts || [])
+    .filter((account) => account && !account.hidden && !account.returnedToStockAt && !isTerminalManagedAccountStatus(account.status || ""))
+    .filter((account) => String(account.orderId || account.sourceOrderId || "").trim() !== String(order.id || "").trim())
+    .map((account) => String(account.stockId || "").trim())
+    .filter(Boolean));
+  const stocks = stockForVariant(db, product, variant, "available")
+    .filter((stock) => !blockedStockIds.has(String(stock.id || "").trim()))
+    .slice(0, qty);
+  if (stocks.length < qty) return [];
+  const reservedAt = nowText();
+  for (const stock of stocks) {
+    stock.status = "reserved";
+    stock.reservedFor = order.id;
+    stock.reservedUntil = order.paymentExpiresAt || "";
+    stock.reservedAt = reservedAt;
+  }
+  order.reservedStockIds = stocks.map((stock) => stock.id);
+  return stocks;
+}
+
+function publicCatalog(db, options = {}) {
+  const includeEmpty = Boolean(options.includeEmpty);
+  return (db.products || [])
+    .filter((product) => product.isActive && !product.isArchived && !isOrderLocked(product, null))
+    .map((product) => {
+      const variants = (product.variants || [])
+        .filter((variant) => isVariantOrderable(product, variant) && !isOrderLocked(product, variant))
+        .map((variant) => {
+          const linkPool = isLinkPoolProduct(db, product, variant);
+          const fallbackAvailable = stockForVariant(db, product, variant, "available");
+          const available = linkPool ? [] : fallbackAvailable;
+          const linkPoolCount = linkPool
+            ? linkPoolsForVariant(db, product, variant).reduce((total, pool) => total + linkPoolAvailableCount(db, pool), 0)
+            : 0;
+          const stockCount = linkPool
+            ? (linkPoolCount > 0 || !isCanvaProduct(product) ? linkPoolCount : fallbackAvailable.length)
+            : available.length;
+          return {
+            ...variant,
+            prices: pricesAllowedForVariant(variant),
+            checkoutRequirements: checkoutRequirementsForVariant(db, product, variant),
+            stockCount,
+            stockIds: linkPool
+              ? Array.from({ length: stockCount }, (_, index) => `${variant.id}-link-slot-${index}`)
+              : available.map((item) => item.id),
+          };
+        })
+        .filter((variant) => includeEmpty || variant.stockCount > 0);
+      const uniqueStockIds = new Set(variants.flatMap((variant) => variant.stockIds || []));
+      return {
+        ...product,
+        variants: variants.map(({ stockIds, ...variant }) => variant),
+        stockCount: uniqueStockIds.size,
+      };
+    })
+    .filter((product) => product.variants.length > 0 && (includeEmpty || product.stockCount > 0));
+}
+
+function maintenanceMode(db = {}) {
+  const state = db.settings?.maintenance || db.settings?.maintenanceMode || {};
+  return {
+    enabled: Boolean(state.enabled),
+    reason: String(state.reason || "").trim(),
+    source: String(state.source || "manual").trim(),
+    updatedAt: String(state.updatedAt || "").trim(),
+  };
+}
+
+function enableMaintenanceMode(db, reason = "Maintenance aktif", source = "system") {
+  db.settings = db.settings || {};
+  db.settings.maintenance = {
+    enabled: true,
+    reason: String(reason || "Maintenance aktif").trim(),
+    source: String(source || "system").trim(),
+    updatedAt: nowText(),
+  };
+}
+
+function setMaintenanceMode(db, enabled, reason = "", source = "manual") {
+  db.settings = db.settings || {};
+  db.settings.maintenance = {
+    enabled: Boolean(enabled),
+    reason: String(reason || (enabled ? "Maintenance manual aktif" : "")).trim(),
+    source: String(source || "manual").trim(),
+    updatedAt: nowText(),
+  };
+}
+
+function assertOrderIntakeOpen(db) {
+  const state = maintenanceMode(db);
+  if (!state.enabled) return;
+  if (state.source === "google_sheets" && isGoogleSheetsQuotaError(state.reason || "")) return;
+  const error = new Error(state.reason || "Kavya sedang maintenance. Order baru ditahan sementara.");
+  error.status = 503;
+  throw error;
+}
+
+function firstConfigured(...values) {
+  return values.map((value) => String(value || "").trim()).find(Boolean) || "";
+}
+
+function configuredTokens(...values) {
+  return Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean)));
+}
+
+function firstUsableSecret(...values) {
+  return values
+    .map((value) => String(value || "").trim())
+    .find((value) => value && !/^(change-me|change-this|replace-with|your-)/i.test(value)) || "";
+}
+
+function parseBotPublicUrlInput(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return { publicUrl: "", tokenFromUrl: "" };
+  try {
+    const url = new URL(raw);
+    const tokenFromUrl = url.searchParams.get("token") || "";
+    if (url.pathname.includes("/session/qr")) {
+      url.pathname = url.pathname.replace(/\/session\/qr.*$/, "") || "/";
+    }
+    url.search = "";
+    url.hash = "";
+    return {
+      publicUrl: url.toString().replace(/\/$/, ""),
+      tokenFromUrl: /^TOKEN_/i.test(tokenFromUrl) ? "" : tokenFromUrl,
+    };
+  } catch {
+    return { publicUrl: raw.replace(/\/session\/qr.*$/, "").replace(/\/$/, ""), tokenFromUrl: "" };
+  }
+}
+
+function randomSecret(prefix) {
+  return `${prefix}_${crypto.randomBytes(24).toString("hex")}`;
+}
+
+const runtimeAuthSecretFallback = randomSecret("auth");
+
+function assertInboundToken(req, db = {}) {
+  const expectedTokens = configuredTokens(
+    firstUsableSecret(db.settings?.whatsappInboundToken),
+    firstUsableSecret(process.env.WHATSAPP_INBOUND_TOKEN),
+  );
+  if (!expectedTokens.length) {
+    const error = new Error("WhatsApp inbound token belum dikonfigurasi");
+    error.status = 401;
+    throw error;
+  }
+  const authorization = String(req.get("authorization") || "").trim();
+  const bearer = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
+  const actual = req.get("x-whatsapp-token") || bearer || req.body?.token;
+  if (!expectedTokens.includes(String(actual || "").trim())) {
+    const error = new Error("Invalid WhatsApp inbound token");
+    error.status = 401;
+    throw error;
+  }
+}
+
+function assertPakasirSecret(req, db = {}) {
+  const expectedTokens = configuredTokens(
+    firstUsableSecret(db.settings?.pakasirWebhookSecret),
+    firstUsableSecret(process.env.PAKASIR_WEBHOOK_SECRET),
+  );
+  if (!expectedTokens.length) return;
+  const actual = req.get("x-pakasir-secret") || req.body?.secret;
+  if (!expectedTokens.includes(String(actual || "").trim())) {
+    const error = new Error("Invalid Pakasir webhook secret");
+    error.status = 401;
+    throw error;
+  }
+}
+
+function ownerCredentials(db = {}) {
+  const storedPassword = firstUsableSecret(db.settings?.ownerPassword);
+  const envPassword = firstUsableSecret(process.env.OWNER_PASSWORD, process.env.OWNER_LOGIN_PASSWORD);
+  const password = storedPassword && storedPassword !== "admin12345" ? storedPassword : envPassword;
+  return {
+    email: firstConfigured(db.settings?.ownerEmail, process.env.OWNER_EMAIL, process.env.OWNER_LOGIN_EMAIL),
+    password,
+  };
+}
+
+function ownerProfile(db) {
+  const name = String(db.settings?.ownerName || "Admin Owner").trim() || "Admin Owner";
+  const username = String(db.settings?.ownerUsername || "owner").trim() || "owner";
+  const email = String(db.settings?.ownerEmail || "owner@kavya.id").trim() || "owner@kavya.id";
+  const whatsapp = String(db.settings?.ownerWhatsAppNumber || process.env.OWNER_WHATSAPP_NUMBER || "").replace(/[^\d]/g, "");
+  const initial = String(db.settings?.ownerInitial || name.slice(0, 1) || "A").trim().slice(0, 2).toUpperCase();
+  return { name, username, email, whatsapp, initial: initial || "O" };
+}
+
+function warrantyWhatsAppNumber(db = {}) {
+  return normalizeWhatsappNumber(
+    db.settings?.warrantyWhatsAppNumber ||
+      process.env.WARRANTY_WHATSAPP_NUMBER ||
+      process.env.GARANSI_WHATSAPP_NUMBER ||
+      "6285194629029",
+  );
+}
+
+function ownerIntegrationSettings(db) {
+  const settings = db.settings || {};
+  const publicDomain = firstConfigured(settings.publicDomain, process.env.PUBLIC_DOMAIN, settings.botPublicUrl, "http://127.0.0.1:4174").replace(/\/$/, "");
+  const pakasir = {
+    apiKey: firstUsableSecret(settings.pakasirApiKey, process.env.PAKASIR_API_KEY),
+    merchantId: firstConfigured(settings.pakasirMerchantId, settings.pakasirProject, process.env.PAKASIR_PROJECT),
+    webhookSecret: firstUsableSecret(settings.pakasirWebhookSecret, process.env.PAKASIR_WEBHOOK_SECRET),
+  };
+  const bailey = {
+    sessionId: firstConfigured(settings.baileySessionId, process.env.WHATSAPP_BAILEY_SESSION_ID, "kavya-main"),
+    botNumber: firstConfigured(settings.baileyBotNumber, process.env.WHATSAPP_BOT_NUMBER, settings.ownerWhatsAppNumber).replace(/[^\d]/g, ""),
+    publicUrl: firstConfigured(settings.whatsappBotPublicUrl, process.env.WHATSAPP_BOT_PUBLIC_URL, `${publicDomain}/whatsapp-bot`),
+    webhookUrl: firstConfigured(settings.baileyWebhookUrl, process.env.WHATSAPP_INBOUND_WEBHOOK_URL, `${publicDomain}/api/whatsapp/inbound`),
+    qrisGenerateUrl: firstConfigured(settings.baileyQrisGenerateUrl, `${publicDomain}/api/orders`),
+    botToken: firstUsableSecret(settings.whatsappBotToken, process.env.WHATSAPP_BOT_TOKEN),
+    inboundToken: firstUsableSecret(settings.whatsappInboundToken, process.env.WHATSAPP_INBOUND_TOKEN),
+  };
+  const gmail = {
+    mode: firstConfigured(settings.gmailMode, process.env.GMAIL_MODE, settings.gmailImapPassword ? "imap" : "oauth").toLowerCase(),
+    clientId: firstConfigured(settings.gmailClientId, process.env.GMAIL_CLIENT_ID),
+    clientSecret: firstUsableSecret(settings.gmailClientSecret, process.env.GMAIL_CLIENT_SECRET),
+    redirectUri: firstConfigured(settings.gmailRedirectUri, process.env.GMAIL_REDIRECT_URI, `${publicDomain}/api/gmail/oauth/callback`),
+    inboxEmail: firstConfigured(settings.gmailInboxEmail, process.env.GMAIL_INBOX_EMAIL),
+    refreshToken: firstUsableSecret(settings.gmailRefreshToken, process.env.GMAIL_REFRESH_TOKEN),
+    imapHost: firstConfigured(settings.gmailImapHost, process.env.GMAIL_IMAP_HOST, "imap.gmail.com"),
+    imapPort: Number(firstConfigured(settings.gmailImapPort, process.env.GMAIL_IMAP_PORT, "993")) || 993,
+    imapUser: firstConfigured(settings.gmailImapUser, process.env.GMAIL_IMAP_USER, settings.gmailInboxEmail, process.env.GMAIL_INBOX_EMAIL),
+    imapPassword: firstUsableSecret(settings.gmailImapPassword, process.env.GMAIL_IMAP_PASSWORD).replace(/\s+/g, ""),
+    imapSecure: String(firstConfigured(settings.gmailImapSecure, process.env.GMAIL_IMAP_SECURE, "true")).toLowerCase() !== "false",
+  };
+  const cloudflare = {
+    publicDomain,
+    tunnelToken: firstUsableSecret(process.env.CLOUDFLARED_TOKEN),
+  };
+  const payment = {
+    ownerQrisImageUrl: firstConfigured(settings.ownerQrisImageUrl, process.env.OWNER_QRIS_IMAGE_URL),
+    ownerQrisNote: firstConfigured(settings.ownerQrisNote, process.env.OWNER_QRIS_NOTE),
+    danaNumber: firstConfigured(settings.danaNumber, process.env.OWNER_DANA_NUMBER),
+    danaName: firstConfigured(settings.danaName, process.env.OWNER_DANA_NAME),
+    livinNumber: firstConfigured(settings.livinNumber, process.env.OWNER_LIVIN_NUMBER),
+    livinName: firstConfigured(settings.livinName, process.env.OWNER_LIVIN_NAME),
+    bcaNumber: firstConfigured(settings.bcaNumber, process.env.OWNER_BCA_NUMBER),
+    bcaName: firstConfigured(settings.bcaName, process.env.OWNER_BCA_NAME),
+    gopayNumber: firstConfigured(settings.gopayNumber, process.env.OWNER_GOPAY_NUMBER),
+    gopayName: firstConfigured(settings.gopayName, process.env.OWNER_GOPAY_NAME),
+    shopeepayNumber: firstConfigured(settings.shopeepayNumber, process.env.OWNER_SHOPEEPAY_NUMBER),
+    shopeepayName: firstConfigured(settings.shopeepayName, process.env.OWNER_SHOPEEPAY_NAME),
+  };
+  const googleSheets = googleSheetsPublicSettings(db);
+  const gmailHasConfig = Boolean(gmail.clientId && gmail.clientSecret && gmail.redirectUri);
+  const gmailHasToken = Boolean(gmail.refreshToken);
+  const gmailHasImap = Boolean(gmail.imapHost && gmail.imapPort && gmail.imapUser && gmail.imapPassword);
+  const gmailTokenInvalid = String(settings.gmailOAuthStatus || "").toLowerCase() === "invalid";
+  const gmailStatus = gmail.mode === "imap"
+    ? gmailHasImap ? "connected" : "disconnected"
+    : gmailHasConfig && gmailHasToken && !gmailTokenInvalid ? "connected" : gmailHasConfig ? "needs_oauth" : "disconnected";
+  return {
+    profile: ownerProfile(db),
+    pakasir,
+    bailey,
+    gmail,
+    cloudflare,
+    payment,
+    googleSheets,
+    status: {
+      pakasir: pakasir.merchantId && pakasir.apiKey ? "connected" : "disconnected",
+      bailey: bailey.sessionId && bailey.botNumber && bailey.botToken && bailey.inboundToken ? "connected" : "disconnected",
+      gmail: gmailStatus,
+      googleSheets: googleSheetsConfigured(db) ? "connected" : "disconnected",
+    },
+  };
+}
+
+function base64url(value) {
+  return Buffer.from(typeof value === "string" ? value : JSON.stringify(value)).toString("base64url");
+}
+
+function authSecret() {
+  return firstUsableSecret(process.env.AUTH_SECRET, process.env.SESSION_SECRET, process.env.OWNER_PASSWORD) || runtimeAuthSecretFallback;
+}
+
+function signPayload(payload) {
+  return crypto.createHmac("sha256", authSecret()).update(payload).digest("base64url");
+}
+
+function sessionTtlSeconds(remember = false) {
+  const defaultTtl = 60 * 60 * 8;
+  const rememberTtl = 60 * 60 * 24 * 30;
+  const configured = remember
+    ? firstConfigured(process.env.SESSION_REMEMBER_TTL_SECONDS, process.env.SESSION_TTL_REMEMBER_SECONDS, rememberTtl)
+    : firstConfigured(process.env.SESSION_TTL_SECONDS, defaultTtl);
+  const ttl = Number(configured);
+  return Number.isFinite(ttl) && ttl > 0 ? ttl : remember ? rememberTtl : defaultTtl;
+}
+
+function issueAuthToken(session, sessionVersion = 0, options = {}) {
+  const now = Math.floor(Date.now() / 1000);
+  const header = base64url({ alg: "HS256", typ: "JWT" });
+  const payload = base64url({
+    sub: session.user.id,
+    role: session.role,
+    name: session.user.name,
+    email: session.user.email || "",
+    username: session.user.username || "",
+    sv: Number(sessionVersion || 0),
+    iat: now,
+    exp: now + sessionTtlSeconds(Boolean(options.remember)),
+  });
+  return `${header}.${payload}.${signPayload(`${header}.${payload}`)}`;
+}
+
+function verifyAuthToken(token) {
+  const parts = String(token || "").split(".");
+  if (parts.length !== 3) return null;
+  const [header, payload, signature] = parts;
+  const expected = signPayload(`${header}.${payload}`);
+  const expectedBuffer = Buffer.from(expected);
+  const signatureBuffer = Buffer.from(signature);
+  if (expectedBuffer.length !== signatureBuffer.length || !crypto.timingSafeEqual(expectedBuffer, signatureBuffer)) return null;
+  try {
+    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (!data?.sub || !data?.role || Number(data.exp || 0) < Math.floor(Date.now() / 1000)) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function sessionVersionForAuth(db, auth) {
+  if (auth.role === "owner") return Number(db.settings?.ownerSessionVersion || 0);
+  const reseller = (db.resellers || []).find((item) => item.id === auth.sub);
+  if (!reseller) return null;
+  return Number(reseller.sessionVersion || 0);
+}
+
+function requireAuth(roles = ["owner", "reseller"]) {
+  return async (req, res, next) => {
+    const header = req.get("authorization") || "";
+    const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+    const auth = verifyAuthToken(token);
+    if (!auth) {
+      res.status(401).json({ error: "Sesi login tidak valid atau sudah berakhir" });
+      return;
+    }
+    if (!roles.includes(auth.role)) {
+      res.status(403).json({ error: "Akses tidak diizinkan untuk role ini" });
+      return;
+    }
+    try {
+      const db = await readDb();
+      const expectedVersion = sessionVersionForAuth(db, auth);
+      if (expectedVersion === null || Number(auth.sv || 0) !== expectedVersion) {
+        res.status(401).json({ error: "Sesi login tidak valid atau sudah berakhir" });
+        return;
+      }
+      req.auth = auth;
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+}
+
+function authReseller(db, auth) {
+  if (auth?.role !== "reseller") return null;
+  return (db.resellers || []).find((item) => item.id === auth.sub) || null;
+}
+
+const defaultResellerAccessTools = ["signin", "verification", "household"];
+
+function normalizeResellerAccessTools(value, fallback = defaultResellerAccessTools) {
+  const allowed = new Set(["signin", "verification", "reset", "household"]);
+  const source = Array.isArray(value) ? value : Array.isArray(fallback) ? fallback : defaultResellerAccessTools;
+  const normalized = source
+    .map((item) => String(item || "").trim().toLowerCase())
+    .filter((item) => allowed.has(item));
+  return Array.from(new Set(normalized));
+}
+
+function resellerAccessTools(reseller = {}) {
+  return normalizeResellerAccessTools(reseller.allowedAccessTools, defaultResellerAccessTools);
+}
+
+function orderBelongsToReseller(db, auth, order) {
+  if (auth?.role !== "reseller") return true;
+  if (order.resellerId) return order.resellerId === auth.sub;
+  const reseller = authReseller(db, auth);
+  if (!reseller) return false;
+  return resellerNumberCandidates(reseller).has(normalizeWhatsappNumber(order.whatsapp));
+}
+
+function ownedStockIdsForReseller(db, auth) {
+  if (auth?.role !== "reseller") return new Set();
+  return new Set(
+    (db.orders || [])
+      .filter((order) => orderBelongsToReseller(db, auth, order))
+      .flatMap((order) => order.deliveredStockIds || [])
+      .map((stockId) => String(stockId || "").trim())
+      .filter(Boolean),
+  );
+}
+
+function orderForManagedAccount(db, account = {}) {
+  const directOrderId = String(account.orderId || account.sourceOrderId || "").trim();
+  const stockId = String(account.stockId || "").trim();
+  if (directOrderId) {
+    const direct = (db.orders || []).find((item) => String(item.id || "").trim() === directOrderId);
+    const deliveredIds = new Set((direct?.deliveredStockIds || []).map((item) => String(item || "").trim()).filter(Boolean));
+    if (direct && (!stockId || !deliveredIds.size || deliveredIds.has(stockId))) return direct;
+  }
+  if (!stockId) return null;
+  return (db.orders || []).find((item) => (item.deliveredStockIds || []).some((candidate) => String(candidate || "").trim() === stockId)) || null;
+}
+
+function stockForManagedAccount(db, account = {}) {
+  const stockId = String(account.stockId || "").trim();
+  const sheetStockKey = String(account.sheetStockKey || "").trim();
+  if (!stockId && !sheetStockKey) return null;
+  return (db.stock || []).find((item) => (
+    (stockId && String(item.id || "").trim() === stockId)
+    || (sheetStockKey && String(item.sheetStockKey || "").trim() === sheetStockKey)
+  )) || null;
+}
+
+function addManagedAccountResellerCandidate(candidates, reseller, score, source) {
+  if (!reseller?.id) return;
+  const current = candidates.get(reseller.id);
+  if (!current || score > current.score) {
+    candidates.set(reseller.id, { reseller, score, source });
+  }
+}
+
+function resolveManagedAccountReseller(db, account = {}, options = {}) {
+  const order = options.order || orderForManagedAccount(db, account);
+  const candidates = new Map();
+  const sheetBacked = String(account.sheetSource || account.source || "").toLowerCase() === "google_sheets";
+  // For Sheet-backed accounts, the explicit SELLER cell is authoritative.
+  // Stale order/WhatsApp metadata must not move the assignment to another user.
+  if (sheetBacked && String(account.sheetSellerInput || "").trim()) {
+    addManagedAccountResellerCandidate(
+      candidates,
+      resellerBySellerText(db, account.sheetSellerInput),
+      700,
+      "sheet_seller",
+    );
+  }
+  addManagedAccountResellerCandidate(candidates, resellerById(db, order?.resellerId), 500, "order_reseller_id");
+  addManagedAccountResellerCandidate(candidates, activeResellerByWhatsapp(db, order?.whatsapp || ""), 460, "order_whatsapp");
+  addManagedAccountResellerCandidate(candidates, activeResellerByWhatsapp(db, account.whatsapp || ""), 420, "account_whatsapp");
+  addManagedAccountResellerCandidate(candidates, resellerBySellerText(db, account.reseller || account.buyer || order?.customer || ""), 360, "seller_text");
+  addManagedAccountResellerCandidate(candidates, resellerById(db, account.resellerId), 240, "account_reseller_id");
+  const ranked = [...candidates.values()].sort((left, right) => right.score - left.score);
+  if (!ranked.length) return null;
+  if (ranked.length > 1 && ranked[0].score === ranked[1].score && ranked[0].reseller.id !== ranked[1].reseller.id) {
+    return null;
+  }
+  return ranked[0].reseller;
+}
+
+function managedAccountBelongsToReseller(db, auth, account = {}, options = {}) {
+  if (auth?.role !== "reseller") return true;
+  const reseller = options.reseller || authReseller(db, auth);
+  if (!reseller) return false;
+
+  const resolvedReseller = resolveManagedAccountReseller(db, account, { order: options.order });
+  if (resolvedReseller?.id) return resolvedReseller.id === auth.sub;
+
+  if (account.resellerId) return account.resellerId === auth.sub;
+
+  const resellerWhatsapp = options.resellerWhatsapp || primaryResellerWhatsapp(reseller);
+  if (account.whatsapp && resellerWhatsapp) return normalizeWhatsappNumber(account.whatsapp) === resellerWhatsapp;
+
+  const ownedStockIds = options.ownedStockIds || ownedStockIdsForReseller(db, auth);
+  if (account.stockId && ownedStockIds.has(String(account.stockId || "").trim())) return true;
+
+  return [account.reseller, account.buyer].some((value) => sellerTextMatchesReseller(value, reseller));
+}
+
+function looksLikeEmail(value = "") {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+}
+
+function isMalformedManagedAccount(account = {}) {
+  if (account.sheetSource !== "google_sheets") return false;
+  if (!isNetflixManagedAccount(account)) return false;
+  const email = String(account.email || "").trim();
+  const password = String(account.password || "").trim();
+  if (!looksLikeEmail(email)) return true;
+  if (!password) return true;
+  return false;
+}
+
+function isVirtualManagedStockLink(account = {}) {
+  const stockId = String(account.stockId || "").trim().toLowerCase();
+  const source = String(account.source || account.sheetSource || "").trim().toLowerCase();
+  const product = String(account.product || account.productId || "").trim().toLowerCase();
+  return stockId.startsWith("canva-")
+    || stockId.startsWith("link-")
+    || source.startsWith("canva")
+    || source.includes("link_pool")
+    || product.includes("canva");
+}
+
+function managedAccountSlotKey(account = {}) {
+  if (!isNetflixManagedAccount(account)) return "";
+  const email = String(account.email || "").trim().toLowerCase();
+  const profile = String(account.profile || "").trim().toLowerCase();
+  if (!email || !profile) return "";
+  return `${email}::${profile}`;
+}
+
+function overlappingLiveSlotAccount(db, account = {}) {
+  const wanted = managedAccountSlotKey(account);
+  if (!wanted) return null;
+  return (db.managedAccounts || []).find((candidate) => {
+    if (!candidate || candidate.id === account.id) return false;
+    if (candidate.hidden || candidate.returnedToStockAt) return false;
+    const status = String(candidate.status || accountStatusFromDate(candidate.expiresAt, candidate.durationDays)).toLowerCase();
+    if (["expired", "replaced", "disabled"].includes(status)) return false;
+    if (managedAccountSlotKey(candidate) !== wanted) return false;
+    const sameOrder = String(candidate.orderId || candidate.sourceOrderId || "").trim() === String(account.orderId || account.sourceOrderId || "").trim();
+    const sameStock = String(candidate.stockId || "").trim() === String(account.stockId || "").trim();
+    return !sameOrder || !sameStock;
+  }) || null;
+}
+
+function sameMinuteBucket(left = "", right = "") {
+  return String(left || "").slice(0, 16) && String(left || "").slice(0, 16) === String(right || "").slice(0, 16);
+}
+
+function deliveredAccountsForOrder(db, order = {}, options = {}) {
+  const includeHidden = options.includeHidden === true;
+  const deliveredStockIds = new Set((order.deliveredStockIds || []).map((item) => String(item || "").trim()).filter(Boolean));
+  const orderId = String(order.id || "").trim();
+  const direct = (db.managedAccounts || []).filter((account) => (
+    (includeHidden || (!account.hidden && !account.returnedToStockAt))
+    && String(account.orderId || account.sourceOrderId || "").trim() === orderId
+  ));
+  if (direct.length) return direct;
+  const fallback = (db.managedAccounts || []).filter((account) => {
+    if (!includeHidden && (account.hidden || account.returnedToStockAt)) return false;
+    if (!deliveredStockIds.size || !deliveredStockIds.has(String(account.stockId || "").trim())) return false;
+    if (order.expiresAt && String(account.expiresAt || "").trim() === String(order.expiresAt || "").trim()) return true;
+    return sameMinuteBucket(account.startedAt, order.paidAt || order.createdAt);
+  });
+  return fallback;
+}
+
+function directManagedAccountsForOrder(db, order = {}, options = {}) {
+  const includeHidden = options.includeHidden === true;
+  const orderId = String(order.id || "").trim();
+  if (!orderId) return [];
+  return (db.managedAccounts || []).filter((account) => (
+    (includeHidden || (!account.hidden && !account.returnedToStockAt))
+    && String(account.orderId || account.sourceOrderId || "").trim() === orderId
+  ));
+}
+
+function stockHasConflictingHistoricalOrders(db, stock = null, order = null) {
+  const stockId = String(stock?.id || "").trim();
+  if (!stockId) return false;
+  if (String(stock?.sheetSource || "").toLowerCase() !== "google_sheets") return false;
+  const currentOrderId = String(order?.id || "").trim();
+  const orderIds = new Set();
+  for (const account of db.managedAccounts || []) {
+    if (String(account.stockId || "").trim() !== stockId) continue;
+    const linkedOrderId = String(account.orderId || account.sourceOrderId || "").trim();
+    if (linkedOrderId) orderIds.add(linkedOrderId);
+  }
+  for (const candidate of db.orders || []) {
+    if (!(candidate.deliveredStockIds || []).some((item) => String(item || "").trim() === stockId)) continue;
+    const linkedOrderId = String(candidate.id || "").trim();
+    if (linkedOrderId) orderIds.add(linkedOrderId);
+  }
+  if (currentOrderId) orderIds.delete(currentOrderId);
+  return orderIds.size > 0 || Boolean(stock?.historyConflict);
+}
+
+function syncHistoricalStockConflicts(db) {
+  db.stock = db.stock || [];
+  const orderIdsByStock = new Map();
+  for (const account of db.managedAccounts || []) {
+    const stockId = String(account.stockId || "").trim();
+    const orderId = String(account.orderId || account.sourceOrderId || "").trim();
+    if (!stockId || !orderId) continue;
+    const set = orderIdsByStock.get(stockId) || new Set();
+    set.add(orderId);
+    orderIdsByStock.set(stockId, set);
+  }
+  for (const order of db.orders || []) {
+    const orderId = String(order.id || "").trim();
+    if (!orderId) continue;
+    for (const stockIdRaw of order.deliveredStockIds || []) {
+      const stockId = String(stockIdRaw || "").trim();
+      if (!stockId) continue;
+      const set = orderIdsByStock.get(stockId) || new Set();
+      set.add(orderId);
+      orderIdsByStock.set(stockId, set);
+    }
+  }
+
+  let updated = 0;
+  for (const stock of db.stock || []) {
+    const stockId = String(stock.id || "").trim();
+    if (!stockId) continue;
+    const orderIds = [...(orderIdsByStock.get(stockId) || new Set())].sort();
+    const conflicting = isGoogleSheetsBackedStock(stock) && orderIds.length > 1;
+    if (conflicting) {
+      if (!stock.historyConflict) {
+        stock.historyConflict = true;
+        updated += 1;
+      }
+      const serialized = JSON.stringify(orderIds);
+      if (JSON.stringify(stock.historyConflictOrderIds || []) !== serialized) {
+        stock.historyConflictOrderIds = orderIds;
+        updated += 1;
+      }
+      if (!stock.historyConflictDetectedAt) {
+        stock.historyConflictDetectedAt = nowText();
+        updated += 1;
+      }
+      if (!stock.autoBackfillBlocked) {
+        stock.autoBackfillBlocked = true;
+        updated += 1;
+      }
+    } else {
+      if (stock.historyConflict) {
+        delete stock.historyConflict;
+        updated += 1;
+      }
+      if (stock.historyConflictOrderIds) {
+        delete stock.historyConflictOrderIds;
+        updated += 1;
+      }
+      if (stock.historyConflictDetectedAt) {
+        delete stock.historyConflictDetectedAt;
+        updated += 1;
+      }
+      if (stock.autoBackfillBlocked) {
+        delete stock.autoBackfillBlocked;
+        updated += 1;
+      }
+    }
+  }
+  return updated;
+}
+
+function repairHistoricalStockReuse(db) {
+  db.stock = db.stock || [];
+  db.managedAccounts = db.managedAccounts || [];
+  let updated = 0;
+
+  for (const stock of db.stock || []) {
+    if (!isGoogleSheetsBackedStock(stock)) continue;
+    const stockStatus = String(stock.status || "").toLowerCase();
+    const sheetReturned = stockStatus === "available";
+    if (sheetReturned) continue;
+    if (!stock.historyConflict && !stockHasConflictingHistoricalOrders(db, stock)) continue;
+    const accounts = (db.managedAccounts || []).filter((account) => (
+      String(account.stockId || "").trim() === String(stock.id || "").trim()
+      || (stock.sheetStockKey && String(account.sheetStockKey || "").trim() === String(stock.sheetStockKey || "").trim())
+    ));
+    if (!accounts.length) continue;
+    const ranked = accounts.slice().sort((left, right) => {
+      const leftStart = createdAtMs(left.startedAt || left.snapshotAt || left.expiresAt || "");
+      const rightStart = createdAtMs(right.startedAt || right.snapshotAt || right.expiresAt || "");
+      return rightStart - leftStart;
+    });
+    const keeper = ranked[0];
+    const keeperStatus = accountStatusFromDate(keeper.expiresAt, keeper.durationDays);
+    if (keeper.hidden) {
+      keeper.hidden = false;
+      updated += 1;
+    }
+    if (keeper.returnedToStockAt) {
+      delete keeper.returnedToStockAt;
+      updated += 1;
+    }
+    if (keeper.status !== keeperStatus) {
+      keeper.status = keeperStatus;
+      updated += 1;
+    }
+    for (const account of ranked.slice(1)) {
+      const nextStatus = accountStatusFromDate(account.expiresAt, account.durationDays);
+      const shouldReplace = nextStatus !== "expired";
+      if (shouldReplace && account.status !== "replaced") {
+        account.status = "replaced";
+        updated += 1;
+      }
+      if (account.hidden) {
+        account.hidden = false;
+        updated += 1;
+      }
+    }
+
+    const linkedOrder = orderForManagedAccount(db, keeper)
+      || (db.orders || []).find((order) => (order.deliveredStockIds || []).some((candidate) => String(candidate || "").trim() === String(stock.id || "").trim()))
+      || null;
+    const nextBuyer = String(keeper.buyer || linkedOrder?.customer || stock.buyer || "").trim();
+    const nextReseller = String(keeper.reseller || linkedOrder?.reseller || stock.reseller || "").trim();
+    const nextResellerId = String(keeper.resellerId || linkedOrder?.resellerId || stock.resellerId || "").trim();
+    const nextWhatsapp = normalizeWhatsappNumber(keeper.whatsapp || linkedOrder?.whatsapp || stock.whatsapp || "");
+    const nextOrderId = String(keeper.orderId || keeper.sourceOrderId || linkedOrder?.id || stock.sheetOrderId || "").trim();
+    const nextSoldAt = String(keeper.startedAt || linkedOrder?.paidAt || linkedOrder?.createdAt || stock.soldAt || "").trim();
+    const nextExpiresAt = String(keeper.expiresAt || stock.expiresAt || stock.soldExpiresAt || "").trim();
+    const nextDuration = String(keeper.duration || linkedOrder?.duration || stock.soldDuration || "").trim();
+    const nextDurationDays = Math.max(0, Number(keeper.durationDays || linkedOrder?.durationDays || stock.soldDurationDays || 0));
+
+    if (String(stock.status || "").toLowerCase() !== "sold") {
+      stock.status = "sold";
+      updated += 1;
+    }
+    if (nextBuyer && String(stock.buyer || "").trim() !== nextBuyer) {
+      stock.buyer = nextBuyer;
+      updated += 1;
+    }
+    if (nextReseller && String(stock.reseller || "").trim() !== nextReseller) {
+      stock.reseller = nextReseller;
+      updated += 1;
+    }
+    if (nextResellerId && String(stock.resellerId || "").trim() !== nextResellerId) {
+      stock.resellerId = nextResellerId;
+      updated += 1;
+    }
+    if (nextWhatsapp && normalizeWhatsappNumber(stock.whatsapp || "") !== nextWhatsapp) {
+      stock.whatsapp = nextWhatsapp;
+      updated += 1;
+    }
+    if (nextOrderId && String(stock.sheetOrderId || "").trim() !== nextOrderId) {
+      stock.sheetOrderId = nextOrderId;
+      updated += 1;
+    }
+    if (nextSoldAt && String(stock.soldAt || "").trim() !== nextSoldAt) {
+      stock.soldAt = nextSoldAt;
+      updated += 1;
+    }
+    if (nextExpiresAt && String(stock.soldExpiresAt || stock.expiresAt || "").trim() !== nextExpiresAt) {
+      stock.soldExpiresAt = nextExpiresAt;
+      stock.expiresAt = nextExpiresAt;
+      updated += 1;
+    }
+    if (nextDuration && String(stock.soldDuration || "").trim() !== nextDuration) {
+      stock.soldDuration = nextDuration;
+      updated += 1;
+    }
+    if (nextDurationDays > 0 && Number(stock.soldDurationDays || 0) !== nextDurationDays) {
+      stock.soldDurationDays = nextDurationDays;
+      updated += 1;
+    }
+  }
+
+  return updated;
+}
+
+function deliveryAccountSummary(account = {}, options = {}) {
+  const includeSecrets = options.includeSecrets === true;
+  const includeSheetMeta = options.includeSheetMeta === true;
+  const summary = {
+    id: account.id,
+    stockId: account.stockId || "",
+    orderId: account.orderId || account.sourceOrderId || "",
+    product: account.product || "",
+    variant: account.variant || "",
+    email: account.email || "",
+    profile: account.profile || "",
+    startedAt: account.startedAt || "",
+    expiresAt: account.expiresAt || "",
+    status: account.status || "",
+    reseller: account.reseller || "",
+    buyer: account.buyer || "",
+    device: account.device || "",
+    source: account.source || "",
+  };
+  if (includeSecrets) {
+    summary.password = account.password || "";
+    summary.pin = account.pin || "";
+  }
+  if (includeSheetMeta) {
+    summary.sheetName = account.sheetName || "";
+    summary.sheetRow = Number(account.sheetRow || 0);
+    summary.sheetPool = account.sheetPool || "";
+  }
+  return summary;
+}
+
+function orderBaseForApi(order = {}, options = {}) {
+  const detail = options.detail === true;
+  const publicView = options.public === true;
+  const base = publicView ? safePublicOrder(order) : { ...order };
+  if (!detail) {
+    base.fulfillmentText = "";
+    base.snkText = "";
+  }
+  return base;
+}
+
+function isSmokeTestReseller(reseller = {}) {
+  return Boolean(reseller.isSmokeTestAccount) || String(reseller.username || "").trim().toLowerCase() === "kya";
+}
+
+function orderUsesSmokeTestReseller(db, order = {}) {
+  const reseller = (db.resellers || []).find((item) => (
+    (order.resellerId && item.id === order.resellerId)
+    || (order.reseller && String(item.username || "").trim().toLowerCase() === String(order.reseller || "").trim().toLowerCase())
+  ));
+  return isSmokeTestReseller(reseller);
+}
+
+function serializeOrderForApi(db, order = {}, options = {}) {
+  const viewerRole = options.viewerRole || "owner";
+  const publicView = viewerRole === "public";
+  const detail = options.detail === true;
+  const deliveredAccounts = deliveredAccountsForOrder(db, order);
+  const traceEvents = detail && !publicView ? buildOrderTraceEvents(db, order) : [];
+  const accounts = detail && !publicView
+    ? deliveredAccounts.map((account) => deliveryAccountSummary(account, {
+        includeSecrets: true,
+        includeSheetMeta: viewerRole === "owner",
+      }))
+    : [];
+  const base = orderBaseForApi(order, { public: publicView, detail });
+  base.excludeFromSalesMetrics = Boolean(base.excludeFromSalesMetrics || isSmokeTestOrder(order) || orderUsesSmokeTestReseller(db, order));
+  return {
+    ...base,
+    customer: publicView ? "" : order.customer || base.customer || "",
+    whatsapp: publicView ? "" : order.whatsapp || base.whatsapp || "",
+    resellerId: publicView ? "" : order.resellerId || "",
+    reseller: publicView ? "" : order.reseller || "",
+    resellerName: publicView ? "" : order.reseller || order.customer || "",
+    deliveredAccounts: accounts,
+    deliveredAccountCount: deliveredAccounts.length,
+    traceEvents,
+  };
+}
+
+function isSmokeTestOrder(order = {}) {
+  return Boolean(order.isSmokeTest || String(order.source || "").toLowerCase() === "owner_smoke_test");
+}
+
+function visibleManagedAccountsForAuth(db, auth) {
+  const stockRows = db.stock || [];
+  const visible = (db.managedAccounts || []).filter((account) => {
+    if (account.hidden || account.returnedToStockAt) return false;
+    if (account.sheetClearedAt && String(account.sheetSource || account.source || "").toLowerCase() === "google_sheets") return false;
+    if (isMalformedManagedAccount(account)) return false;
+    if (account.sheetSource !== "google_sheets") return true;
+    const linkedStock = stockRows.find((stock) => (
+      (account.stockId && stock.id === account.stockId)
+      || (account.sheetStockKey && stock.sheetStockKey === account.sheetStockKey)
+    ));
+    // Sheet-backed accounts without a current Sheet stock row are historical
+    // tombstones, not active/expired accounts for the dashboard.
+    if (!linkedStock) return false;
+    const stockReturned = linkedStock.status === "available" && !linkedStock.soldAt && !linkedStock.reservedFor && !linkedStock.reservedAccountId;
+    return !stockReturned;
+  });
+  if (auth?.role !== "reseller") return visible;
+
+  const reseller = authReseller(db, auth);
+  if (!reseller) return [];
+  const resellerWhatsapp = primaryResellerWhatsapp(reseller);
+  const ownedStockIds = ownedStockIdsForReseller(db, auth);
+  return visible.filter((account) => managedAccountBelongsToReseller(db, auth, account, { reseller, resellerWhatsapp, ownedStockIds }));
+}
+
+function activityBelongsToReseller(db, auth, activity) {
+  if (auth?.role !== "reseller") return true;
+  const reseller = authReseller(db, auth);
+  if (!reseller) return false;
+  const resellerWhatsapp = primaryResellerWhatsapp(reseller);
+  if (activity.resellerId) return activity.resellerId === auth.sub;
+  const activityWhatsapp = normalizeWhatsappNumber(activity.whatsapp || "");
+  if (activityWhatsapp) return Boolean(resellerWhatsapp && activityWhatsapp === resellerWhatsapp);
+
+  const account = activity.accountId
+    ? (db.managedAccounts || []).find((item) => item.id === activity.accountId)
+    : null;
+  if (activity.accountId && !account) return false;
+  if (account) return managedAccountBelongsToReseller(db, auth, account, { reseller, resellerWhatsapp });
+  return false;
+}
+
+const loginAttempts = new Map();
+
+function loginAttemptKey(req, email) {
+  return `${req.ip || req.socket?.remoteAddress || "local"}::${email}`;
+}
+
+function assertLoginAllowed(req, email) {
+  const key = loginAttemptKey(req, email);
+  const attempt = loginAttempts.get(key);
+  const now = Date.now();
+  if (!attempt || attempt.resetAt <= now) return;
+  if (attempt.count >= Number(process.env.LOGIN_MAX_ATTEMPTS || 5)) {
+    const error = new Error("Terlalu banyak percobaan login. Coba lagi beberapa menit lagi.");
+    error.status = 429;
+    throw error;
+  }
+}
+
+function recordLoginFailure(req, email) {
+  const key = loginAttemptKey(req, email);
+  const now = Date.now();
+  const windowMs = Number(process.env.LOGIN_WINDOW_MS || 15 * 60 * 1000);
+  const attempt = loginAttempts.get(key);
+  if (!attempt || attempt.resetAt <= now) {
+    loginAttempts.set(key, { count: 1, resetAt: now + windowMs });
+    return;
+  }
+  attempt.count += 1;
+}
+
+function clearLoginFailures(req, email) {
+  loginAttempts.delete(loginAttemptKey(req, email));
+}
+
+function normalizeLoginIdentifier(value = "") {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeWhatsappNumber(value = "") {
+  const digits = String(value || "").split("@")[0].split(":")[0].replace(/[^\d]/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("0")) return `62${digits.slice(1)}`;
+  if (digits.startsWith("8")) return `62${digits}`;
+  return digits;
+}
+
+function normalizeEmailKey(value = "") {
+  return String(value || "").trim().toLowerCase();
+}
+
+function findPasswordResetAccount(db, identifier) {
+  const query = normalizeLoginIdentifier(identifier);
+  const whatsappQuery = normalizeWhatsappNumber(identifier);
+  if (!query) return null;
+
+  const owner = ownerCredentials(db);
+  const profile = ownerProfile(db);
+  const ownerCandidates = [owner.email, profile.email, profile.username, `${profile.username}@kavya.id`]
+    .filter(Boolean)
+    .map(normalizeLoginIdentifier);
+  if (ownerCandidates.includes(query) || (whatsappQuery && whatsappQuery === normalizeWhatsappNumber(profile.whatsapp))) {
+    return {
+      role: "owner",
+      id: "owner",
+      name: profile.name,
+      email: profile.email || owner.email,
+      whatsapp: profile.whatsapp,
+    };
+  }
+
+  const reseller = (db.resellers || []).find((item) => {
+    const candidates = [item.email, item.username, `${item.username}@kavya.id`].filter(Boolean).map(normalizeLoginIdentifier);
+    return candidates.includes(query) || (whatsappQuery && whatsappQuery === normalizeWhatsappNumber(item.whatsapp));
+  });
+  if (!reseller || reseller.isActive === false) return null;
+  return {
+    role: "reseller",
+    id: reseller.id,
+    name: reseller.name,
+    email: reseller.email,
+    whatsapp: reseller.whatsapp,
+  };
+}
+
+function resetCodeHash(resetId, code) {
+  return crypto.createHmac("sha256", authSecret()).update(`${resetId}:${String(code || "").trim()}`).digest("hex");
+}
+
+function resetTokenHash(token) {
+  return crypto.createHmac("sha256", authSecret()).update(String(token || "")).digest("hex");
+}
+
+function cleanupPasswordResets(db) {
+  const now = Date.now();
+  db.passwordResets = (db.passwordResets || []).filter((item) => {
+    if (item.usedAt) return false;
+    return Number(item.expiresAtMs || 0) > now || Number(item.resetTokenExpiresAtMs || 0) > now;
+  });
+}
+
+async function sendWhatsAppMessage(db, { to, text, imageUrl = "", mediaPath = "", documentPath = "", fileName = "" }) {
+  const token = firstUsableSecret(db.settings?.whatsappBotToken, process.env.WHATSAPP_BOT_TOKEN);
+  const botUrl = firstConfigured(process.env.WHATSAPP_BOT_URL, db.settings?.whatsappBotUrl, "http://127.0.0.1:4016");
+  const target = normalizeWhatsAppTarget(to);
+  if (!token || !botUrl) {
+    return { sent: false, reason: "whatsapp_bot_not_configured" };
+  }
+  if (!target) {
+    return { sent: false, reason: "whatsapp_number_not_found" };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Number(process.env.WHATSAPP_BOT_TIMEOUT_MS || 5000));
+  try {
+    const response = await fetch(new URL("/messages/send", botUrl), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        to: target,
+        text,
+        imageUrl,
+        mediaPath,
+        documentPath,
+        fileName,
+      }),
+      signal: controller.signal,
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body.success === false) {
+      return { sent: false, reason: body.error || `whatsapp_bot_http_${response.status}` };
+    }
+    return { sent: true, messageKey: body.message_key || body.messageKey || null };
+  } catch (error) {
+    return {
+      sent: false,
+      reason: error.name === "AbortError" ? "whatsapp_bot_timeout" : error.message || "whatsapp_bot_unavailable",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function depositRequestMethodLabel(value = "") {
+  const method = String(value || "").trim().toLowerCase();
+  if (method === "qris_auto" || method === "qris") return "Deposit otomatis QRIS";
+  if (method === "qris_owner") return "QRIS owner manual";
+  if (method === "dana") return "DANA";
+  if (method === "livin") return "Livin Mandiri";
+  if (method === "bca") return "BCA";
+  if (method === "gopay") return "GoPay";
+  if (method === "shopeepay") return "ShopeePay";
+  return value || "-";
+}
+
+function ownerWhatsappTarget(db = {}) {
+  return normalizeWhatsappNumber(ownerProfile(db).whatsapp || db.settings?.ownerWhatsAppNumber || process.env.OWNER_WHATSAPP_NUMBER || "");
+}
+
+function depositRequestNotificationText({ reseller = {}, amount = 0, method = "", note = "", requestId = "", createdAt = "" } = {}) {
+  return joinBotMessageLines([
+    "_*Permintaan Deposit Baru*_",
+    "",
+    `Reseller : *${reseller.name || reseller.username || reseller.whatsapp || "-"}*`,
+    `WhatsApp : *${normalizeWhatsappNumber(reseller.whatsapp || "") || "-"}*`,
+    `Request ID : *${requestId || "-"}*`,
+    `Metode : *${depositRequestMethodLabel(method)}*`,
+    `Nominal : *${formatRupiah(amount)}*`,
+    note ? `Catatan : *${note}*` : "",
+    createdAt ? `Waktu : *${createdAt}*` : "",
+    "",
+    "_Silakan cek panel owner untuk approve / tolak permintaan ini._",
+  ]);
+}
+
+function normalizeWhatsAppTarget(value = "") {
+  const target = String(value || "").trim();
+  if (target.endsWith("@g.us") || target.endsWith("@s.whatsapp.net") || target.endsWith("@lid")) {
+    return target;
+  }
+  return normalizeWhatsappNumber(target);
+}
+
+function formatRentalDays(value) {
+  const days = Number(value || 0);
+  return `${Number.isFinite(days) ? Math.max(0, days) : 0} hari`;
+}
+
+function rentalDayChangeLines({ addedDays, previousDays, totalDays } = {}) {
+  let delta = Number(addedDays || 0);
+  if (!Number.isFinite(delta) || delta === 0) {
+    const before = Number(previousDays || 0);
+    const after = Number(totalDays || 0);
+    if (Number.isFinite(before) && Number.isFinite(after) && before !== after) {
+      delta = after - before;
+    }
+  }
+  if (!Number.isFinite(delta) || delta === 0) return [];
+  const label = delta > 0 ? "Penambahan Hari" : "Pengurangan Hari";
+  return [`${label} : *${Math.abs(delta)} hari*`];
+}
+
+function rentalOwnerContactNumber(db, rental = {}) {
+  return normalizeWhatsappNumber(
+    rental.contact ||
+      rental.ownerNumber ||
+      rental.ownerWhatsapp ||
+      rental.ownerWhatsAppNumber ||
+      rental.owner ||
+      process.env.OWNER_WHATSAPP_NUMBER ||
+      db.settings?.ownerWhatsAppNumber ||
+      process.env.BACKUP_OWNER_NUMBER ||
+      ownerProfile(db).whatsapp ||
+      "",
+  );
+}
+
+function rentalStoreOwnerNotificationTarget(db, rental = {}) {
+  return rentalOwnerContactNumber(db, rental);
+}
+
+function rentalDisplayName(rental = {}) {
+  return String(rental.name || rental.groupName || rental.groupJid || rental.id || "Grup WhatsApp").trim();
+}
+
+function rentalOwnerNumber(db, rental = {}) {
+  return rentalOwnerContactNumber(db, rental) || "-";
+}
+
+function joinBotMessageLines(lines = []) {
+  return lines
+    .map((line) => String(line ?? "").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function rentalNotificationText({ title, db, rental, totalDays, addedDays, previousDays }) {
+  return joinBotMessageLines([
+    `_*${title}*_`,
+    "",
+    `Name Grub : *${rentalDisplayName(rental)}*`,
+    `Nomor Owner : *${rentalOwnerNumber(db, rental)}*`,
+    ...rentalDayChangeLines({ addedDays, previousDays, totalDays }),
+    `Expired : *${formatRentalDays(totalDays || rental.daysLeft || 0)}*`,
+    "",
+    "_Untuk Mengecek status sewa ketik .ceksewa pada grub tersebut_",
+  ]);
+}
+
+function rentalOwnerNotificationText(payload) {
+  return rentalNotificationText({ ...payload, title: "Bot Sewa Bertambah" });
+}
+
+function rentalJoinedNotificationText(payload) {
+  return rentalNotificationText({ ...payload, title: "Bot Sudah Bergabung" });
+}
+
+async function notifyOwnerRentalChanged(db, payload) {
+  const target = rentalStoreOwnerNotificationTarget(db, payload.rental);
+  if (!target) return { sent: false, reason: "store_owner_whatsapp_missing" };
+  return sendWhatsAppMessage(db, {
+    to: target,
+    text: rentalOwnerNotificationText({ db, ...payload }),
+  });
+}
+
+async function notifyOwnerRentalJoined(db, payload) {
+  const target = rentalStoreOwnerNotificationTarget(db, payload.rental);
+  if (!target) return { sent: false, reason: "store_owner_whatsapp_missing" };
+  return sendWhatsAppMessage(db, {
+    to: target,
+    text: rentalJoinedNotificationText({ db, ...payload }),
+  });
+}
+
+function rentalExpiringNotificationText(db, rental, daysLeft) {
+  return joinBotMessageLines([
+    "_*Notifikasi Bot Owner Grup*_",
+    "",
+    `Name Grub : *${rentalDisplayName(rental)}*`,
+    `Nomor Owner : *${rentalOwnerNumber(db, rental)}*`,
+    `Expired : *${formatRentalDays(daysLeft)}*`,
+    "",
+    "_Untuk Mengecek status sewa ketik .ceksewa pada grub tersebut_",
+  ]);
+}
+
+function rentalExpiredNotificationText(db, rental) {
+  return joinBotMessageLines([
+    "_*Notifikasi Sewa Bot Expired*_",
+    "",
+    `Name Grub : *${rentalDisplayName(rental)}*`,
+    `Nomor Owner : *${rentalOwnerNumber(db, rental)}*`,
+    "Expired : *0 hari*",
+    "",
+    "Bot tidak akan merespons command di grup sampai sewa diperpanjang.",
+    "_List grup tetap disimpan sementara dan baru dibersihkan otomatis setelah 30 hari expired._",
+  ]);
+}
+
+async function deleteWhatsAppMessage(db, { to, messageKey }) {
+  const token = firstUsableSecret(db.settings?.whatsappBotToken, process.env.WHATSAPP_BOT_TOKEN);
+  const botUrl = firstConfigured(process.env.WHATSAPP_BOT_URL, db.settings?.whatsappBotUrl, "http://127.0.0.1:4016");
+  const target = normalizeWhatsAppTarget(to);
+  if (!token || !botUrl) {
+    return { deleted: false, reason: "whatsapp_bot_not_configured" };
+  }
+  if (!target || !messageKey) {
+    return { deleted: false, reason: "message_key_not_found" };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Number(process.env.WHATSAPP_BOT_TIMEOUT_MS || 5000));
+  try {
+    const response = await fetch(new URL("/messages/delete", botUrl), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        to: target,
+        messageKey,
+      }),
+      signal: controller.signal,
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body.success === false) {
+      return { deleted: false, reason: body.error || `whatsapp_bot_http_${response.status}` };
+    }
+    return { deleted: true };
+  } catch (error) {
+    return {
+      deleted: false,
+      reason: error.name === "AbortError" ? "whatsapp_bot_timeout" : error.message || "whatsapp_bot_unavailable",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function sendResetCodeWhatsApp(db, { to, code }) {
+  return sendWhatsAppMessage(db, {
+    to,
+    text: [
+      `Kode OTP reset password Kavya: ${code}`,
+      "",
+      "Kode berlaku 10 menit. Abaikan pesan ini kalau kamu tidak meminta reset password.",
+    ].join("\n"),
+  });
+}
+
+function passwordResetDeliveryError(reason = "") {
+  const code = String(reason || "").trim();
+  if (code === "account_not_found") return "Akun tidak ditemukan. Gunakan username, email, atau nomor WhatsApp yang terdaftar.";
+  if (code === "whatsapp_number_not_found") return "Nomor WhatsApp akun belum terisi.";
+  if (code === "whatsapp_bot_not_configured") return "Bot WhatsApp belum dikonfigurasi.";
+  if (code === "whatsapp_bot_timeout") return "Bot WhatsApp tidak merespons saat mengirim OTP.";
+  if (/not_connected|closed|socket|EPIPE|timed?_?out/i.test(code)) return "Bot WhatsApp belum stabil/terhubung. Coba lagi setelah status bot terhubung.";
+  return code ? `OTP belum terkirim: ${code}` : "OTP belum terkirim.";
+}
+
+function dashboardWebsiteUrl(db) {
+  const integrations = ownerIntegrationSettings(db);
+  return firstConfigured(integrations.cloudflare.publicDomain, db.settings?.publicDomain, process.env.PUBLIC_DOMAIN, "https://vya.baby").replace(/\/$/, "");
+}
+
+function resellerWelcomeMessage(db, reseller) {
+  const resellerName = reseller.name || reseller.username || "Kak";
+  return joinBotMessageLines([
+    `Welcome (๑•ᴗ•๑)♡, ${resellerName}!`,
+    "akun kamu berhasil dibuat———☆",
+    "",
+    ` User   : ${reseller.username}`,
+    ` Pass   : ${reseller.password}`,
+    ` Email  : ${reseller.email || "-"}`,
+    ` Status : ${reseller.isActive === false ? "Nonaktif" : "Aktif"}`,
+    "",
+    ".・゜-: ✧ :»»————>",
+    "○ note: email bisa diedit melalui Settings",
+  ]);
+}
+
+async function sendResellerWelcomeWhatsApp(db, reseller) {
+  return sendWhatsAppMessage(db, {
+    to: reseller.whatsapp,
+    text: resellerWelcomeMessage(db, reseller),
+  });
+}
+
+function resellerChangeFields(before = {}, after = {}) {
+  const fields = [
+    ["name", "Nama"],
+    ["username", "Username"],
+    ["email", "Email"],
+    ["whatsapp", "Nomor WhatsApp"],
+    ["password", "Password"],
+    ["isActive", "Status"],
+    ["deposit", "Deposit"],
+  ];
+  return fields
+    .filter(([key]) => {
+      if (key === "whatsapp") {
+        return normalizeWhatsappNumber(before[key] ?? "") !== normalizeWhatsappNumber(after[key] ?? "");
+      }
+      if (key === "deposit") {
+        return Number(before[key] ?? 0) !== Number(after[key] ?? 0);
+      }
+      return String(before[key] ?? "") !== String(after[key] ?? "");
+    })
+    .map(([key, label]) => ({ key, label }));
+}
+
+function resellerUpdateMessage(db, reseller = {}, changes = [], actor = "owner") {
+  const resellerName = reseller.name || reseller.username || "Kak";
+  const lines = [
+    ".・。.・UPDATE DATA RESELLER —⁠☆",
+    "",
+    `Halo ${resellerName}! data akun reseller kamu diperbarui ${actor === "self" ? "melalui panel reseller." : "oleh admin."}`,
+    ":･ﾟ★ Perubahan:",
+    "",
+    ` Nama      : ${reseller.name || "-"}`,
+    ` Username  : ${reseller.username || "-"}`,
+    ` Email     : ${reseller.email || "-"}`,
+    ` WhatsApp  : ${reseller.whatsapp ? `+${normalizeWhatsappNumber(reseller.whatsapp)}` : "-"}`,
+    ` Status    : ${reseller.isActive === false ? "Nonaktif" : "Aktif"}`,
+    ` Deposit   : ${formatRupiah(Number(reseller.deposit || 0))}`,
+  ];
+  if (changes.some((item) => item.key === "password")) {
+    lines.push(` Password  : ${reseller.password || "-"}`);
+  }
+  lines.push("", "‼️Gunakan data terbaru ini untuk login dan menerima notifikasi Kavya‼️ :･ﾟ☆");
+  return joinBotMessageLines(lines);
+}
+
+function resellerDepositOnlyMessage(reseller = {}, before = {}, after = {}, actor = "owner") {
+  const resellerName = reseller.username || reseller.name || "reseller";
+  const depositBefore = Number(before.deposit || 0);
+  const depositAfter = Number(after.deposit || 0);
+  const delta = depositAfter - depositBefore;
+  const footer = delta >= 0
+    ? "Saldo deposit berhasil ditambahkan ✧⁠*⁠。"
+    : actor === "self"
+      ? "Saldo reseller berhasil diperbarui."
+      : "Saldo reseller telah dikurangi oleh admin.";
+  return joinBotMessageLines([
+    ".・。.・✭ INFORMASI UPDATE SALDO・。",
+    "",
+    ` Username          : ${resellerName}`,
+    ` Saldo sebelumnya  : ${formatRupiah(depositBefore)}`,
+    ` Saldo sekarang    : ${formatRupiah(depositAfter)}`,
+    ` Perubahan         : ${delta >= 0 ? "+" : "-"}${formatRupiah(Math.abs(delta))}`,
+    "",
+    footer,
+  ]);
+}
+
+function resellerDepositPaidMessage(reseller = {}, order = {}, payment = {}) {
+  const resellerName = reseller.username || reseller.name || order.customer || "reseller";
+  const depositBefore = Math.max(0, Number(order.depositBefore ?? payment.depositBefore ?? 0));
+  const depositAfter = Math.max(0, Number(order.depositAfter ?? payment.depositAfter ?? depositBefore));
+  const delta = Math.max(0, Number(order.depositAdded ?? payment.depositAdded ?? payment.amount ?? order.paymentDue ?? order.total ?? 0));
+  return joinBotMessageLines([
+    ".・。.・✭ INFORMASI UPDATE SALDO・。",
+    "",
+    ` Username          : ${resellerName}`,
+    ` Saldo sebelumnya  : ${formatRupiah(depositBefore)}`,
+    ` Saldo sekarang    : ${formatRupiah(depositAfter)}`,
+    ` Perubahan         : +${formatRupiah(delta)}`,
+    "",
+    "Saldo deposit berhasil ditambahkan ✧⁠*⁠。",
+  ]);
+}
+
+async function notifyResellerProfileChanged(db, before = {}, after = {}, actor = "owner") {
+  const changes = resellerChangeFields(before, after);
+  if (!changes.length) return { sent: false, skipped: true, reason: "no_changes" };
+  const sentAt = nowText();
+  const depositBefore = Number(before.deposit || 0);
+  const depositAfter = Number(after.deposit || 0);
+  const depositChanged = depositBefore !== depositAfter;
+  const depositOnlyChange = depositChanged && changes.every((item) => item.key === "deposit");
+  const message = depositOnlyChange
+    ? resellerDepositOnlyMessage(after, before, after, actor)
+    : resellerUpdateMessage(db, after, changes, actor);
+  const depositLines = !depositOnlyChange && depositChanged
+    ? [
+        "",
+        ".・。.・✭ INFORMASI UPDATE SALDO・。",
+        "",
+        ` Username          : ${after.username || after.name || "reseller"}`,
+        ` Saldo sebelumnya  : ${formatRupiah(depositBefore)}`,
+        ` Saldo sekarang    : ${formatRupiah(depositAfter)}`,
+        ` Perubahan         : ${depositAfter >= depositBefore ? "+" : "-"}${formatRupiah(Math.abs(depositAfter - depositBefore))}`,
+        "",
+        `‼️Hubungi ${after.username || after.name || "owner"} bila mengalami kendala‼️`,
+      ]
+    : [];
+  const delivery = await sendWhatsAppMessage(db, {
+    to: after.whatsapp || before.whatsapp || "",
+    text: joinBotMessageLines([message, ...depositLines]),
+  });
+  after.panelProfileUpdateStatus = delivery.sent ? "sent" : "failed";
+  after.panelProfileUpdateAt = sentAt;
+  after.panelProfileUpdateReason = delivery.sent ? "" : (delivery.reason || "whatsapp_send_failed");
+  db.activities = db.activities || [];
+  db.activities.unshift({
+    id: makeId("act"),
+    type: "reseller",
+    title: delivery.sent ? "Data reseller diperbarui" : "Data reseller diperbarui tanpa notif WA",
+    description: delivery.sent
+      ? `Perubahan ${changes.map((item) => item.label).join(", ")} tersimpan dan notif dikirim ke ${after.name || after.username || after.id}.`
+      : `Perubahan ${changes.map((item) => item.label).join(", ")} tersimpan di panel ${after.name || after.username || after.id}, tetapi notif WA gagal: ${delivery.reason || "unknown_error"}.`,
+    resellerId: after.id || "",
+    whatsapp: normalizeWhatsappNumber(after.whatsapp || before.whatsapp || ""),
+    createdAt: sentAt,
+  });
+  return { ...delivery, logged: true, changes };
+}
+
+async function fulfillPaidOrderAndNotify(db, orderId) {
+  const result = fulfillPaidOrder(db, orderId);
+  if (!result?.ok || !result.order || !result.reply) return result;
+  if (result.order.googleSheetsSyncStatus !== "synced") {
+    await pushFulfilledOrderToGoogleSheets(db, result);
+  }
+  const sheetCommitRequired = (result.order.deliveredStockIds || []).some((stockId) => {
+    const stock = (db.stock || []).find((item) => item.id === stockId);
+    return String(stock?.sheetSource || "").toLowerCase() === "google_sheets";
+  });
+  if (sheetCommitRequired && result.order.googleSheetsSyncStatus !== "synced") {
+    result.order.orderStatus = "processing";
+    result.order.deliveryStatus = "sheet_sync_failed";
+    result.order.fulfillmentBlockedReason = result.order.googleSheetsSyncError || "google_sheets_sync_failed";
+    db.activities = db.activities || [];
+    db.activities.unshift({
+      id: makeId("act"),
+      type: "order",
+      title: `Order ${result.order.id} tertahan saat commit Sheets`,
+      description: `Akun belum boleh dianggap terkirim karena assignment Google Sheets gagal: ${result.order.fulfillmentBlockedReason}.`,
+      createdAt: nowText(),
+      orderId: result.order.id,
+    });
+    return {
+      ...result,
+      reply: "",
+      delivery: { sent: false, skipped: true, reason: "google_sheets_sync_failed" },
+    };
+  }
+  if (isSmokeTestOrder(result.order)) {
+    result.order.whatsappNotificationStatus = "skipped";
+    result.order.whatsappNotificationError = "";
+    result.order.whatsappNotificationSentAt = "";
+    result.order.whatsappNotificationAttemptedAt = nowText();
+    result.order.whatsappNotificationAttemptCount = Number(result.order.whatsappNotificationAttemptCount || 0) + 1;
+    return { ...result, delivery: { sent: false, skipped: true, reason: "smoke_test" } };
+  }
+  if (result.order.whatsappNotificationStatus === "sent") {
+    return { ...result, delivery: { sent: true, skipped: true } };
+  }
+  result.order.whatsappNotificationAttemptedAt = nowText();
+  result.order.whatsappNotificationAttemptCount = Number(result.order.whatsappNotificationAttemptCount || 0) + 1;
+
+  if (result.order.source === "whatsapp") {
+    const paymentChatJid = String(result.order.whatsappPaymentMessageChatJid || "").trim();
+    const deleteTarget = paymentChatJid || result.order.whatsapp;
+    const notifyTarget =
+      (result.order.type === "deposit_topup" || result.order.orderType === "deposit_topup") && paymentChatJid
+        ? paymentChatJid
+        : result.order.whatsapp;
+    const deletePayment = result.order.whatsappPaymentMessageKey
+      ? await deleteWhatsAppMessage(db, {
+          to: deleteTarget,
+          messageKey: result.order.whatsappPaymentMessageKey,
+        })
+      : { deleted: false, skipped: true, reason: "payment_message_key_not_recorded" };
+    const accountDelivery = await sendWhatsAppMessage(db, {
+      to: notifyTarget,
+      text: result.reply,
+    });
+    const snkDelivery = result.snkText
+      ? await sendWhatsAppMessage(db, {
+          to: result.order.whatsapp,
+          text: result.snkText,
+        })
+      : { sent: false, skipped: true, reason: "snk_empty" };
+    result.delivery = { account: accountDelivery, snk: snkDelivery, deletePayment };
+    result.order.whatsappPaymentDeleteStatus = deletePayment.deleted ? "deleted" : deletePayment.skipped ? "skipped" : "failed";
+    if (!deletePayment.deleted && !deletePayment.skipped) {
+      result.order.whatsappPaymentDeleteError = deletePayment.reason || "whatsapp_delete_failed";
+    }
+    result.order.whatsappNotificationStatus = accountDelivery.sent ? "sent" : "failed";
+    result.order.whatsappSnkNotificationStatus = snkDelivery.sent ? "sent" : snkDelivery.skipped ? "skipped" : "failed";
+    if (accountDelivery.sent) {
+      result.order.whatsappNotificationSentAt = nowText();
+      result.order.whatsappNotificationError = "";
+    } else {
+      result.order.whatsappNotificationError = accountDelivery.reason || "whatsapp_send_failed";
+    }
+    if (snkDelivery.sent) {
+      result.order.whatsappSnkNotificationSentAt = nowText();
+    } else if (!snkDelivery.skipped) {
+      result.order.whatsappSnkNotificationError = snkDelivery.reason || "whatsapp_snk_send_failed";
+    }
+    return result;
+  }
+
+  const deliveryText =
+    result.order.deliveryStatus === "stock_unavailable_deposit"
+      ? result.reply
+      : (result.order.type === "deposit_topup" || result.order.orderType === "deposit_topup")
+        ? resellerDepositPaidMessage(
+            (db.resellers || []).find((item) => item.id === result.order.resellerId) || activeResellerByWhatsapp(db, result.order.whatsapp) || {},
+            result.order,
+            (db.payments || []).find((item) => item.orderId === result.order.id || item.ref === result.order.paymentRef) || {},
+          )
+      : joinBotMessageLines([
+          "Pembayaran berhasil ✧⁠*⁠。",
+          "",
+          "Periksa detail akun dan SnK di halaman selesai website Kavya.",
+          "",
+          ` Order ID : ${result.order.id}`,
+          ` Produk   : ${result.order.product} ${result.order.variant}`,
+          ` Total    : ${formatRupiah(result.order.total)}`,
+          "",
+          "๑ Jika terdapat kendala, owner bisa cek menggunakan Order ID di dashboard. ๑",
+          "",
+          "Terimakasih ෆ⁠╹⁠ .̮ ⁠╹⁠ෆ",
+        ]);
+  const delivery = await sendWhatsAppMessage(db, {
+    to: result.order.whatsapp,
+    text: deliveryText,
+  });
+  result.delivery = delivery;
+  result.order.whatsappNotificationStatus = delivery.sent ? "sent" : "failed";
+  if (delivery.sent) {
+    result.order.whatsappNotificationSentAt = nowText();
+    result.order.whatsappNotificationError = "";
+  } else {
+    result.order.whatsappNotificationError = delivery.reason || "whatsapp_send_failed";
+  }
+  return result;
+}
+
+async function readJsonIfExists(filePath, fallback) {
+  try {
+    return JSON.parse(await fs.readFile(filePath, "utf8"));
+  } catch (error) {
+    if (error.code === "ENOENT") return fallback;
+    throw error;
+  }
+}
+
+async function writeJsonFilePretty(filePath, value) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+async function readFirstNonEmptyJson(filePaths, fallback) {
+  for (const filePath of filePaths) {
+    const value = await readJsonIfExists(filePath, fallback);
+    if (Array.isArray(value) ? value.length : Object.keys(value || {}).length) return value;
+  }
+  return fallback;
+}
+
+function whatsappDatabasePath(fileName) {
+  return path.join(whatsappDatabaseDir, fileName);
+}
+
+function normalizeDashboardListGroup(groupData = {}) {
+  const now = new Date().toISOString();
+  if (!groupData || typeof groupData !== "object" || Array.isArray(groupData)) {
+    return { createdAt: now, updatedAt: now, list: {} };
+  }
+
+  if (groupData.list && typeof groupData.list === "object") {
+    const list = {};
+    for (const [keyword, item] of Object.entries(groupData.list || {})) {
+      list[keyword] = {
+        content: {
+          text: String(item?.content?.text || item?.text || "").trim(),
+          media: item?.content?.media || item?.media || item?.media_path || null,
+        },
+        updatedAt: item?.updatedAt || item?.updated_at || item?.addedAt || groupData.updatedAt || now,
+      };
+    }
+    return {
+      createdAt: groupData.createdAt || now,
+      updatedAt: groupData.updatedAt || now,
+      list,
+    };
+  }
+
+  const metadataKeys = new Set(["createdAt", "updatedAt", "addedAt", "list", "template", "templatelist", "setlist"]);
+  const list = {};
+  for (const [keyword, item] of Object.entries(groupData)) {
+    if (metadataKeys.has(keyword) || !item || typeof item !== "object") continue;
+    list[keyword] = {
+      content: {
+        text: String(item?.content?.text || item?.text || "").trim(),
+        media: item?.content?.media || item?.media || item?.media_path || null,
+      },
+      updatedAt: item?.updatedAt || item?.updated_at || item?.addedAt || groupData.updatedAt || now,
+    };
+  }
+
+  return {
+    createdAt: groupData.createdAt || now,
+    updatedAt: groupData.updatedAt || now,
+    list,
+  };
+}
+
+function mergeDashboardGroupMaps(primary = {}, secondary = {}) {
+  const merged = { ...secondary };
+  for (const [groupJid, groupData] of Object.entries(primary || {})) {
+    const base = normalizeDashboardListGroup(groupData);
+    const mirror = normalizeDashboardListGroup(merged[groupJid] || {});
+    merged[groupJid] = {
+      createdAt: base.createdAt || mirror.createdAt || new Date().toISOString(),
+      updatedAt: base.updatedAt || mirror.updatedAt || new Date().toISOString(),
+      list: {
+        ...(mirror.list || {}),
+        ...(base.list || {}),
+      },
+    };
+  }
+  return merged;
+}
+
+async function readLegacyGroupLists() {
+  const modernListPath = whatsappDatabasePath("lists.json");
+  const appBotListPath = path.join(legacyRootDir, "apps", "bot", "database", "lists.json");
+  const legacyListPath = path.join(legacyRootDir, "database", "list.json");
+  const participantPath = path.join(legacyRootDir, "database", "additional", "group participant.json");
+  const [modernLists, appBotLists, legacyLists, participants] = await Promise.all([
+    readJsonIfExists(modernListPath, {}),
+    readJsonIfExists(appBotListPath, {}),
+    readJsonIfExists(legacyListPath, {}),
+    readJsonIfExists(participantPath, {}),
+  ]);
+  const hasModernLists = modernLists && typeof modernLists === "object" && !Array.isArray(modernLists) && Object.keys(modernLists).length > 0;
+  const sourceLists = hasModernLists ? modernLists : mergeDashboardGroupMaps(appBotLists, legacyLists);
+  if (!hasModernLists && sourceLists && Object.keys(sourceLists).length > 0) {
+    await writeJsonFilePretty(modernListPath, sourceLists).catch(() => {});
+  }
+
+  return Object.entries(sourceLists).map(([groupJid, groupData]) => {
+    const entries = Object.entries(groupData?.list || {})
+      .map(([keyword, item]) => ({
+        keyword,
+        text: String(item?.content?.text || "").trim(),
+        media: item?.content?.media || null,
+      }))
+      .filter((entry) => entry.keyword)
+      .sort((a, b) => a.keyword.localeCompare(b.keyword));
+
+    return {
+      groupJid,
+      total: entries.length,
+      updatedAt: groupData?.updatedAt || groupData?.createdAt || "",
+      template: participants?.[groupJid]?.setlist || "",
+      entries,
+    };
+  });
+}
+
+async function readLegacyRentals() {
+  return readFirstNonEmptyJson([whatsappDatabasePath("rentals.json"), legacySewaPath()], {});
+}
+
+function rentalExpiredForCleanup(rental = {}, now = Date.now()) {
+  const expiredAt = Number(rental?.expired || rental?.expiresAt || rental?.expiredAt || 0);
+  if (!expiredAt) return false;
+  const timestamp = expiredAt < 100000000000 ? expiredAt * 1000 : expiredAt;
+  const retentionDays = Math.max(1, Number(process.env.WHATSAPP_RENTAL_LIST_RETENTION_DAYS || 30));
+  return timestamp > 0 && timestamp <= now - retentionDays * 86400000;
+}
+
+async function cleanupExpiredRentalGroupLists() {
+  const rentals = await readLegacyRentals();
+  const expiredGroupJids = Object.entries(rentals)
+    .filter(([, rental]) => rentalExpiredForCleanup(rental))
+    .map(([groupJid]) => groupJid)
+    .filter(Boolean);
+  if (!expiredGroupJids.length) return { cleaned: 0, groups: [] };
+
+  const listPaths = [
+    whatsappDatabasePath("lists.json"),
+    path.join(legacyRootDir, "apps", "bot", "database", "lists.json"),
+    path.join(legacyRootDir, "database", "list.json"),
+  ];
+  const cleanedGroups = new Set();
+  for (const listPath of listPaths) {
+    const lists = await readJsonIfExists(listPath, {});
+    if (!lists || typeof lists !== "object" || Array.isArray(lists)) continue;
+    let changed = false;
+    for (const groupJid of expiredGroupJids) {
+      if (Object.prototype.hasOwnProperty.call(lists, groupJid)) {
+        delete lists[groupJid];
+        cleanedGroups.add(groupJid);
+        changed = true;
+      }
+    }
+    if (changed) await writeJsonFilePretty(listPath, lists);
+  }
+
+  return { cleaned: cleanedGroups.size, groups: Array.from(cleanedGroups) };
+}
+
+async function readActiveLegacyGroupLists() {
+  const [rentals, groupLists] = await Promise.all([readLegacyRentals(), readLegacyGroupLists()]);
+  const activeJids = new Set(
+    Object.entries(rentals)
+      .filter(([, rental]) => legacyDaysLeft(rental?.expired) > 0)
+      .map(([groupJid]) => groupJid),
+  );
+  return groupLists.filter((group) => activeJids.has(group.groupJid));
+}
+
+function legacySewaPath() {
+  return path.join(legacyRootDir, "database", "sewa.json");
+}
+
+function formatLegacyDate(value) {
+  const timestamp = Number(value || 0);
+  if (!timestamp) return "";
+  return new Date(timestamp).toLocaleDateString("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function formatDateFromDays(daysLeft) {
+  return formatLegacyDate(Date.now() + Number(daysLeft || 0) * 86400000);
+}
+
+function legacyTodayText() {
+  return new Date().toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+    timeZone: "Asia/Jakarta",
+  });
+}
+
+function expirationFromDays(daysLeft) {
+  return Date.now() + Math.max(0, Number(daysLeft || 0)) * 86400000;
+}
+
+function legacyDaysLeft(value) {
+  const timestamp = Number(value || 0);
+  if (!timestamp) return 0;
+  return Math.ceil((timestamp - Date.now()) / 86400000);
+}
+
+function rentalCalendarDaysLeft(value) {
+  const endsAt = toAccountDateTime(value);
+  if (!endsAt) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  endsAt.setHours(0, 0, 0, 0);
+  return Math.max(0, Math.ceil((endsAt.getTime() - today.getTime()) / 86400000));
+}
+
+function rentalTimestampDaysLeft(value) {
+  const timestamp = Number(value || 0);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return null;
+  const normalized = timestamp < 100000000000 ? timestamp * 1000 : timestamp;
+  return Math.max(0, Math.ceil((normalized - Date.now()) / 86400000));
+}
+
+function normalizeRentalRuntimeDays(row = {}, fallbackDaysLeft = 0) {
+  const timestampDaysLeft = rentalTimestampDaysLeft(row.expired ?? row.expiresAt ?? row.expiredAt);
+  const calendarDaysLeft = rentalCalendarDaysLeft(row.endsAt);
+  const computedDaysLeft = timestampDaysLeft ?? calendarDaysLeft;
+  const daysLeft = computedDaysLeft === null ? Math.max(0, Number(fallbackDaysLeft ?? row.daysLeft ?? 0)) : computedDaysLeft;
+  const statusValue = String(row.status || "").trim().toLowerCase();
+  const status = statusValue === "paused" ? "paused" : daysLeft > 0 ? "active" : "expired";
+  return {
+    ...row,
+    daysLeft,
+    status,
+  };
+}
+
+function cleanInviteLink(value) {
+  return String(value || "").trim().replace(/\?mode=[^ ]+/gi, "");
+}
+
+function extractInviteCode(value) {
+  const link = cleanInviteLink(value);
+  const match = link.match(/chat\.whatsapp\.com\/([^/?\s]+)/i);
+  return match?.[1] || "";
+}
+
+function normalizeGroupIdentity(value = "") {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function resolveKnownGroupDirectory(db, candidates = []) {
+  const normalizedCandidates = candidates
+    .map((value) => normalizeGroupIdentity(value))
+    .filter(Boolean);
+  if (!normalizedCandidates.length) return null;
+  return (db.whatsappGroupDirectory || []).find((group) => {
+    const groupName = normalizeGroupIdentity(group?.name || "");
+    return normalizedCandidates.includes(groupName);
+  }) || null;
+}
+
+function resolveRentalGroupJid(db, options = {}) {
+  const directCandidates = [
+    options.groupJid,
+    options.id,
+    options.joinGroupJid,
+    options.matchedGroupJid,
+    options.fallbackGroupJid,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter((value) => value.endsWith("@g.us"));
+  if (directCandidates.length) {
+    return { groupJid: directCandidates[0], directory: null, source: "direct" };
+  }
+
+  const knownDirectory = resolveKnownGroupDirectory(db, [
+    options.name,
+    options.groupName,
+    options.fallbackName,
+  ]);
+  if (knownDirectory?.groupJid) {
+    return { groupJid: knownDirectory.groupJid, directory: knownDirectory, source: "directory_name" };
+  }
+
+  return { groupJid: "", directory: null, source: "" };
+}
+
+async function writeLegacyRentals(rentals) {
+  const targets = [whatsappDatabasePath("rentals.json"), legacySewaPath()];
+  for (const targetPath of targets) {
+    await fs.mkdir(path.dirname(targetPath), { recursive: true });
+    await fs.writeFile(targetPath, `${JSON.stringify(rentals, null, 2)}\n`, "utf8");
+  }
+}
+
+async function upsertLegacyRental(groupJid, patch) {
+  if (!String(groupJid || "").endsWith("@g.us")) return null;
+  const rentals = await readLegacyRentals();
+  const current = rentals[groupJid] || {};
+  const next = {
+    ...current,
+    ...(patch.linkGrub ? { linkGrub: patch.linkGrub } : {}),
+    start: patch.start || current.start || legacyTodayText(),
+    expired: Number(patch.expired ?? current.expired ?? expirationFromDays(patch.daysLeft || 0)),
+  };
+  rentals[groupJid] = next;
+  await writeLegacyRentals(rentals);
+  return next;
+}
+
+async function joinGroupThroughBot(inviteLink) {
+  const db = await readDb();
+  const token = firstUsableSecret(db.settings?.whatsappBotToken, process.env.WHATSAPP_BOT_TOKEN);
+  const botUrl = firstConfigured(process.env.WHATSAPP_BOT_URL, db.settings?.whatsappBotUrl, "http://127.0.0.1:4016");
+  if (!token || !botUrl) {
+    return { joinStatus: "pending", joinError: "whatsapp_bot_not_configured" };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Number(process.env.WHATSAPP_BOT_TIMEOUT_MS || 5000));
+  try {
+    const url = new URL("/groups/join", botUrl);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ invite_link: inviteLink }),
+      signal: controller.signal,
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body.success === false) {
+      throw new Error(body.error || `whatsapp_bot_http_${response.status}`);
+    }
+    return {
+      joinStatus: "joined",
+      groupJid: body.group_jid || body.groupJid || "",
+      groupName: body.group_name || body.groupName || "",
+      ownerJid: body.owner_jid || body.ownerJid || "",
+      ownerNumber: body.owner_number || body.ownerNumber || "",
+    };
+  } catch (error) {
+    return {
+      joinStatus: "pending",
+      joinError: error.name === "AbortError" ? "whatsapp_bot_timeout" : error.message || "whatsapp_bot_unavailable",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function buildRentalBase(groupJid, rental, listCount) {
+  const daysLeft = legacyDaysLeft(rental?.expired);
+  const hasRental = Boolean(rental);
+  return {
+    id: groupJid,
+    groupJid,
+    name: groupJid,
+    owner: "",
+    contact: "",
+    product: "",
+    members: 0,
+    capacity: 0,
+    helpedOrders: 0,
+    monthlyPrice: 0,
+    startedAt: rental?.start || "",
+    endsAt: formatLegacyDate(rental?.expired),
+    daysLeft,
+    sent: 0,
+    replies: 0,
+    status: hasRental ? (daysLeft > 0 ? "active" : "expired") : "paused",
+    linkGrub: rental?.linkGrub || "",
+    listCount,
+  };
+}
+
+async function mergedWhatsappRentals(db, options = {}) {
+  const includeExpired = Boolean(options.includeExpired);
+  const [legacyRentals, groupLists] = await Promise.all([readLegacyRentals(), readLegacyGroupLists()]);
+  const listCounts = new Map(groupLists.map((group) => [group.groupJid, group.total]));
+  const directoryByJid = new Map((db.whatsappGroupDirectory || []).map((group) => [group.groupJid, group]));
+  const groupIds = new Set(Object.keys(legacyRentals));
+  const runtimeById = new Map((db.whatsappRentals || []).map((rental) => [rental.id, rental]));
+  const rows = [];
+  const withSyncedGroup = (row) => {
+    const groupJid = row.groupJid || row.id;
+    const synced = directoryByJid.get(groupJid);
+    if (!synced) return row;
+    const currentName = String(row.name || "").trim();
+    const shouldUseSyncedName = !currentName || currentName === groupJid || currentName.startsWith("Menunggu join ");
+    return {
+      ...row,
+      name: shouldUseSyncedName ? synced.name || currentName || groupJid : currentName,
+      members: Number(row.members || synced.members || 0),
+      capacity: Number(row.capacity || synced.members || 0),
+      owner: row.owner || synced.owner || "",
+      contact: row.contact || synced.contact || "",
+      description: row.description || synced.description || "",
+      syncedAt: row.syncedAt || synced.syncedAt || "",
+    };
+  };
+
+  for (const groupJid of groupIds) {
+    const base = buildRentalBase(groupJid, legacyRentals[groupJid], listCounts.get(groupJid) || 0);
+    const merged = normalizeRentalRuntimeDays({
+      ...base,
+      ...(runtimeById.get(groupJid) || {}),
+      id: groupJid,
+      groupJid,
+      listCount: listCounts.get(groupJid) || 0,
+    }, base.daysLeft);
+    if (!includeExpired && (merged.daysLeft <= 0 || merged.status === "expired")) continue;
+    rows.push(withSyncedGroup(merged));
+  }
+
+  for (const rental of db.whatsappRentals || []) {
+    if (groupIds.has(rental.id) || ["grp-001", "grp-002"].includes(rental.id)) continue;
+    const merged = normalizeRentalRuntimeDays({
+      groupJid: rental.groupJid || rental.id,
+      listCount: listCounts.get(rental.id) || 0,
+      ...rental,
+    }, rental.daysLeft);
+    if (!includeExpired && (merged.daysLeft <= 0 || merged.status === "expired")) continue;
+    rows.push(withSyncedGroup(merged));
+  }
+
+  return rows.sort((a, b) => {
+    if (a.status !== b.status) return a.status === "active" ? -1 : b.status === "active" ? 1 : 0;
+    return String(a.name || a.id).localeCompare(String(b.name || b.id));
+  });
+}
+
+async function notifyRentalReminders() {
+  const db = await readDb();
+  const rows = await mergedWhatsappRentals(db, { includeExpired: true });
+  const notices = db.whatsappRentalNotices || {};
+  const fiveDayRows = rows.filter((rental) => {
+    const daysLeft = Number(rental.daysLeft || 0);
+    const key = rental.groupJid || rental.id;
+    return daysLeft === 5 && rental.status === "active" && !notices[key]?.fiveDaySentAt;
+  });
+  const expiredRows = rows.filter((rental) => {
+    const daysLeft = Number(rental.daysLeft || 0);
+    const key = rental.groupJid || rental.id;
+    return (daysLeft <= 0 || rental.status === "expired") && !notices[key]?.expiredSentAt;
+  });
+
+  for (const rental of fiveDayRows) {
+    const key = rental.groupJid || rental.id;
+    const target = rentalStoreOwnerNotificationTarget(db, rental);
+    if (!target) continue;
+    const delivery = await sendWhatsAppMessage(db, {
+      to: target,
+      text: rentalExpiringNotificationText(db, rental, Number(rental.daysLeft || 0)),
+    });
+    await updateDb((current) => {
+      current.whatsappRentalNotices = current.whatsappRentalNotices || {};
+      current.whatsappRentalNotices[key] = {
+        ...(current.whatsappRentalNotices[key] || {}),
+        fiveDaySentAt: delivery.sent ? nowText() : "",
+        fiveDayError: delivery.sent ? "" : delivery.reason || "whatsapp_send_failed",
+        fiveDayTarget: target,
+      };
+      return current.whatsappRentalNotices[key];
+    });
+  }
+
+  for (const rental of expiredRows) {
+    const key = rental.groupJid || rental.id;
+    const target = rentalStoreOwnerNotificationTarget(db, rental);
+    if (!target) continue;
+    const delivery = await sendWhatsAppMessage(db, {
+      to: target,
+      text: rentalExpiredNotificationText(db, rental),
+    });
+    await updateDb((current) => {
+      current.whatsappRentalNotices = current.whatsappRentalNotices || {};
+      current.whatsappRentalNotices[key] = {
+        ...(current.whatsappRentalNotices[key] || {}),
+        expiredSentAt: delivery.sent ? nowText() : "",
+        expiredError: delivery.sent ? "" : delivery.reason || "whatsapp_send_failed",
+        expiredTarget: target,
+      };
+      return current.whatsappRentalNotices[key];
+    });
+  }
+}
+
+async function runRentalReminderJob() {
+  try {
+    await notifyRentalReminders();
+  } catch (error) {
+    console.warn("[RENTAL] Gagal cek notifikasi sewa:", error.message || error);
+  }
+
+  try {
+    const cleanup = await cleanupExpiredRentalGroupLists();
+    if (cleanup.cleaned > 0) {
+      await updateDb((db) => {
+        db.activities = db.activities || [];
+        db.activities.unshift({
+          id: makeId("act"),
+          type: "whatsapp",
+          title: "List grup expired dibersihkan",
+          description: `${cleanup.cleaned} list grup yang expired lebih dari 30 hari dihapus otomatis dari database list WhatsApp.`,
+          createdAt: nowText(),
+        });
+        return cleanup;
+      });
+    }
+  } catch (error) {
+    console.warn("[RENTAL] Gagal cleanup list grup expired:", error.message || error);
+  }
+}
+
+async function markRentalJoinedNotice(rental, delivery) {
+  const key = rental.groupJid || rental.id;
+  if (!key) return;
+  await updateDb((db) => {
+    db.whatsappRentalNotices = db.whatsappRentalNotices || {};
+    db.whatsappRentalNotices[key] = {
+      ...(db.whatsappRentalNotices[key] || {}),
+      joinedSentAt: delivery.sent ? nowText() : "",
+      joinedError: delivery.sent ? "" : delivery.reason || "whatsapp_send_failed",
+      joinedTarget: rentalStoreOwnerNotificationTarget(db, rental),
+    };
+    return db.whatsappRentalNotices[key];
+  });
+}
+
+async function sendRentalJoinedNotifications(rentals = []) {
+  if (!rentals.length) return [];
+  const db = await readDb();
+  const results = [];
+  for (const rental of rentals) {
+    const delivery = await notifyOwnerRentalJoined(db, {
+      rental,
+      addedDays: rental.daysLeft,
+      previousDays: 0,
+      totalDays: rental.daysLeft,
+      source: "WhatsApp",
+    });
+    await markRentalJoinedNotice(rental, delivery);
+    results.push({ id: rental.id, groupJid: rental.groupJid, ...delivery });
+  }
+  return results;
+}
+
+function normalizeSyncedGroup(group = {}) {
+  const groupJid = String(group.group_jid || group.groupJid || group.id || "").trim();
+  if (!groupJid.endsWith("@g.us")) return null;
+  return {
+    groupJid,
+    name: String(group.group_name || group.groupName || group.name || groupJid).trim() || groupJid,
+    members: Number(group.participant_count || group.participantCount || group.members || 0),
+    owner: String(group.owner_name || group.ownerName || group.owner || group.owner_jid || group.ownerJid || "").trim(),
+    contact: String(group.owner_number || group.ownerNumber || "").replace(/[^\d]/g, ""),
+    description: String(group.description || "").trim(),
+    syncedAt: String(group.synced_at || group.syncedAt || new Date().toISOString()).trim(),
+  };
+}
+
+function syncWhatsappGroups(db, groups = [], source = "bot") {
+  const normalizedGroups = (Array.isArray(groups) ? groups : []).map(normalizeSyncedGroup).filter(Boolean);
+  const now = new Date().toISOString();
+  db.whatsappRentals = db.whatsappRentals || [];
+  db.whatsappGroupDirectory = db.whatsappGroupDirectory || [];
+
+  const directoryByJid = new Map((db.whatsappGroupDirectory || []).map((group) => [group.groupJid, group]));
+  for (const group of normalizedGroups) {
+    directoryByJid.set(group.groupJid, {
+      ...(directoryByJid.get(group.groupJid) || {}),
+      ...group,
+      source,
+      syncedAt: group.syncedAt || now,
+    });
+  }
+  db.whatsappGroupDirectory = Array.from(directoryByJid.values()).sort((a, b) => String(a.name || a.groupJid).localeCompare(String(b.name || b.groupJid)));
+
+  const rentalById = new Map(db.whatsappRentals.map((rental) => [rental.id, rental]));
+  let updatedRentals = 0;
+  const joinedRentals = [];
+  db.whatsappRentalNotices = db.whatsappRentalNotices || {};
+  for (const group of normalizedGroups) {
+    const rental = rentalById.get(group.groupJid) || db.whatsappRentals.find((item) => item.groupJid === group.groupJid);
+    if (!rental) continue;
+    const key = rental.groupJid || rental.id || group.groupJid;
+    const shouldNotifyJoined = rental.joinStatus !== "joined" && !db.whatsappRentalNotices[key]?.joinedSentAt;
+    Object.assign(rental, {
+      name: group.name || rental.name,
+      members: group.members || rental.members || 0,
+      capacity: group.members || rental.capacity || 0,
+      owner: group.owner || rental.owner || "",
+      contact: rental.contact || group.contact || "",
+      groupJid: group.groupJid,
+      joinStatus: "joined",
+      joinError: "",
+      syncedAt: group.syncedAt || now,
+    });
+    if (shouldNotifyJoined) {
+      joinedRentals.push({ ...rental });
+    }
+    updatedRentals += 1;
+  }
+
+  return {
+    total: normalizedGroups.length,
+    updatedRentals,
+    joinedRentals,
+    directoryTotal: db.whatsappGroupDirectory.length,
+    syncedAt: now,
+  };
+}
+
+function normalizeRentalPatch(body, fallback = {}) {
+  return {
+    name: String(body.name ?? fallback.name ?? "").trim(),
+    owner: String(body.owner ?? fallback.owner ?? "").trim(),
+    contact: String(body.contact ?? fallback.contact ?? "").trim(),
+    product: String(body.product ?? fallback.product ?? "").trim(),
+    members: Number(body.members ?? fallback.members ?? 0),
+    capacity: Number(body.capacity ?? fallback.capacity ?? 0),
+    helpedOrders: Number(body.helpedOrders ?? fallback.helpedOrders ?? 0),
+    monthlyPrice: Number(body.monthlyPrice ?? fallback.monthlyPrice ?? 0),
+    startedAt: String(body.startedAt ?? fallback.startedAt ?? "").trim(),
+    endsAt: String(body.endsAt ?? fallback.endsAt ?? "").trim(),
+    daysLeft: Number(body.daysLeft ?? fallback.daysLeft ?? 0),
+    sent: Number(body.sent ?? fallback.sent ?? 0),
+    replies: Number(body.replies ?? fallback.replies ?? 0),
+    status: ["active", "expired", "paused"].includes(body.status) ? body.status : fallback.status || "active",
+    linkGrub: String(body.linkGrub ?? fallback.linkGrub ?? "").trim(),
+  };
+}
+
+function publicUser(user) {
+  if (!user) return null;
+  const { password: _password, sessionVersion: _sessionVersion, ...safeUser } = user;
+  return safeUser;
+}
+
+function toDateTime(value) {
+  if (!value) return null;
+  const normalized = String(value).includes("T") ? String(value) : String(value).replace(" ", "T");
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function hasTimePart(value = "") {
+  return /[ T]\d{1,2}:\d{2}/.test(String(value || ""));
+}
+
+function monthNumber(value = "") {
+  const key = String(value || "").trim().toLowerCase().replace(/\./g, "");
+  const months = {
+    jan: 0,
+    januari: 0,
+    feb: 1,
+    februari: 1,
+    mar: 2,
+    maret: 2,
+    apr: 3,
+    april: 3,
+    mei: 4,
+    may: 4,
+    jun: 5,
+    juni: 5,
+    jul: 6,
+    juli: 6,
+    agu: 7,
+    agustus: 7,
+    aug: 7,
+    sep: 8,
+    september: 8,
+    okt: 9,
+    oktober: 9,
+    oct: 9,
+    nov: 10,
+    november: 10,
+    des: 11,
+    desember: 11,
+    dec: 11,
+  };
+  return months[key];
+}
+
+function toAccountDateTime(value, options = {}) {
+  if (!value) return null;
+  const raw = String(value || "").trim();
+  const monthMatch = raw.match(/^(\d{1,2})[\s/-]*([a-zA-Z]+)(?:[\s/-]+(\d{4}))?(?:[\s,]+(\d{1,2})[:.](\d{2}))?$/);
+  if (monthMatch) {
+    const month = monthNumber(monthMatch[2]);
+    if (month !== undefined) {
+      const reference = options.referenceDate instanceof Date && !Number.isNaN(options.referenceDate.getTime()) ? options.referenceDate : null;
+      const year = Number(monthMatch[3] || reference?.getFullYear() || new Date().getFullYear());
+      const hasTime = Boolean(monthMatch[4]);
+      const date = new Date(year, month, Number(monthMatch[1]), Number(monthMatch[4] || 0), Number(monthMatch[5] || 0));
+      if (!monthMatch[3] && reference && date.getTime() < reference.getTime() - 86400000) {
+        date.setFullYear(date.getFullYear() + 1);
+      }
+      if (options.endOfDay && !hasTime) date.setHours(23, 59, 59, 999);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+  }
+  const normalized = raw.includes("T") ? raw : raw.replace(" ", "T");
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(normalized);
+  const date = new Date(dateOnly ? `${normalized}T${options.endOfDay ? "23:59:59" : "00:00:00"}` : normalized);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function addMinutesText(minutes, from = new Date()) {
+  const date = new Date(from.getTime() + Number(minutes || 0) * 60000);
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function dateOnlyText(date) {
+  const value = date instanceof Date ? date : toDateTime(date);
+  const normalized = value && !Number.isNaN(value.getTime()) ? value : new Date();
+  const pad = (part) => String(part).padStart(2, "0");
+  return `${normalized.getFullYear()}-${pad(normalized.getMonth() + 1)}-${pad(normalized.getDate())}`;
+}
+
+function dateTimeText(date) {
+  const value = date instanceof Date ? date : toDateTime(date);
+  const normalized = value && !Number.isNaN(value.getTime()) ? value : new Date();
+  const pad = (part) => String(part).padStart(2, "0");
+  return `${normalized.getFullYear()}-${pad(normalized.getMonth() + 1)}-${pad(normalized.getDate())} ${pad(normalized.getHours())}:${pad(normalized.getMinutes())}`;
+}
+
+function addDaysText(days, from = new Date()) {
+  const date = toDateTime(from) || new Date();
+  date.setDate(date.getDate() + Number(days || 0));
+  return dateOnlyText(date);
+}
+
+function addAccountDaysText(days, from = new Date(), options = {}) {
+  const date = toAccountDateTime(from) || new Date();
+  date.setTime(date.getTime() + Number(days || 0) * 86400000);
+  return options.keepTime || hasTimePart(from) ? dateTimeText(date) : dateOnlyText(date);
+}
+
+function durationDays(duration) {
+  return subscriptionDurationDays(duration);
+}
+
+function durationParts(value = "") {
+  const source = String(value || "").trim().toLowerCase();
+  const amount = Number(source.match(/\d+/)?.[0] || 0);
+  if (!amount) return { amount: 0, unit: "" };
+  if (/(?:^|\s)\d+\s*(?:b|bln|bulan|month|months)\b/i.test(source)) return { amount, unit: "month" };
+  if (/(?:^|\s)\d+\s*(?:t|thn|tahun|year|years)\b/i.test(source)) return { amount, unit: "year" };
+  if (/(?:^|\s)\d+\s*(?:jam|hour|hours|hr)\b/i.test(source)) return { amount, unit: "hour" };
+  if (/(?:^|\s)\d+\s*(?:d|h|hari|day|days)\b/i.test(source)) return { amount, unit: "day" };
+  return { amount, unit: "" };
+}
+
+function addCalendarMonths(date, months) {
+  const next = new Date(date);
+  const wantedDay = next.getDate();
+  next.setDate(1);
+  next.setMonth(next.getMonth() + Math.max(1, Number(months || 1)));
+  const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+  next.setDate(Math.min(wantedDay, lastDay));
+  return next;
+}
+
+function accountExpiryFromDurationText(startedAt, durationText = "", durationDayCount = 0) {
+  const start = toAccountDateTime(startedAt);
+  if (!start) return "";
+  const { amount, unit } = durationParts(durationText);
+  let expires = null;
+  if (amount && unit === "hour") expires = new Date(start.getTime() + amount * 3600000);
+  else {
+    const fixedDays = amount && ["month", "year", "day"].includes(unit) ? durationDays(durationText) : Number(durationDayCount || 0);
+    if (!fixedDays) return "";
+    expires = new Date(start);
+    expires.setTime(expires.getTime() + fixedDays * 86400000);
+  }
+  if (!expires) return "";
+  return hasTimePart(startedAt) || unit ? dateTimeText(expires) : dateOnlyText(expires);
+}
+
+function isCanvaManagedAccount(account = {}) {
+  const text = [
+    account.product,
+    account.productId,
+    account.variant,
+    account.variantCode,
+    account.accountType,
+    account.source,
+  ]
+    .join(" ")
+    .toLowerCase();
+  return text.includes("canva");
+}
+
+function repairManagedAccountExpiry(account = {}) {
+  const startedAt = toAccountDateTime(account.startedAt);
+  if (!startedAt) return false;
+  const { unit } = durationParts(account.duration);
+  if (!["month", "year"].includes(unit)) return false;
+  const computedText = accountExpiryFromDurationText(account.startedAt, account.duration);
+  const computedDate = toAccountDateTime(computedText, { endOfDay: !hasTimePart(computedText), referenceDate: startedAt });
+  if (!computedText || !computedDate) return false;
+
+  const currentDate = toAccountDateTime(account.expiresAt, { endOfDay: !hasTimePart(account.expiresAt), referenceDate: startedAt });
+  if (currentDate && Math.abs(currentDate.getTime() - computedDate.getTime()) < 60000) return false;
+
+  account.expiresAt = computedText;
+  const expectedDays = durationDays(account.duration);
+  if (expectedDays && Number(account.durationDays || 0) !== expectedDays) account.durationDays = expectedDays;
+  return true;
+}
+
+function depositBreakdown(reseller, total) {
+  const depositBefore = Math.max(0, Number(reseller?.deposit || 0));
+  const depositUsed = Math.min(depositBefore, Math.max(0, Number(total || 0)));
+  return {
+    depositBefore,
+    depositUsed,
+    depositAfter: Math.max(0, depositBefore - depositUsed),
+    paymentDue: Math.max(0, Number(total || 0) - depositUsed),
+  };
+}
+
+function parseOrderQty(value) {
+  const numericValue = Number(value || 1);
+  if (!Number.isFinite(numericValue)) return 1;
+  return Math.max(1, Math.floor(numericValue));
+}
+
+function splitCustomerEmails(value = "") {
+  return String(value || "")
+    .split(/[\s,;]+/)
+    .map((item) => item.trim().toLowerCase())
+    .filter((item) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item));
+}
+
+function splitDeviceNames(value = "") {
+  return String(value || "")
+    .split(/\r?\n|[,;]+|\s+\+\s+|\s+dan\s+/i)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function isNetflixOrderProduct(product = {}) {
+  const text = [product.id, product.code, product.name, product.category].join(" ").toLowerCase();
+  return text.includes("netflix") || String(product.code || "").toUpperCase() === "NET";
+}
+
+function productVariantText(product = {}, variant = {}) {
+  return [product.id, product.code, product.name, product.category, variant?.id, variant?.code, variant?.name]
+    .join(" ")
+    .toLowerCase();
+}
+
+function isHboOrderProduct(product = {}, variant = {}) {
+  const text = productVariantText(product, variant);
+  return text.includes("hbo") || text.includes("max");
+}
+
+function isWetvOrderProduct(product = {}, variant = {}) {
+  const text = productVariantText(product, variant);
+  return text.includes("wetv") || String(product.code || "").toUpperCase() === "WETV";
+}
+
+function normalizeRuntimeCheckoutRequirements(raw = {}) {
+  if (!raw || typeof raw !== "object") return null;
+  const field = String(raw.customerField || raw.field || "").trim().toLowerCase();
+  if (!["email", "device", "optional", "none"].includes(field)) return null;
+  return {
+    customerField: field === "none" ? "optional" : field,
+    required: raw.required === undefined ? field !== "optional" && field !== "none" : Boolean(raw.required),
+    minItems: Math.max(1, Math.floor(Number(raw.minItems || raw.min || 1))),
+    label: String(raw.label || raw.customerLabel || "").trim(),
+    placeholder: String(raw.placeholder || "").trim(),
+    helper: String(raw.helper || raw.description || "").trim(),
+  };
+}
+
+function configuredCheckoutRequirements(product = {}, variant = {}) {
+  return normalizeRuntimeCheckoutRequirements(variant?.checkoutRequirements || product?.checkoutRequirements || {});
+}
+
+function sheetCheckoutRequirements(product = {}, variant = {}) {
+  return normalizeRuntimeCheckoutRequirements(variant?.sheetCheckoutRequirements || product?.sheetCheckoutRequirements || {});
+}
+
+function checkoutRequirementsForVariant(db, product = {}, variant = {}, options = {}) {
+  const qty = Math.max(1, Math.floor(Number(options.qty || 1)));
+  const configured = configuredCheckoutRequirements(product, variant);
+  if (configured) {
+    return {
+      ...configured,
+      minItems: configured.customerField === "email" ? Math.max(qty, configured.minItems) : configured.minItems,
+    };
+  }
+
+  const netflix = isNetflixOrderProduct(product);
+  const semiNetflix = netflix && isNetflixSemiPrivateVariant(product, variant);
+  const sheetConfigured = sheetCheckoutRequirements(product, variant);
+  if (sheetConfigured) {
+    const minItems = sheetConfigured.customerField === "email"
+      ? Math.max(qty, sheetConfigured.minItems)
+      : sheetConfigured.customerField === "device" && semiNetflix
+        ? Math.max(2, sheetConfigured.minItems)
+        : sheetConfigured.minItems;
+    return {
+      ...sheetConfigured,
+      minItems,
+    };
+  }
+
+  const linkPool = isLinkPoolProduct(db, product, variant);
+  const hbo = isHboOrderProduct(product, variant);
+  const wetv = isWetvOrderProduct(product, variant);
+  const productName = String(product?.name || "Produk").trim() || "Produk";
+
+  if (linkPool) {
+    return {
+      customerField: "email",
+      required: true,
+      minItems: qty,
+      label: `Email Customer ${productName}`,
+      placeholder: "email customer, pisahkan jika beli banyak",
+      helper: "Wajib isi email customer. Jika qty lebih dari 1, isi sejumlah qty.",
+    };
+  }
+
+  if (netflix || hbo) {
+    const labelProduct = netflix ? "Netflix" : "HBO";
+    const minItems = semiNetflix ? 2 : 1;
+    return {
+      customerField: "device",
+      required: true,
+      minItems,
+      label: `${labelProduct} Device${minItems > 1 ? ` (${minItems} device)` : ""}`,
+      placeholder: minItems > 1 ? "Contoh: Smart TV Samsung, iPhone 13" : "Contoh: Smart TV Samsung",
+      helper: minItems > 1
+        ? `${labelProduct} Semi Private wajib isi ${minItems} device customer. Pisahkan dengan koma atau baris baru.`
+        : `Wajib diisi dan sesuaikan dengan device customer untuk audit ${labelProduct}.`,
+    };
+  }
+
+  if (wetv) {
+    return {
+      customerField: "device",
+      required: true,
+      minItems: 1,
+      label: "Device Customer",
+      placeholder: "Contoh: Android TV, iPhone, Smart TV",
+      helper: "Wajib isi device customer supaya admin bisa audit akun WeTV.",
+    };
+  }
+
+  return {
+    customerField: "optional",
+    required: false,
+    minItems: 1,
+    label: "Data Customer",
+    placeholder: "Email, device, atau catatan customer",
+    helper: "",
+  };
+}
+
+function expirePendingOrders(db, now = new Date()) {
+  let changed = false;
+  for (const order of db.orders || []) {
+    if (order.qrisStatus !== "pending") continue;
+    const expiresAt = toDateTime(order.paymentExpiresAt);
+    if (!expiresAt || expiresAt.getTime() > now.getTime()) continue;
+
+    order.qrisStatus = "expired";
+    order.orderStatus = "cancelled";
+    order.deliveryStatus = "waiting_payment";
+    changed = true;
+
+    for (const stock of db.stock || []) {
+      if (stock.reservedFor !== order.id) continue;
+      clearReservedStockState(stock);
+    }
+
+    const payment = (db.payments || []).find((item) => item.ref === order.paymentRef || item.orderId === order.id);
+    if (payment) payment.status = "expired";
+    if (Number(order.depositUsed || 0) > 0 && !order.depositRefunded) {
+      const reseller = (db.resellers || []).find((item) => item.id === order.resellerId) || activeResellerByWhatsapp(db, order.whatsapp);
+      if (reseller) {
+        reseller.deposit = Math.max(0, Number(reseller.deposit || 0)) + Number(order.depositUsed || 0);
+        order.depositRefunded = true;
+        order.depositRefundedAt = nowText();
+      }
+    }
+    if (!order.expiredActivityLogged) {
+      db.activities = db.activities || [];
+      db.activities.unshift({
+        id: makeId("act"),
+        type: "order",
+        title: `QRIS ${order.paymentRef || order.id} expired`,
+        description: `${order.product} ${order.variant} x${order.qty || 1} dibatalkan. Stok dikembalikan ke tersedia${
+          Number(order.depositUsed || 0) > 0 ? ` dan deposit ${formatRupiah(order.depositUsed)} dikembalikan.` : "."
+        }`,
+        createdAt: nowText(),
+        orderId: order.id,
+        resellerId: order.resellerId || "",
+        whatsapp: normalizeWhatsappNumber(order.whatsapp || ""),
+      });
+      order.expiredActivityLogged = true;
+    }
+  }
+  return changed;
+}
+
+function hasExpiredPendingOrders(db, now = new Date()) {
+  return (db.orders || []).some((order) => {
+    if (order.qrisStatus !== "pending") return false;
+    const expiresAt = toDateTime(order.paymentExpiresAt);
+    return Boolean(expiresAt && expiresAt.getTime() <= now.getTime());
+  });
+}
+
+function parseFulfillmentField(text, label) {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = String(text || "").match(new RegExp(`^${escaped}:\\s*(.*)$`, "im"));
+  return match?.[1]?.trim() || "";
+}
+
+function accountStatusFromDate(expiresAt, durationDaysValue = 0) {
+  const expires = toAccountDateTime(expiresAt, { endOfDay: true });
+  if (!expires) return "active";
+  const msLeft = expires.getTime() - Date.now();
+  if (msLeft <= 0) return "expired";
+  const daysLeft = Math.ceil(msLeft / 86400000);
+  if (Number(durationDaysValue || 0) >= 30 && daysLeft <= 5) return "expiring";
+  return "active";
+}
+
+function isTerminalManagedAccountStatus(status = "") {
+  return ["expired", "replaced", "disabled"].includes(String(status || "").toLowerCase());
+}
+
+function shouldRestoreArchivedGoogleSheetsAccount(db, account = {}, nextStatus = "") {
+  if (account.sheetSource !== "google_sheets") return false;
+  if (!isNetflixManagedAccount(account)) return false;
+  if (["replaced", "disabled"].includes(String(account.status || "").toLowerCase())) return false;
+  if (!account.hidden && !account.returnedToStockAt && String(account.status || "").toLowerCase() !== "expired") return false;
+  if (String(nextStatus || "").toLowerCase() === "expired") return false;
+
+  const linkedStock = stockForManagedAccount(db, account);
+  if (!linkedStock) return false;
+  const linkedStatus = String(linkedStock.status || "").toLowerCase();
+  if (!["sold", "reserved"].includes(linkedStatus)) return false;
+  if (account.sheetMissingArchivedAt && linkedStock.sheetRemovedAt) return false;
+  return true;
+}
+
+function managedAccountIdentityKey(account = {}) {
+  const stockId = String(account.stockId || "").trim();
+  const sheetStockKey = String(account.sheetStockKey || "").trim();
+  const orderId = String(account.orderId || account.sourceOrderId || "").trim();
+  if (!orderId) return "";
+  const stockKey = stockId || sheetStockKey;
+  if (!stockKey) return "";
+  return `${stockKey}::${orderId}`;
+}
+
+function managedAccountSortTimestamp(value = "") {
+  return Number(toAccountDateTime(value, { endOfDay: !hasTimePart(value) })?.getTime() || 0);
+}
+
+function compareManagedAccountPriority(left = {}, right = {}) {
+  const leftExpires = managedAccountSortTimestamp(left.expiresAt);
+  const rightExpires = managedAccountSortTimestamp(right.expiresAt);
+  if (rightExpires !== leftExpires) return rightExpires - leftExpires;
+
+  const leftStarted = managedAccountSortTimestamp(left.startedAt);
+  const rightStarted = managedAccountSortTimestamp(right.startedAt);
+  if (rightStarted !== leftStarted) return rightStarted - leftStarted;
+
+  const leftSheet = left.sheetSource === "google_sheets" ? 1 : 0;
+  const rightSheet = right.sheetSource === "google_sheets" ? 1 : 0;
+  if (rightSheet !== leftSheet) return rightSheet - leftSheet;
+
+  const leftKey = left.sheetStockKey ? 1 : 0;
+  const rightKey = right.sheetStockKey ? 1 : 0;
+  if (rightKey !== leftKey) return rightKey - leftKey;
+
+  const leftSource = String(left.source || "");
+  const rightSource = String(right.source || "");
+  if (leftSource !== rightSource) {
+    if (rightSource === "google_sheets") return 1;
+    if (leftSource === "google_sheets") return -1;
+  }
+
+  return String(right.id || "").localeCompare(String(left.id || ""));
+}
+
+function dedupeLiveManagedAccounts(db) {
+  db.managedAccounts = db.managedAccounts || [];
+  const groups = managedAccountDuplicateGroups(db);
+
+  let updated = 0;
+  for (const accounts of groups.values()) {
+    if (accounts.length < 2) continue;
+    const sorted = accounts.slice().sort(compareManagedAccountPriority);
+    const keeper = sorted[0];
+    const archivedAt = nowText();
+    for (const duplicate of sorted.slice(1)) {
+      if (!duplicate.hidden) {
+        duplicate.hidden = true;
+        updated += 1;
+      }
+      if (!duplicate.returnedToStockAt) {
+        duplicate.returnedToStockAt = archivedAt;
+        updated += 1;
+      }
+      if (duplicate.status !== "replaced") {
+        duplicate.status = "replaced";
+        updated += 1;
+      }
+      if (duplicate.duplicateOfAccountId !== keeper.id) {
+        duplicate.duplicateOfAccountId = keeper.id;
+        updated += 1;
+      }
+      if (duplicate.duplicateArchivedAt !== archivedAt) {
+        duplicate.duplicateArchivedAt = archivedAt;
+        updated += 1;
+      }
+    }
+  }
+  return updated;
+}
+
+function dedupeLiveSheetRowAccounts(db) {
+  db.managedAccounts = db.managedAccounts || [];
+  const groups = new Map();
+  for (const account of db.managedAccounts) {
+    if (account.hidden || account.returnedToStockAt) continue;
+    if (["replaced", "disabled"].includes(String(account.status || "").toLowerCase())) continue;
+    const linkedStock = stockForManagedAccount(db, account);
+    const sheetStockKey = String(account.sheetStockKey || linkedStock?.sheetStockKey || "").trim();
+    if (!sheetStockKey) continue;
+    const list = groups.get(sheetStockKey) || [];
+    list.push(account);
+    groups.set(sheetStockKey, list);
+  }
+
+  let updated = 0;
+  for (const [sheetStockKey, accounts] of groups) {
+    if (accounts.length < 2) continue;
+    const matchingStocks = (db.stock || []).filter((item) => (
+      String(item.sheetStockKey || "").trim() === sheetStockKey
+      && String(item.status || "").toLowerCase() !== "removed"
+      && !item.sheetRemovedAt
+    ));
+    const stock = matchingStocks.find((item) => String(item.sheetOrderId || "").trim()) || matchingStocks[0] || null;
+    const sheetOrderId = String(stock?.sheetOrderId || "").trim();
+    const ranked = accounts.slice().sort((left, right) => {
+      const leftOrder = orderForManagedAccount(db, left);
+      const rightOrder = orderForManagedAccount(db, right);
+      const leftSynced = String(leftOrder?.googleSheetsSyncStatus || "").toLowerCase() === "synced" ? 1 : 0;
+      const rightSynced = String(rightOrder?.googleSheetsSyncStatus || "").toLowerCase() === "synced" ? 1 : 0;
+      if (rightSynced !== leftSynced) return rightSynced - leftSynced;
+      const leftPaidValue = Number(leftOrder?.total || 0) > 0 ? 1 : 0;
+      const rightPaidValue = Number(rightOrder?.total || 0) > 0 ? 1 : 0;
+      if (rightPaidValue !== leftPaidValue) return rightPaidValue - leftPaidValue;
+      const leftMatches = sheetOrderId && String(left.orderId || left.sourceOrderId || "").trim() === sheetOrderId ? 1 : 0;
+      const rightMatches = sheetOrderId && String(right.orderId || right.sourceOrderId || "").trim() === sheetOrderId ? 1 : 0;
+      if (rightMatches !== leftMatches) return rightMatches - leftMatches;
+      return compareManagedAccountPriority(left, right);
+    });
+    const keeper = ranked[0];
+    const archivedAt = nowText();
+    for (const duplicate of ranked.slice(1)) {
+      duplicate.hidden = true;
+      duplicate.returnedToStockAt = duplicate.returnedToStockAt || archivedAt;
+      duplicate.status = "replaced";
+      duplicate.duplicateOfAccountId = keeper.id;
+      duplicate.duplicateArchivedAt = archivedAt;
+      duplicate.sheetRowDuplicateArchived = true;
+      updated += 1;
+    }
+  }
+  return updated;
+}
+
+function dedupeLiveNetflixSlotAccounts(db) {
+  db.managedAccounts = db.managedAccounts || [];
+  const groups = new Map();
+  for (const account of db.managedAccounts || []) {
+    if (account.hidden || account.returnedToStockAt) continue;
+    const status = String(account.status || accountStatusFromDate(account.expiresAt, account.durationDays)).toLowerCase();
+    if (["expired", "replaced", "disabled"].includes(status)) continue;
+    if (isMalformedManagedAccount(account)) continue;
+    const key = managedAccountSlotKey(account);
+    if (!key) continue;
+    const list = groups.get(key) || [];
+    list.push(account);
+    groups.set(key, list);
+  }
+
+  let updated = 0;
+  for (const accounts of groups.values()) {
+    if (accounts.length < 2) continue;
+    // Distinct rows that are still assigned in Google Sheets are intentional
+    // reuse history. Sheets owns those assignments, so local repair may only
+    // archive non-Sheet duplicates around them.
+    const sheetAssignments = accounts.filter((account) => (
+      String(account.sheetSource || account.source || "").toLowerCase() === "google_sheets"
+      && String(account.sheetStockKey || "").trim()
+      && String(account.sheetSellerInput || account.reseller || account.buyer || "").trim()
+    ));
+    const sorted = accounts.slice().sort(compareManagedAccountPriority);
+    const keeper = sheetAssignments.slice().sort(compareManagedAccountPriority)[0] || sorted[0];
+    const duplicates = sheetAssignments.length
+      ? sorted.filter((account) => !sheetAssignments.includes(account))
+      : sorted.slice(1);
+    const archivedAt = nowText();
+    for (const duplicate of duplicates) {
+      if (!duplicate.hidden) {
+        duplicate.hidden = true;
+        updated += 1;
+      }
+      if (!duplicate.returnedToStockAt) {
+        duplicate.returnedToStockAt = archivedAt;
+        updated += 1;
+      }
+      if (duplicate.status !== "replaced") {
+        duplicate.status = "replaced";
+        updated += 1;
+      }
+      if (duplicate.duplicateOfAccountId !== keeper.id) {
+        duplicate.duplicateOfAccountId = keeper.id;
+        updated += 1;
+      }
+      if (duplicate.duplicateArchivedAt !== archivedAt) {
+        duplicate.duplicateArchivedAt = archivedAt;
+        updated += 1;
+      }
+      duplicate.slotConflictArchived = true;
+    }
+  }
+  return updated;
+}
+
+function archiveMalformedManagedAccounts(db) {
+  db.managedAccounts = db.managedAccounts || [];
+  let updated = 0;
+  const archivedAt = nowText();
+  for (const account of db.managedAccounts || []) {
+    if (account.hidden || account.returnedToStockAt) continue;
+    if (!isMalformedManagedAccount(account)) continue;
+    if (!account.hidden) {
+      account.hidden = true;
+      updated += 1;
+    }
+    if (!account.returnedToStockAt) {
+      account.returnedToStockAt = archivedAt;
+      updated += 1;
+    }
+    if (account.status !== "expired") {
+      account.status = "expired";
+      updated += 1;
+    }
+    account.sheetMalformedArchivedAt = archivedAt;
+  }
+  return updated;
+}
+
+function archiveReturnedGoogleSheetsManagedAccounts(db) {
+  db.managedAccounts = db.managedAccounts || [];
+  let updated = 0;
+  const archivedAt = nowText();
+  for (const account of db.managedAccounts || []) {
+    if (!account || account.hidden || account.returnedToStockAt) continue;
+    const linkedStock = stockForManagedAccount(db, account);
+    const sheetBacked = String(account.sheetSource || account.source || "").toLowerCase() === "google_sheets"
+      || String(linkedStock?.sheetSource || "").toLowerCase() === "google_sheets"
+      || Boolean(linkedStock?.sheetStockKey);
+    if (!sheetBacked) continue;
+    if (account.sheetClearedAt) {
+      if (!account.hidden) {
+        account.hidden = true;
+        updated += 1;
+      }
+      if (!account.returnedToStockAt) {
+        account.returnedToStockAt = account.sheetClearedAt || archivedAt;
+        updated += 1;
+      }
+      if (account.status !== "expired") {
+        account.status = "expired";
+        updated += 1;
+      }
+      continue;
+    }
+    if (!linkedStock) continue;
+    const stockStatus = String(linkedStock.status || "").toLowerCase();
+    const stockReturned = stockStatus === "available"
+      && !String(linkedStock.soldAt || "").trim()
+      && !String(linkedStock.reservedFor || "").trim()
+      && !String(linkedStock.reservedAccountId || "").trim();
+    const stockRemoved = stockStatus === "removed" || Boolean(linkedStock.sheetRemovedAt);
+    if (!stockReturned && !stockRemoved) continue;
+    if (!account.hidden) {
+      account.hidden = true;
+      updated += 1;
+    }
+    if (!account.returnedToStockAt) {
+      account.returnedToStockAt = archivedAt;
+      updated += 1;
+    }
+    if (!account.sheetClearedAt) {
+      account.sheetClearedAt = archivedAt;
+      updated += 1;
+    }
+    if (account.status !== "expired") {
+      account.status = "expired";
+      updated += 1;
+    }
+  }
+  return updated;
+}
+
+function managedAccountDuplicateGroups(db, options = {}) {
+  const includeTerminal = options.includeTerminal === true;
+  const groups = new Map();
+  for (const account of db.managedAccounts || []) {
+    if (account.hidden || account.returnedToStockAt) continue;
+    if (!includeTerminal && isTerminalManagedAccountStatus(account.status || accountStatusFromDate(account.expiresAt, account.durationDays))) continue;
+    const key = managedAccountIdentityKey(account);
+    if (!key) continue;
+    const list = groups.get(key) || [];
+    list.push(account);
+    groups.set(key, list);
+  }
+  return new Map([...groups.entries()].filter(([, accounts]) => accounts.length > 1));
+}
+
+function normalizeManagedAccountDurations(db) {
+  let updated = 0;
+  for (const account of db.managedAccounts || []) {
+    if (["replaced", "disabled"].includes(String(account.status || "").toLowerCase())) continue;
+    let changed = false;
+    if (repairManagedAccountExpiry(account)) {
+      changed = true;
+    }
+    const startedAt = toAccountDateTime(account.startedAt);
+    const expiresAt = toAccountDateTime(account.expiresAt, { endOfDay: !hasTimePart(account.expiresAt), referenceDate: startedAt });
+    let currentDays = Number(account.durationDays || 0);
+    if (startedAt && expiresAt) {
+      currentDays = Math.round((expiresAt.getTime() - startedAt.getTime()) / 86400000);
+      if (!account.durationDays && currentDays > 0) {
+        account.durationDays = currentDays;
+        changed = true;
+      }
+    }
+
+    const nextStatus = accountStatusFromDate(account.expiresAt, account.durationDays || currentDays);
+    if (shouldRestoreArchivedGoogleSheetsAccount(db, account, nextStatus)) {
+      account.hidden = false;
+      delete account.archivedAt;
+      delete account.returnedToStockAt;
+      changed = true;
+    } else if (account.returnedToStockAt) {
+      if (changed) updated += 1;
+      continue;
+    }
+
+    if (account.status !== nextStatus) {
+      account.status = nextStatus;
+      changed = true;
+    }
+    if (changed) updated += 1;
+  }
+  updated += archiveMalformedManagedAccounts(db);
+  updated += archiveReturnedGoogleSheetsManagedAccounts(db);
+  updated += dedupeLiveManagedAccounts(db);
+  updated += dedupeLiveSheetRowAccounts(db);
+  updated += dedupeLiveNetflixSlotAccounts(db);
+  return updated;
+}
+
+function refreshManagedAccountStatuses(db) {
+  return normalizeManagedAccountDurations(db);
+}
+
+function backfillManagedAccountsFromCompletedOrders(db) {
+  db.managedAccounts = db.managedAccounts || [];
+  let created = 0;
+
+  for (const order of db.orders || []) {
+    if (order.orderStatus !== "completed" && order.deliveryStatus !== "sent") continue;
+    const linkedAccounts = directManagedAccountsForOrder(db, order, { includeHidden: true });
+    const deliveredStockIds = Array.isArray(order.deliveredStockIds) ? order.deliveredStockIds.filter(Boolean) : [];
+    const expectedCount = Math.max(1, Number(order.qty || order.quantity || 1), deliveredStockIds.length);
+    if (linkedAccounts.length >= expectedCount) continue;
+    const rebuilt = rebuildManagedAccountsForOrder(db, order, { source: "completed_order_backfill" });
+    created += rebuilt.created.length;
+  }
+
+  return created;
+}
+
+function isFulfilledProductOrder(order = {}) {
+  if (!order || order.type === "deposit_topup" || order.orderType === "deposit_topup") return false;
+  return order.qrisStatus === "paid" || order.orderStatus === "completed" || order.deliveryStatus === "sent";
+}
+
+function orderMatchesSheetStockProduct(order = {}, stock = {}) {
+  const stockProductId = String(stock.productId || "").trim();
+  const orderProductId = String(order.productId || "").trim();
+  if (stockProductId && orderProductId && stockProductId !== orderProductId) return false;
+  // Historical fulfillment may have selected a slot from a sibling variant.
+  // Product + reseller + exact duration + payment time are the stable join;
+  // variant/pool metadata cannot veto an otherwise unique Sheet assignment.
+  return true;
+}
+
+function reconcileGoogleSheetsStockOrderLinks(db) {
+  db.stock = db.stock || [];
+  db.orders = db.orders || [];
+  db.managedAccounts = db.managedAccounts || [];
+  const matches = [];
+  const maxTimeDistanceMs = 15 * 60 * 1000;
+
+  for (const stock of db.stock) {
+    if (!isGoogleSheetsBackedStock(stock) || String(stock.status || "").toLowerCase() !== "sold") continue;
+    const stockId = String(stock.id || "").trim();
+    const sellerText = String(stock.sheetSellerInput || stock.reseller || stock.buyer || "").trim();
+    const reseller = resellerBySellerText(db, sellerText) || resellerById(db, stock.resellerId);
+    const soldAt = toAccountDateTime(stock.soldAt);
+    const soldDurationDays = Math.max(0, Number(stock.soldDurationDays || durationDays(stock.soldDuration)));
+    if (!stockId || !reseller?.id || !soldAt || !soldDurationDays) continue;
+
+    const candidates = db.orders
+      .filter((order) => {
+        if (!isFulfilledProductOrder(order) || !orderMatchesSheetStockProduct(order, stock)) return false;
+        const orderReseller = resellerById(db, order.resellerId) || activeResellerByWhatsapp(db, order.whatsapp);
+        if (orderReseller?.id !== reseller.id) return false;
+        const orderDurationDays = Math.max(0, Number(order.durationDays || durationDays(order.duration)));
+        if (orderDurationDays !== soldDurationDays) return false;
+        const orderAt = toAccountDateTime(order.paidAt || order.createdAt);
+        return Boolean(orderAt) && Math.abs(orderAt.getTime() - soldAt.getTime()) <= maxTimeDistanceMs;
+      })
+      .map((order) => ({
+        order,
+        distance: Math.abs(toAccountDateTime(order.paidAt || order.createdAt).getTime() - soldAt.getTime()),
+      }))
+      .sort((left, right) => left.distance - right.distance);
+
+    if (!candidates.length) continue;
+    if (candidates.length > 1 && candidates[0].distance === candidates[1].distance) continue;
+    matches.push({ stock, order: candidates[0].order, reseller, distance: candidates[0].distance });
+  }
+
+  matches.sort((left, right) => left.distance - right.distance);
+  const orderUsage = new Map();
+  const accepted = [];
+  for (const match of matches) {
+    const orderId = String(match.order.id || "").trim();
+    const capacity = Math.max(1, Number(match.order.qty || match.order.quantity || 1));
+    const used = orderUsage.get(orderId) || 0;
+    if (used >= capacity) continue;
+    orderUsage.set(orderId, used + 1);
+    accepted.push(match);
+  }
+
+  let updated = 0;
+  for (const { stock, order, reseller } of accepted) {
+    const stockId = String(stock.id || "").trim();
+    for (const candidate of db.orders) {
+      const before = Array.isArray(candidate.deliveredStockIds) ? candidate.deliveredStockIds : [];
+      const next = before.filter((item) => String(item || "").trim() !== stockId);
+      if (candidate.id === order.id) next.push(stockId);
+      const unique = [...new Set(next.map((item) => String(item || "").trim()).filter(Boolean))];
+      if (JSON.stringify(before) !== JSON.stringify(unique)) {
+        candidate.deliveredStockIds = unique;
+        updated += 1;
+      }
+    }
+
+    if (String(stock.sheetOrderId || "").trim() !== String(order.id || "").trim()) {
+      stock.sheetOrderId = order.id;
+      updated += 1;
+    }
+    const canonicalName = canonicalResellerDisplayName(reseller, stock.sheetSellerInput || stock.reseller || "");
+    const canonicalWhatsapp = primaryResellerWhatsapp(reseller);
+    for (const account of db.managedAccounts.filter((item) => String(item.stockId || "").trim() === stockId)) {
+      const expected = {
+        orderId: order.id,
+        sourceOrderId: order.id,
+        resellerId: reseller.id,
+        reseller: canonicalName,
+        buyer: stock.sheetSellerInput || canonicalName,
+        whatsapp: canonicalWhatsapp,
+        startedAt: stock.soldAt,
+        duration: stock.soldDuration,
+        durationDays: Number(stock.soldDurationDays || 0),
+        expiresAt: stock.soldExpiresAt || stock.expiresAt || "",
+      };
+      updated += applyManagedAccountOwnershipSnapshot(account, { reseller, expected }, {
+        forceCanonical: true,
+        forceOrderLinks: true,
+        forceTemporal: true,
+      });
+      account.sheetSellerInput = stock.sheetSellerInput || account.sheetSellerInput || "";
+    }
+  }
+  return updated;
+}
+
+function syncSoldStockMetadata(db) {
+  db.stock = db.stock || [];
+  let updated = 0;
+
+  for (const stock of db.stock) {
+    if (!stock || String(stock.status || "").toLowerCase() !== "sold") continue;
+    const stockId = String(stock.id || "").trim();
+    if (!stockId) continue;
+    const linkedAccount = (db.managedAccounts || []).find((account) => String(account.stockId || "").trim() === stockId)
+      || null;
+    const linkedOrder = linkedAccount
+      ? orderForManagedAccount(db, linkedAccount)
+      : (db.orders || []).find((order) => (order.deliveredStockIds || []).some((candidate) => String(candidate || "").trim() === stockId)) || null;
+
+    const sheetBacked = isGoogleSheetsBackedStock(stock);
+    const expectedBuyer = String(sheetBacked ? (stock.sheetSellerInput || stock.buyer || linkedAccount?.buyer || "") : (linkedAccount?.buyer || linkedOrder?.customer || stock.buyer || "")).trim();
+    const expectedReseller = String(sheetBacked
+      ? (stock.reseller || stock.sheetSellerInput || linkedAccount?.reseller || "")
+      : (
+        linkedAccount?.reseller
+        || canonicalResellerDisplayName(resellerById(db, linkedOrder?.resellerId) || activeResellerByWhatsapp(db, linkedOrder?.whatsapp), linkedOrder?.reseller || "")
+        || stock.reseller
+        || ""
+      )).trim();
+    const expectedOrderId = String(linkedOrder?.id || stock.sheetOrderId || "").trim();
+    const expectedSoldAt = String(sheetBacked ? (stock.soldAt || linkedAccount?.startedAt || "") : (linkedAccount?.startedAt || linkedOrder?.paidAt || linkedOrder?.createdAt || stock.soldAt || "")).trim();
+    const expectedDuration = String(sheetBacked ? (stock.soldDuration || linkedAccount?.duration || "") : (linkedAccount?.duration || linkedOrder?.duration || stock.soldDuration || "")).trim();
+    const expectedDurationDays = Math.max(0, Number(sheetBacked ? (stock.soldDurationDays || linkedAccount?.durationDays || 0) : (linkedAccount?.durationDays || linkedOrder?.durationDays || stock.soldDurationDays || 0)));
+
+    if (expectedBuyer && String(stock.buyer || "").trim() !== expectedBuyer) {
+      stock.buyer = expectedBuyer;
+      updated += 1;
+    }
+    if (expectedReseller && String(stock.reseller || "").trim() !== expectedReseller) {
+      stock.reseller = expectedReseller;
+      updated += 1;
+    }
+    if (expectedOrderId && String(stock.sheetOrderId || "").trim() !== expectedOrderId) {
+      stock.sheetOrderId = expectedOrderId;
+      updated += 1;
+    }
+    if (expectedSoldAt && String(stock.soldAt || "").trim() !== expectedSoldAt) {
+      stock.soldAt = expectedSoldAt;
+      updated += 1;
+    }
+    if (expectedDuration && String(stock.soldDuration || "").trim() !== expectedDuration) {
+      stock.soldDuration = expectedDuration;
+      updated += 1;
+    }
+    if (expectedDurationDays > 0 && Number(stock.soldDurationDays || 0) !== expectedDurationDays) {
+      stock.soldDurationDays = expectedDurationDays;
+      updated += 1;
+    }
+  }
+
+  return updated;
+}
+
+function syncManagedAccountCredentialsFromOrders(db) {
+  db.managedAccounts = db.managedAccounts || [];
+  let updated = 0;
+
+  for (const account of db.managedAccounts) {
+    if (account.hidden || account.returnedToStockAt) continue;
+    if (["expired", "replaced", "disabled"].includes(String(account.status || accountStatusFromDate(account.expiresAt, account.durationDays)).toLowerCase())) continue;
+    const stock = stockForManagedAccount(db, account);
+    if (!stock) continue;
+    const stockId = String(stock.id || account.stockId || "").trim();
+    const order = (db.orders || []).find((item) => (item.deliveredStockIds || []).includes(stockId));
+    const fulfillment = String(order?.fulfillmentText || "");
+    const password = stock?.password || parseFulfillmentField(fulfillment, "Password") || "";
+    const profile = stock?.profile || parseFulfillmentField(fulfillment, "Profile") || "";
+    const pin = stock?.pin || parseFulfillmentField(fulfillment, "PIN") || "";
+    const signInCode = stock?.signInCode || parseFulfillmentField(fulfillment, "Sign-in code") || "";
+    const verificationCode = stock?.verificationCode || parseFulfillmentField(fulfillment, "Verification code") || "";
+    const resetLink = stock?.resetLink || "";
+    const householdLink = stock?.householdLink || "";
+    const sheetBacked = String(account.sheetSource || account.source || "").toLowerCase() === "google_sheets"
+      || String(stock?.sheetSource || "").toLowerCase() === "google_sheets";
+
+    let changed = false;
+    if (password && account.password !== password) {
+      account.password = password;
+      changed = true;
+    }
+    if (profile && account.profile !== profile) {
+      account.profile = profile;
+      changed = true;
+    }
+    if (pin && account.pin !== pin) {
+      account.pin = pin;
+      changed = true;
+    }
+    if (signInCode && account.signInCode !== signInCode) {
+      account.signInCode = signInCode;
+      changed = true;
+    }
+    if (verificationCode && account.verificationCode !== verificationCode) {
+      account.verificationCode = verificationCode;
+      changed = true;
+    }
+    if (resetLink && account.resetLink !== resetLink) {
+      account.resetLink = resetLink;
+      changed = true;
+    }
+    if (householdLink && account.householdLink !== householdLink) {
+      account.householdLink = householdLink;
+      changed = true;
+    }
+    if (sheetBacked && stock?.password && account.password !== stock.password) {
+      account.password = stock.password;
+      changed = true;
+    }
+    if (sheetBacked && stock?.profile && account.profile !== stock.profile) {
+      account.profile = stock.profile;
+      changed = true;
+    }
+    if (sheetBacked && stock?.pin && account.pin !== stock.pin) {
+      account.pin = stock.pin;
+      changed = true;
+    }
+    if (changed) updated += 1;
+  }
+
+  return updated;
+}
+
+function syncNetflixManagedPasswordConsensus(db) {
+  db.managedAccounts = db.managedAccounts || [];
+  let updated = 0;
+  const byEmail = new Map();
+
+  for (const account of db.managedAccounts) {
+    if (account.hidden || account.returnedToStockAt) continue;
+    const status = String(account.status || accountStatusFromDate(account.expiresAt, account.durationDays)).toLowerCase();
+    if (["expired", "replaced", "disabled"].includes(status)) continue;
+    if (isMalformedManagedAccount(account)) continue;
+    if (!isNetflixManagedAccount(account)) continue;
+    if (String(account.sheetSource || account.source || "").toLowerCase() === "google_sheets") continue;
+    const emailKey = String(account.email || "").trim().toLowerCase();
+    const password = String(account.password || "").trim();
+    if (!emailKey || !password) continue;
+    const list = byEmail.get(emailKey) || [];
+    list.push(account);
+    byEmail.set(emailKey, list);
+  }
+
+  for (const accounts of byEmail.values()) {
+    if (accounts.length < 2) continue;
+    const passwordGroups = new Map();
+    for (const account of accounts) {
+      const key = String(account.password || "").trim();
+      const list = passwordGroups.get(key) || [];
+      list.push(account);
+      passwordGroups.set(key, list);
+    }
+    if (passwordGroups.size <= 1) continue;
+
+    const canonicalPassword = [...passwordGroups.entries()]
+      .sort((left, right) => {
+        if (right[1].length !== left[1].length) return right[1].length - left[1].length;
+        const leftKeeper = left[1].slice().sort(compareManagedAccountPriority)[0];
+        const rightKeeper = right[1].slice().sort(compareManagedAccountPriority)[0];
+        return compareManagedAccountPriority(leftKeeper, rightKeeper);
+      })[0]?.[0] || "";
+    if (!canonicalPassword) continue;
+
+    for (const account of accounts) {
+      if (String(account.password || "").trim() === canonicalPassword) continue;
+      account.password = canonicalPassword;
+      const linkedStock = stockForManagedAccount(db, account);
+      if (linkedStock && String(linkedStock.password || "").trim() !== canonicalPassword) {
+        linkedStock.password = canonicalPassword;
+        updated += 1;
+      }
+      updated += 1;
+    }
+  }
+
+  return updated;
+}
+
+function managedAccountOwnershipSnapshot(db, account = {}, options = {}) {
+  const order = options.order || orderForManagedAccount(db, account);
+  const stock = options.stock || stockForManagedAccount(db, account);
+  const reseller = options.reseller || resolveManagedAccountReseller(db, account, { order });
+  const sheetBacked = String(account.sheetSource || account.source || stock?.sheetSource || "").toLowerCase() === "google_sheets";
+  const orderOwnsStock = Boolean(order?.id && account.stockId && (order.deliveredStockIds || []).some((item) => String(item || "").trim() === String(account.stockId || "").trim()));
+  const whatsapp = normalizeWhatsappNumber(order?.whatsapp || account.whatsapp || primaryResellerWhatsapp(reseller) || "");
+  const resellerName = reseller?.name || reseller?.username || "";
+  const orderId = String(order?.id || "").trim();
+  const useSheetTemporal = sheetBacked && stock;
+  const startedAt = String(useSheetTemporal ? (stock.soldAt || account.startedAt || "") : (orderOwnsStock ? (order?.paidAt || order?.createdAt || stock?.soldAt || account.startedAt || "") : (account.startedAt || order?.paidAt || order?.createdAt || stock?.soldAt || ""))).trim();
+  const duration = String(useSheetTemporal ? (stock.soldDuration || account.duration || "") : (orderOwnsStock ? (order?.duration || stock?.soldDuration || account.duration || "") : (account.duration || order?.duration || stock?.soldDuration || ""))).trim();
+  const durationDaysValue = Math.max(0, Number(useSheetTemporal ? (stock.soldDurationDays || account.durationDays || 0) : (orderOwnsStock ? (order?.durationDays || stock?.soldDurationDays || account.durationDays || 0) : (account.durationDays || order?.durationDays || stock?.soldDurationDays || 0))));
+  const expiresAt = String(useSheetTemporal ? (stock.soldExpiresAt || stock.expiresAt || account.expiresAt || "") : (orderOwnsStock ? (order?.expiresAt || "") : (account.expiresAt || order?.expiresAt || ""))).trim()
+    || (startedAt && durationDaysValue > 0 ? addAccountDaysText(durationDaysValue, startedAt, { keepTime: true }) : "");
+  const buyer = String(account.buyer || order?.customer || resellerName || whatsapp || "").trim();
+  return {
+    order,
+    stock,
+    reseller,
+    orderOwnsStock,
+    expected: {
+      whatsapp,
+      resellerId: reseller?.id || "",
+      reseller: resellerName,
+      buyer,
+      orderId,
+      sourceOrderId: orderId,
+      startedAt,
+      duration,
+      durationDays: durationDaysValue,
+      expiresAt,
+    },
+  };
+}
+
+function canonicalResellerDisplayName(reseller = null, fallback = "") {
+  const source = safeResellerRecord(reseller);
+  return String(source.name || source.username || primaryResellerWhatsapp(source) || fallback || "").trim();
+}
+
+function applyManagedAccountOwnershipSnapshot(account = {}, snapshot = {}, options = {}) {
+  const expected = snapshot.expected || {};
+  let updated = 0;
+  const forceCanonical = options.forceCanonical === true;
+  const forceOrderLinks = options.forceOrderLinks === true;
+  const forceTemporal = options.forceTemporal === true;
+  const resellerIdChanged = Boolean(expected.resellerId && account.resellerId !== expected.resellerId);
+
+  if (expected.whatsapp && account.whatsapp !== expected.whatsapp) {
+    account.whatsapp = expected.whatsapp;
+    updated += 1;
+  }
+  if (expected.resellerId && account.resellerId !== expected.resellerId) {
+    account.resellerId = expected.resellerId;
+    updated += 1;
+  }
+
+  const currentResellerLooksLikeNumber = normalizeWhatsappNumber(account.reseller || "");
+  if (
+    expected.reseller
+    && account.reseller !== expected.reseller
+    && (
+      forceCanonical
+      || (expected.resellerId && String(account.resellerId || "").trim() === String(expected.resellerId || "").trim())
+      || resellerIdChanged
+      || !account.reseller
+      || currentResellerLooksLikeNumber
+      || (snapshot.reseller && sellerTextMatchesReseller(account.reseller, snapshot.reseller))
+    )
+  ) {
+    account.reseller = expected.reseller;
+    updated += 1;
+  }
+
+  if (expected.buyer && (!account.buyer || forceCanonical) && account.buyer !== expected.buyer) {
+    account.buyer = expected.buyer;
+    updated += 1;
+  }
+
+  if (expected.orderId && (forceOrderLinks || !account.orderId) && account.orderId !== expected.orderId) {
+    account.orderId = expected.orderId;
+    updated += 1;
+  }
+  if (expected.sourceOrderId && (forceOrderLinks || !account.sourceOrderId) && account.sourceOrderId !== expected.sourceOrderId) {
+    account.sourceOrderId = expected.sourceOrderId;
+    updated += 1;
+  }
+  if (expected.startedAt && (forceTemporal || !account.startedAt) && account.startedAt !== expected.startedAt) {
+    account.startedAt = expected.startedAt;
+    updated += 1;
+  }
+  if (expected.duration && (forceTemporal || !account.duration) && account.duration !== expected.duration) {
+    account.duration = expected.duration;
+    updated += 1;
+  }
+  if (expected.durationDays > 0 && (forceTemporal || !account.durationDays) && Number(account.durationDays || 0) !== expected.durationDays) {
+    account.durationDays = expected.durationDays;
+    updated += 1;
+  }
+  if (expected.expiresAt && (forceTemporal || !account.expiresAt) && account.expiresAt !== expected.expiresAt) {
+    account.expiresAt = expected.expiresAt;
+    updated += 1;
+  }
+  return updated;
+}
+
+function syncOrderResellerMetadata(db) {
+  db.orders = db.orders || [];
+  let updated = 0;
+
+  for (const order of db.orders) {
+    if (!order || typeof order !== "object") continue;
+    const reseller = resellerById(db, order.resellerId) || activeResellerByWhatsapp(db, order.whatsapp);
+    const expectedResellerId = String(reseller?.id || order.resellerId || "").trim();
+    const expectedWhatsapp = normalizeWhatsappNumber(order.whatsapp || primaryResellerWhatsapp(reseller) || "");
+    const expectedReseller = canonicalResellerDisplayName(reseller, order.reseller || order.customer || expectedWhatsapp || "");
+
+    if (expectedResellerId && String(order.resellerId || "").trim() !== expectedResellerId) {
+      order.resellerId = expectedResellerId;
+      updated += 1;
+    }
+    if (expectedWhatsapp && normalizeWhatsappNumber(order.whatsapp || "") !== expectedWhatsapp) {
+      order.whatsapp = expectedWhatsapp;
+      updated += 1;
+    }
+    if (expectedReseller && String(order.reseller || "").trim() !== expectedReseller) {
+      order.reseller = expectedReseller;
+      updated += 1;
+    }
+  }
+
+  return updated;
+}
+
+function syncManagedAccountWhatsappFromOrders(db) {
+  db.managedAccounts = db.managedAccounts || [];
+  let updated = 0;
+
+  for (const account of db.managedAccounts) {
+    const snapshot = managedAccountOwnershipSnapshot(db, account);
+    updated += applyManagedAccountOwnershipSnapshot(account, snapshot, {
+      forceOrderLinks: snapshot.orderOwnsStock,
+      forceTemporal: snapshot.orderOwnsStock,
+    });
+  }
+
+  return updated;
+}
+
+function rebuildManagedAccountsForOrder(db, order = {}, options = {}) {
+  db.managedAccounts = db.managedAccounts || [];
+  if (!order?.id) return { created: [], skippedReason: "order_not_found" };
+  if (order.type === "deposit_topup" || order.orderType === "deposit_topup") {
+    return { created: [], skippedReason: "deposit_order" };
+  }
+
+  const product = getProduct(db, order.productId) || (db.products || []).find((item) => item.name === order.product);
+  const variant = getVariant(db, product?.id, order.variantId) || product?.variants?.find((item) => item.id === order.customerVariantId || item.code === order.variantCode || item.name === order.variant);
+  if (!product || !variant) return { created: [], skippedReason: "product_variant_missing" };
+  if (isLinkPoolProduct(db, product, variant)) return { created: [], skippedReason: "link_pool_manual_only" };
+
+  const linkedAccounts = directManagedAccountsForOrder(db, order, { includeHidden: true });
+  const existingStockIds = new Set(linkedAccounts.map((item) => String(item.stockId || "").trim()).filter(Boolean));
+  const deliveredStockIds = Array.isArray(order.deliveredStockIds) ? order.deliveredStockIds : [];
+  const deliveredStocks = deliveredStockIds
+    .map((stockId) => (db.stock || []).find((item) => String(item.id || "").trim() === String(stockId || "").trim()))
+    .filter(Boolean);
+  if (!deliveredStocks.length) return { created: [], skippedReason: "delivered_stock_missing" };
+
+  const reseller = resellerById(db, order.resellerId) || activeResellerByWhatsapp(db, order.whatsapp);
+  const created = [];
+  for (const stock of deliveredStocks) {
+    if (existingStockIds.has(String(stock.id || "").trim())) continue;
+    if (stockHasConflictingHistoricalOrders(db, stock, order)) continue;
+    const sheetBacked = String(stock.sheetSource || "").toLowerCase() === "google_sheets";
+    const liveSheetStatus = String(stock.status || "").toLowerCase();
+    if (sheetBacked && liveSheetStatus !== "sold") continue;
+    const durationDayCount = Math.max(0, Number(order.durationDays || durationDays(order.duration)));
+    const startedAt = String(order.paidAt || order.createdAt || stock.soldAt || nowText()).trim();
+    const account = {
+      id: makeId("acc"),
+      stockId: stock.id,
+      orderId: order.id,
+      sourceOrderId: order.id,
+      resellerId: order.resellerId || reseller?.id || "",
+      product: product.name,
+      productId: product.id,
+      variant: order.customerVariant || order.variant || variant.name,
+      variantId: order.customerVariantId || order.variantId || variant.id,
+      variantCode: order.customerVariantCode || order.variantCode || variant.code,
+      stockPoolKey: order.stockPoolKey || variantStockGroupKey(product, variant),
+      duration: order.duration || "",
+      durationDays: durationDayCount,
+      email: stock.email || "",
+      password: stock.password || "",
+      buyer: order.customer || "",
+      reseller: reseller?.name || reseller?.username || order.reseller || order.whatsapp || "",
+      whatsapp: normalizeWhatsappNumber(order.whatsapp || primaryResellerWhatsapp(reseller) || ""),
+      profile: stock.profile || "",
+      pin: stock.pin || "",
+      signInCode: stock.signInCode || "",
+      verificationCode: stock.verificationCode || "",
+      resetLink: stock.resetLink || "",
+      householdLink: stock.householdLink || "",
+      device: order.device || stock.device || "",
+      sheetSource: stock.sheetSource || "",
+      sheetName: stock.sheetName || "",
+      sheetRow: stock.sheetRow || 0,
+      sheetPool: stock.sheetPool || "",
+      sheetPoolSchema: stock.sheetPoolSchema || "",
+      sheetStartColumn: stock.sheetStartColumn || 0,
+      sheetStockKey: stock.sheetStockKey || "",
+      startedAt,
+      expiresAt: order.expiresAt || (durationDayCount > 0 ? addAccountDaysText(durationDayCount, startedAt, { keepTime: true }) : ""),
+      status: accountStatusFromDate(order.expiresAt || (durationDayCount > 0 ? addAccountDaysText(durationDayCount, startedAt, { keepTime: true }) : ""), durationDayCount),
+      source: options.source || "order_rebuild",
+      rebuiltAt: nowText(),
+    };
+    if (overlappingLiveSlotAccount(db, account)) continue;
+    created.push(account);
+  }
+
+  if (created.length) {
+    db.managedAccounts.push(...created);
+    syncManagedAccountWhatsappFromOrders(db);
+  }
+  return { created, skippedReason: created.length ? "" : "nothing_to_rebuild" };
+}
+
+function repairManagedAccountOwnership(db, options = {}) {
+  db.managedAccounts = db.managedAccounts || [];
+  const scopeAccountId = String(options.accountId || "").trim();
+  const scopeOrderId = String(options.orderId || "").trim();
+  const scopeResellerId = String(options.resellerId || "").trim();
+  let matched = 0;
+  let repaired = 0;
+  const changedAccountIds = [];
+  const changedOrderIds = new Set();
+
+  for (const account of db.managedAccounts) {
+    const snapshot = managedAccountOwnershipSnapshot(db, account);
+    const relatedOrderId = String(snapshot.order?.id || account.orderId || account.sourceOrderId || "").trim();
+    const relatedResellerId = String(snapshot.reseller?.id || account.resellerId || snapshot.order?.resellerId || "").trim();
+    if (scopeAccountId && String(account.id || "").trim() !== scopeAccountId) continue;
+    if (scopeOrderId && relatedOrderId !== scopeOrderId) continue;
+    if (scopeResellerId && relatedResellerId !== scopeResellerId) continue;
+    matched += 1;
+    const changed = applyManagedAccountOwnershipSnapshot(account, snapshot, {
+      forceCanonical: true,
+      forceOrderLinks: true,
+      forceTemporal: false,
+    });
+    if (changed > 0) {
+      repaired += changed;
+      changedAccountIds.push(account.id);
+      if (relatedOrderId) changedOrderIds.add(relatedOrderId);
+    }
+  }
+
+  const rebuildResults = [];
+  const candidateOrders = (db.orders || []).filter((order) => {
+    if (scopeOrderId && String(order.id || "").trim() !== scopeOrderId) return false;
+    if (scopeResellerId && String(order.resellerId || "").trim() !== scopeResellerId) return false;
+    if (scopeAccountId) return false;
+    const delivery = String(order.deliveryStatus || "").toLowerCase();
+    const status = String(order.orderStatus || "").toLowerCase();
+    return ["sent", "failed", "paid", "processing"].includes(delivery) || ["completed", "processing"].includes(status);
+  });
+  for (const order of candidateOrders) {
+    const linkedAccounts = directManagedAccountsForOrder(db, order, { includeHidden: true });
+    const qty = Math.max(1, Number(order.qty || 1));
+    if (linkedAccounts.length >= qty) continue;
+    const rebuilt = rebuildManagedAccountsForOrder(db, order, { source: "reseller_repair" });
+    if (rebuilt.created.length) {
+      rebuildResults.push({ orderId: order.id, created: rebuilt.created.length });
+      changedOrderIds.add(order.id);
+      changedAccountIds.push(...rebuilt.created.map((item) => item.id));
+    }
+  }
+
+  return {
+    matched,
+    repaired,
+    rebuilt: rebuildResults.reduce((sum, item) => sum + Number(item.created || 0), 0),
+    rebuildResults,
+    changedAccountIds,
+    changedOrderIds: [...changedOrderIds],
+  };
+}
+
+function householdTargetForEmail(email) {
+  const domain = String(email || "").split("@").pop()?.toLowerCase().trim() || "";
+  if (!domain) return null;
+  if (["wesaveearth.xyz", "vya.baby", "vya.com"].some((item) => domain === item || domain.endsWith(`.${item}`))) {
+    return { label: "www.vya.baby", url: "https://www.vya.baby" };
+  }
+  if (["freenet.de", "gmx.com"].some((item) => domain === item || domain.endsWith(`.${item}`))) {
+    return { label: "storeify.id", url: "https://storeify.id" };
+  }
+  return null;
+}
+
+function householdFormForAccount(account) {
+  return [
+    "Form Household",
+    "",
+    `Email: ${account.email}`,
+    `Profil: ${account.profile || "-"}`,
+    `Tanggal beli: ${account.startedAt || "-"}`,
+    "Jam OTP:",
+    "Screenshot akun terkena household:",
+  ].join("\n");
+}
+
+function safeAccountForAccess(account) {
+  return {
+    id: account.id,
+    product: account.product,
+    variant: account.variant || "",
+    email: account.email,
+    loginPhone: account.loginPhone || "",
+    profile: account.profile || "",
+    startedAt: account.startedAt || "",
+    expiresAt: account.expiresAt || "",
+    status: account.status || "active",
+  };
+}
+
+function isNetflixManagedAccount(account = {}) {
+  return [account.product, account.productId, account.variant, account.variantCode]
+    .join(" ")
+    .toLowerCase()
+    .includes("netflix");
+}
+
+function isDisneyManagedAccount(account = {}) {
+  return [account.product, account.productId, account.variant, account.variantCode]
+    .join(" ")
+    .toLowerCase()
+    .includes("disney");
+}
+
+function findProductByName(db, name = "") {
+  const wanted = String(name || "").trim().toLowerCase();
+  if (!wanted) return null;
+  return (db.products || []).find((product) => String(product.name || "").trim().toLowerCase() === wanted) || null;
+}
+
+function resolveAccountProductVariant(db, input = {}) {
+  const product = getProduct(db, input.productId) || findProductByName(db, input.product) || (db.products || [])[0] || null;
+  if (!product) return { product: null, variant: null };
+  const variantText = String(input.variant || "").trim().toLowerCase();
+  const variantCode = String(input.variantCode || "").trim().toUpperCase();
+  const variant =
+    (product.variants || []).find((item) => item.id === input.variantId)
+    || (product.variants || []).find((item) => String(item.code || "").trim().toUpperCase() === variantCode)
+    || (product.variants || []).find((item) => String(item.name || "").trim().toLowerCase() === variantText)
+    || (product.variants || []).find((item) => isVariantOrderable(product, item))
+    || (product.variants || [])[0]
+    || null;
+  return { product, variant };
+}
+
+function syncPasswordByEmail(db, email, password, options = {}) {
+  const key = normalizeEmailKey(email);
+  if (!key) return { stockUpdated: 0, accountUpdated: 0, affectedAccounts: [] };
+
+  const nextPassword = String(password ?? "");
+  const affectedAccounts = [];
+  let stockMatched = 0;
+  let accountMatched = 0;
+  let stockUpdated = 0;
+  let accountUpdated = 0;
+
+  for (const stock of db.stock || []) {
+    if (normalizeEmailKey(stock.email) !== key) continue;
+    stockMatched += 1;
+    if (String(stock.password ?? "") !== nextPassword) {
+      stock.password = nextPassword;
+      stockUpdated += 1;
+    }
+  }
+
+  for (const account of db.managedAccounts || []) {
+    if (normalizeEmailKey(account.email) !== key) continue;
+    const accountStatus = accountStatusFromDate(account.expiresAt, account.durationDays);
+    if (account.status === "expired" || accountStatus === "expired") continue;
+    accountMatched += 1;
+    affectedAccounts.push(account);
+    if (String(account.password ?? "") !== nextPassword) {
+      account.password = nextPassword;
+      accountUpdated += 1;
+    }
+  }
+
+  if (!stockUpdated && !accountUpdated && !affectedAccounts.length) {
+    return { stockUpdated, accountUpdated, affectedAccounts };
+  }
+
+  db.activities = db.activities || [];
+  db.activities.unshift({
+    id: makeId("act"),
+    type: "account",
+    title: `Password akun ${email} disinkronkan`,
+    description: `Password untuk ${email} disamakan di ${stockMatched} stok dan ${accountMatched} akun reseller aktif. History expired tidak diubah.`,
+    createdAt: nowText(),
+    accountId: options.sourceAccountId || "",
+    accountEmail: email,
+  });
+
+  const loggedKeys = new Set();
+  for (const account of affectedAccounts) {
+    const logKey = `${account.resellerId || ""}::${normalizeWhatsappNumber(account.whatsapp || "")}::${account.id}`;
+    if (loggedKeys.has(logKey)) continue;
+    loggedKeys.add(logKey);
+    db.activities.unshift({
+      id: makeId("act"),
+      type: "account",
+      title: `Password akun ${email} diperbarui`,
+      description: `Password akun ${[account.product, account.variant].filter(Boolean).join(" - ") || email} diperbarui oleh owner.`,
+      createdAt: nowText(),
+      resellerId: account.resellerId || "",
+      whatsapp: normalizeWhatsappNumber(account.whatsapp || ""),
+      accountId: account.id,
+      accountEmail: email,
+    });
+  }
+
+  return { stockUpdated, accountUpdated, affectedAccounts };
+}
+
+function resellerByAccount(db, account = {}) {
+  const resellerId = String(account.resellerId || "").trim();
+  if (resellerId) {
+    const reseller = (db.resellers || []).find((item) => item.id === resellerId);
+    if (reseller) return reseller;
+  }
+
+  const whatsapp = normalizeWhatsappNumber(account.whatsapp || "");
+  if (whatsapp) {
+    const reseller = activeResellerByWhatsapp(db, whatsapp);
+    if (reseller) return reseller;
+  }
+
+  const resellerKey = String(account.reseller || account.buyer || "").trim().toLowerCase();
+  if (!resellerKey) return null;
+  return (db.resellers || []).find((reseller) => {
+    if (reseller.isActive === false) return false;
+    return [reseller.name, reseller.username, reseller.email, reseller.id]
+      .filter(Boolean)
+      .some((value) => String(value).trim().toLowerCase() === resellerKey);
+  }) || null;
+}
+
+function strictAccountNotificationReseller(db, account = {}) {
+  const resellerId = String(account.resellerId || "").trim();
+  if (resellerId) {
+    const reseller = (db.resellers || []).find((item) => item.id === resellerId && item.isActive !== false);
+    if (reseller) return reseller;
+    return null;
+  }
+
+  const whatsapp = normalizeWhatsappNumber(account.whatsapp || "");
+  if (!whatsapp) return null;
+  return activeResellerByWhatsapp(db, whatsapp);
+}
+
+function accountChangeFields(before = {}, after = {}) {
+  const fields = [
+    ["email", "Email/Account"],
+    ["password", "Password/Link"],
+    ["profile", "Nama profil"],
+    ["pin", "PIN"],
+  ];
+  return fields
+    .filter(([key]) => String(before[key] ?? "") !== String(after[key] ?? ""))
+    .map(([key, label]) => ({ key, label }));
+}
+
+function accountCredentialLabel(account = {}) {
+  const text = [account.product, account.productId, account.variant, account.variantCode, account.accountType, account.source]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (text.includes("canva")) return { identity: "Email customer", secret: "Link Canva" };
+  if (text.includes("viu") || text.includes("vidio")) return { identity: "Account", secret: "Password" };
+  return { identity: "Email akun", secret: /^https?:\/\//i.test(String(account.password || "")) ? "Password/Link" : "Password" };
+}
+
+function buildAccountChangeNotificationText(account = {}, changes = []) {
+  const labels = changes.map((item) => item.label).join(", ") || "Data akun";
+  const credentialLabel = accountCredentialLabel(account);
+  const remaining = remainingAccountDuration(account);
+  const lines = [
+    "IKY - UPDATE DATA AKUN",
+    "",
+    "Data akun kamu diperbarui oleh admin.",
+    `Perubahan: ${labels}`,
+    "",
+    "----------",
+    `Aplikasi : ${[account.product, account.variant].filter(Boolean).join(" - ") || "-"}`,
+    `${credentialLabel.identity} : ${account.email || "-"}`,
+    `${credentialLabel.secret} : ${account.canvaLink || account.password || "-"}`,
+  ];
+  if (account.profile || account.pin) {
+    lines.push(`Profil + PIN : ${[account.profile || "", account.pin ? `PIN ${account.pin}` : ""].filter(Boolean).join(" / ") || "-"}`);
+  }
+  if (account.device) lines.push(`Device : ${account.device}`);
+  lines.push(
+    `Durasi sisa : ${remaining.label || "-"}`,
+    `Status : ${accountStatusFromDate(account.expiresAt, account.durationDays)}`,
+    "----------",
+    "",
+    "Gunakan data terbaru ini untuk login.",
+  );
+  return lines.join("\n");
+}
+
+async function notifyResellerAccountChanged(db, account = {}, changes = [], options = {}) {
+  const filteredChanges = (changes || []).filter(Boolean);
+  if (!filteredChanges.length) return { sent: false, skipped: true, reason: "no_changes" };
+  const reseller = strictAccountNotificationReseller(db, account);
+  if (!reseller?.id) {
+    account.lastChangeNotificationAt = nowText();
+    account.lastChangeNotificationStatus = "skipped";
+    account.lastChangeNotificationError = "reseller_not_found";
+    return { sent: false, skipped: true, reason: "reseller_not_found" };
+  }
+  const target = primaryResellerWhatsapp(reseller) || normalizeWhatsappNumber(account.whatsapp || "");
+
+  const dedupeKey = [
+    reseller.id,
+    account.id || normalizeEmailKey(account.email || ""),
+    normalizeEmailKey(account.email || ""),
+    filteredChanges.map((item) => item.key).sort().join(","),
+  ].join("::");
+  if (options.dedupeSet?.has(dedupeKey)) return { sent: false, skipped: true, reason: "duplicate_notification" };
+  options.dedupeSet?.add(dedupeKey);
+
+  const sentAt = nowText();
+  const labels = filteredChanges.map((item) => item.label).filter(Boolean).join(", ") || "Data akun";
+  const productLabel = [account.product, account.variant].filter(Boolean).join(" - ") || account.email || "akun";
+  db.activities = db.activities || [];
+  db.activities.unshift({
+    id: makeId("act"),
+    type: "account",
+    title: "Data akun diperbarui",
+    description: `${labels} untuk ${productLabel} diperbarui oleh owner. Gunakan data terbaru di Manage Account.`,
+    createdAt: sentAt,
+    resellerId: reseller.id,
+    whatsapp: target,
+    accountId: account.id || "",
+    accountEmail: account.email || "",
+    product: account.product || "",
+    variant: account.variant || "",
+    source: "panel_account_change",
+    changedFields: filteredChanges.map((item) => item.key),
+  });
+  account.lastChangeNotificationAt = sentAt;
+  account.lastChangeNotificationStatus = "panel";
+  account.lastChangeNotificationError = "";
+  return { sent: false, panel: true, logged: true, reason: "panel_notification_only" };
+}
+
+async function syncCredentialsToSheetsSafely(db, options = {}) {
+  try {
+    const result = await syncAccountCredentialsToGoogleSheets(db, options);
+    return result;
+  } catch (error) {
+    const message = error.message || "google_sheets_credential_sync_failed";
+    db.activities = db.activities || [];
+    db.activities.unshift({
+      id: makeId("act"),
+      type: "stock",
+      title: "Sync password ke Google Sheets gagal",
+      description: `Password ${options.email || options.stockIds?.[0] || "akun"} sudah tersimpan di web, tapi belum terkirim ke Sheets: ${message}`,
+      createdAt: nowText(),
+      accountId: options.accountIds?.[0] || "",
+      accountEmail: options.email || "",
+    });
+    return { ok: false, error: message };
+  }
+}
+
+function buildManagedAccountInput(db, body = {}) {
+  const { product, variant } = resolveAccountProductVariant(db, body);
+  if (!product || !variant || !isVariantOrderable(product, variant)) {
+    const error = new Error("Produk atau varian akun tidak valid");
+    error.status = 400;
+    throw error;
+  }
+
+  const reseller = (db.resellers || []).find((item) => item.id === body.resellerId) || activeResellerByWhatsapp(db, body.whatsapp || "");
+  const email = String(body.email || "").trim();
+  if (!email) {
+    const error = new Error("Email akun wajib diisi");
+    error.status = 400;
+    throw error;
+  }
+  const usageMode = String(body.usageMode || body.source || "").toLowerCase().includes("daily") ? "daily" : "manual";
+  const startedAt = String(body.startedAt || (usageMode === "daily" ? dateTimeText(new Date()) : todayText())).trim();
+  const durationLabel = normalizeDurationLabel(body.duration || "1 Bulan", variant);
+  const requestedDurationDays = Number(body.durationDays || 0);
+  const durationDayCount = Number.isFinite(requestedDurationDays) && requestedDurationDays > 0 ? Math.floor(requestedDurationDays) : durationDays(durationLabel);
+  const expiresAt = String(body.expiresAt || addAccountDaysText(durationDayCount, startedAt, { keepTime: usageMode === "daily" })).trim();
+  const whatsapp = normalizeWhatsappNumber(body.whatsapp || reseller?.whatsapp || "");
+
+  return {
+    id: makeId("acc"),
+    stockId: "",
+    manual: true,
+    source: "manual_input",
+    usageMode,
+    snapshotAt: nowText(),
+    resellerId: reseller?.id || String(body.resellerId || "").trim(),
+    product: product.name,
+    productId: product.id,
+    variant: variant.name,
+    variantId: variant.id,
+    variantCode: variant.code,
+    stockPoolKey: variantStockGroupKey(product, variant),
+    duration: durationLabel,
+    durationDays: durationDayCount,
+    email,
+    password: String(body.password || ""),
+    buyer: String(body.buyer || body.customer || reseller?.name || whatsapp || "").trim(),
+    reseller: String(body.reseller || reseller?.name || whatsapp || "").trim(),
+    whatsapp,
+    profile: String(body.profile || ""),
+    pin: String(body.pin || ""),
+    signInCode: String(body.signInCode || ""),
+    verificationCode: String(body.verificationCode || ""),
+    resetLink: String(body.resetLink || ""),
+    householdLink: String(body.householdLink || ""),
+    startedAt,
+    expiresAt,
+    status: body.status || accountStatusFromDate(expiresAt, durationDayCount),
+    hidden: false,
+  };
+}
+
+function buildDailyStockAssignment(db, stock = {}, body = {}) {
+  if (!stock || stock.status !== "available") {
+    const error = new Error("Stok harus berstatus tersedia sebelum assign harian");
+    error.status = 400;
+    throw error;
+  }
+  const product = getProduct(db, stock.productId);
+  const stockVariant = product?.variants?.find((item) => item.id === stock.variantId);
+  if (!product || !stockVariant) {
+    const error = new Error("Produk atau varian stok tidak valid");
+    error.status = 400;
+    throw error;
+  }
+  const customerVariant = product.variants?.find((item) => item.id === body.variantId) || stockVariant;
+  const reseller = (db.resellers || []).find((item) => item.id === body.resellerId) || activeResellerByWhatsapp(db, body.whatsapp || "");
+  if (!reseller) {
+    const error = new Error("Reseller tujuan wajib dipilih");
+    error.status = 400;
+    throw error;
+  }
+  const durationDayCount = Math.max(1, Math.floor(Number(body.durationDays || 1)));
+  const startedAt = String(body.startedAt || dateTimeText(new Date())).trim();
+  const expiresAt = String(body.expiresAt || addAccountDaysText(durationDayCount, startedAt, { keepTime: true })).trim();
+  const whatsapp = normalizeWhatsappNumber(body.whatsapp || reseller.whatsapp || "");
+  return {
+    id: makeId("acc"),
+    stockId: stock.id,
+    manual: true,
+    source: "assign_daily",
+    usageMode: "daily",
+    snapshotAt: nowText(),
+    resellerId: reseller.id,
+    product: product.name,
+    productId: product.id,
+    variant: customerVariant.name,
+    variantId: customerVariant.id,
+    variantCode: customerVariant.code,
+    stockPoolKey: variantStockGroupKey(product, stockVariant),
+    duration: `${durationDayCount} Hari`,
+    durationDays: durationDayCount,
+    email: stock.email || "",
+    password: stock.password || "",
+    buyer: String(body.buyer || reseller.name || whatsapp || "").trim(),
+    reseller: reseller.name || whatsapp || "",
+    whatsapp,
+    profile: stock.profile || "",
+    pin: stock.pin || "",
+    signInCode: stock.signInCode || "",
+    verificationCode: stock.verificationCode || "",
+    resetLink: stock.resetLink || "",
+    householdLink: stock.householdLink || "",
+    device: String(body.device || stock.device || "").trim(),
+    sheetSource: stock.sheetSource || "",
+    sheetStockKey: stock.sheetStockKey || "",
+    sheetPool: stock.sheetPool || "",
+    sheetPoolSchema: stock.sheetPoolSchema || "",
+    sheetName: stock.sheetName || "",
+    sheetRow: stock.sheetRow || 0,
+    sheetStartColumn: stock.sheetStartColumn || 0,
+    startedAt,
+    expiresAt,
+    status: accountStatusFromDate(expiresAt, durationDayCount),
+    hidden: false,
+  };
+}
+
+function returnManagedAccountToStock(db, account = {}) {
+  if (!isNetflixManagedAccount(account)) {
+    const error = new Error("Balikin ke stok hanya berlaku untuk akun Netflix");
+    error.status = 400;
+    throw error;
+  }
+  const { product, variant } = resolveAccountProductVariant(db, account);
+  if (!product || !variant) {
+    const error = new Error("Produk atau varian akun tidak ditemukan untuk balik ke stok");
+    error.status = 400;
+    throw error;
+  }
+
+  let stock = account.stockId ? (db.stock || []).find((item) => item.id === account.stockId) : null;
+  if (stock && isGoogleSheetsBackedStock(stock)) {
+    const error = new Error("Stok Google Sheets harus dikembalikan lewat row Sheets, bukan dari web.");
+    error.status = 409;
+    throw error;
+  }
+  if (!stock) {
+    stock = {
+      id: makeId("stk"),
+      productId: product.id,
+      variantId: variant.id,
+      createdAt: todayText(),
+      notes: `Balik dari manajemen akun ${account.id || ""}`.trim(),
+    };
+    db.stock = db.stock || [];
+    db.stock.unshift(stock);
+  }
+
+  Object.assign(stock, {
+    productId: product.id,
+    variantId: variant.id,
+    email: account.email || stock.email || "",
+    password: account.password || stock.password || "",
+    profile: account.profile || "",
+    pin: account.pin || "",
+    signInCode: account.signInCode || "",
+    verificationCode: account.verificationCode || "",
+    resetLink: account.resetLink || "",
+    householdLink: account.householdLink || "",
+    device: "",
+    status: "available",
+    reservedFor: "",
+    reservedAccountId: "",
+    reservedUntil: "",
+    soldAt: "",
+    soldVariant: "",
+    soldVariantId: "",
+    soldDuration: "",
+    soldDurationDays: 0,
+    sheetOrderId: "",
+  });
+  return stock;
+}
+
+function managedAccountPoolKey(db, account = {}) {
+  if (account.stockPoolKey) return account.stockPoolKey;
+  const { product, variant } = resolveAccountProductVariant(db, account);
+  return product && variant ? variantStockGroupKey(product, variant) : "";
+}
+
+function isExpiredManagedAccountForReturn(account = {}) {
+  const status = String(account.status || "").toLowerCase();
+  return status === "expired" || accountStatusFromDate(account.expiresAt, account.durationDays) === "expired";
+}
+
+function returnBatchForManagedAccount(db, targetAccount = {}) {
+  if (!isNetflixManagedAccount(targetAccount)) return [];
+  const emailKey = normalizeEmailKey(targetAccount.email);
+  const poolKey = managedAccountPoolKey(db, targetAccount);
+  const seen = new Set();
+  return (db.managedAccounts || []).filter((account) => {
+    if (!account || seen.has(account.id)) return false;
+    if (!isNetflixManagedAccount(account)) return false;
+    const status = String(account.status || "").toLowerCase();
+    if (account.returnedToStockAt || account.hidden || ["replaced", "disabled"].includes(status)) return false;
+    if (account.id === targetAccount.id) {
+      seen.add(account.id);
+      return true;
+    }
+    if (!emailKey || normalizeEmailKey(account.email) !== emailKey) return false;
+    if (!poolKey || managedAccountPoolKey(db, account) !== poolKey) return false;
+    if (!isExpiredManagedAccountForReturn(account)) return false;
+    seen.add(account.id);
+    return true;
+  });
+}
+
+function stockProductVariant(db, stock = {}) {
+  const product = getProduct(db, stock.productId);
+  const variant = product?.variants?.find((item) => item.id === stock.variantId) || null;
+  return { product, variant };
+}
+
+function stockPoolKeyForStock(db, stock = {}) {
+  const { product, variant } = stockProductVariant(db, stock);
+  if (!product || !variant) return "";
+  return variantStockGroupKey(product, variant);
+}
+
+function replacementStockMatchesAccount(db, account = {}, stock = {}) {
+  if (!stock || stock.status !== "available") return false;
+  const { product, variant } = resolveAccountProductVariant(db, account);
+  if (!product || !variant || stock.productId !== product.id) return false;
+  return stockPoolKeyForStock(db, stock) === (account.stockPoolKey || variantStockGroupKey(product, variant));
+}
+
+function remainingAccountDuration(account = {}) {
+  const startedAt = toAccountDateTime(account.startedAt);
+  const expires = toAccountDateTime(account.expiresAt, { endOfDay: !hasTimePart(account.expiresAt), referenceDate: startedAt });
+  if (!expires) return { days: 0, expiresAt: "", label: "0 hari" };
+  const msLeft = expires.getTime() - Date.now();
+  if (msLeft <= 0) return { days: 0, expiresAt: dateTimeText(expires), label: "0 hari" };
+  const hours = Math.ceil(msLeft / 3600000);
+  return {
+    days: Math.max(1, Math.ceil(hours / 24)),
+    expiresAt: hasTimePart(account.expiresAt) ? dateTimeText(expires) : dateOnlyText(expires),
+    label: hours < 48 ? `${hours} jam` : `${Math.ceil(hours / 24)} hari`,
+  };
+}
+
+function buildWarrantyCompleteText(account = {}, remainingLabel = "") {
+  return [
+    "IKY ✦ WARRANTY COMPLETE ──",
+    "",
+    "Akun garansi/replacement telah diproses.",
+    "Jika masih ada kendala, kirim screenshot lalu reply chat ini.",
+    "",
+    "──────────",
+    `⊳ aplikasi : ${account.product || "-"}`,
+    `⊳ email akun : ${account.email || "-"}`,
+    `⊳ password : ${account.password || "-"}`,
+    `⊳ profil + pin : ${[account.profile, account.pin].filter(Boolean).join(" / ") || "-"}`,
+    `⊳ durasi sisa : ${remainingLabel || "-"}`,
+    "──────────",
+    "",
+    "NOTE !",
+    "• Disarankan login melalui aplikasi.",
+    "• Gunakan akun hanya pada 1 device.",
+    "• Jika gagal login, gunakan tips login sebelumnya.",
+    "",
+    "──────────",
+    "IKY ✦ Warranty Service",
+    "Secure • Reliable • Trusted",
+  ].join("\n");
+}
+
+function buildWarrantyCompleteTextV2(account = {}, remainingLabel = "") {
+  return [
+    "IKY ✦ WARRANTY COMPLETE ──",
+    "",
+    "Akun garansi/replacement telah diproses.",
+    "Jika masih ada kendala, kirim screenshot lalu reply chat ini.",
+    "",
+    "──────────",
+    `⊳ aplikasi : ${account.product || "-"}`,
+    `⊳ email akun : ${account.email || "-"}`,
+    `⊳ password : ${account.password || "-"}`,
+    `⊳ profil + pin : ${[account.profile, account.pin].filter(Boolean).join(" / ") || "-"}`,
+    `⊳ durasi sisa : ${remainingLabel || "-"}`,
+    "──────────",
+    "",
+    "NOTE !",
+    "• Disarankan login melalui aplikasi.",
+    "• Gunakan akun hanya pada 1 device.",
+    "• Jika gagal login, gunakan tips login sebelumnya.",
+    "",
+    "──────────",
+    "IKY ✦ Warranty Service",
+    "Secure • Reliable • Trusted",
+  ].join("\n");
+}
+
+function replaceManagedAccountFromStock(db, accountId, body = {}) {
+  const account = (db.managedAccounts || []).find((item) => item.id === accountId);
+  if (!account) return null;
+  if (isTerminalManagedAccountStatus(account.status)) {
+    const error = new Error("Akun lama sudah nonaktif atau sudah direplace");
+    error.status = 400;
+    throw error;
+  }
+
+  const replacementStockId = String(body.replacementStockId || body.stockId || "").trim();
+  const replacementStock = (db.stock || []).find((item) => item.id === replacementStockId);
+  if (!replacementStock) {
+    const error = new Error("Stok pengganti tidak ditemukan");
+    error.status = 404;
+    throw error;
+  }
+  if (!replacementStockMatchesAccount(db, account, replacementStock)) {
+    const error = new Error("Stok pengganti harus available dan berada di pool produk yang sama");
+    error.status = 400;
+    throw error;
+  }
+
+  const remaining = remainingAccountDuration(account);
+  if (!remaining.days) {
+    const error = new Error("Akun lama sudah habis durasi, tidak bisa direplace otomatis");
+    error.status = 400;
+    throw error;
+  }
+
+  const oldDisposition = String(body.oldAccountDisposition || "release_via_sheets").trim();
+  const shouldReleaseViaSheets = oldDisposition !== "keep_sold";
+  const reason = String(body.reason || "").trim();
+  const replacedAt = nowText();
+  const { product, variant } = resolveAccountProductVariant(db, account);
+  const stockPoolKey = account.stockPoolKey || (product && variant ? variantStockGroupKey(product, variant) : stockPoolKeyForStock(db, replacementStock));
+
+  const replacementAccount = {
+    id: makeId("acc"),
+    stockId: replacementStock.id,
+    manual: true,
+    source: "replacement",
+    usageMode: account.usageMode || "monthly",
+    snapshotAt: replacedAt,
+    resellerId: account.resellerId || "",
+    product: account.product || product?.name || "",
+    productId: account.productId || product?.id || replacementStock.productId || "",
+    variant: account.variant || variant?.name || "",
+    variantId: account.variantId || variant?.id || "",
+    variantCode: account.variantCode || variant?.code || "",
+    stockPoolKey,
+    duration: `${remaining.days} Hari`,
+    durationDays: remaining.days,
+    email: replacementStock.email || "",
+    password: replacementStock.password || "",
+    buyer: account.buyer || "",
+    reseller: account.reseller || "",
+    whatsapp: normalizeWhatsappNumber(account.whatsapp || ""),
+    profile: replacementStock.profile || "",
+    pin: replacementStock.pin || "",
+    signInCode: replacementStock.signInCode || "",
+    verificationCode: replacementStock.verificationCode || "",
+    resetLink: replacementStock.resetLink || "",
+    householdLink: replacementStock.householdLink || "",
+    device: account.device || "",
+    startedAt: replacedAt,
+    expiresAt: remaining.expiresAt,
+    status: accountStatusFromDate(remaining.expiresAt, remaining.days),
+    replacedAccountId: account.id,
+    replacementReason: reason,
+    hidden: false,
+  };
+
+  const oldEmail = account.email || account.id;
+  account.status = "replaced";
+  account.replacedAt = replacedAt;
+  account.replacedByAccountId = replacementAccount.id;
+  account.replacedByStockId = replacementStock.id;
+  account.replacementReason = reason;
+  account.replacementDisposition = shouldReleaseViaSheets ? "release_via_sheets" : "keep_sold";
+  account.hidden = false;
+
+  let returnedStock = null;
+  const oldStock = account.stockId ? (db.stock || []).find((item) => item.id === account.stockId) : null;
+  if (oldStock) {
+    oldStock.status = "sold";
+    oldStock.notes = [
+      shouldReleaseViaSheets
+        ? `READY/release via Sheets setelah replace ${replacedAt}`
+        : `BAD/cek manual setelah replace ${replacedAt}`,
+      reason,
+      oldStock.notes,
+    ].filter(Boolean).join(" | ");
+  }
+
+  Object.assign(replacementStock, {
+    status: "sold",
+    soldAt: replacedAt,
+    soldVariant: replacementAccount.variant,
+    soldVariantId: replacementAccount.variantId,
+    soldDuration: replacementAccount.duration,
+    soldDurationDays: replacementAccount.durationDays,
+    reservedFor: "",
+    reservedAccountId: "",
+    reservedUntil: "",
+    device: replacementAccount.device || replacementStock.device || "",
+    sheetOrderId: `RPL-${account.id}`,
+    notes: [`Replacement dari ${oldEmail}`, reason, replacementStock.notes].filter(Boolean).join(" | "),
+  });
+
+  db.managedAccounts = db.managedAccounts || [];
+  db.managedAccounts.unshift(replacementAccount);
+  db.activities = db.activities || [];
+  db.activities.unshift({
+    id: makeId("act"),
+    type: "account",
+    title: `Akun ${oldEmail} direplace`,
+    description: `${account.reseller || account.buyer || "reseller"} pindah ke ${replacementAccount.email}. Akun lama ${shouldReleaseViaSheets ? "menunggu release dari Sheets" : "ditahan untuk cek manual"}. Sisa durasi ${remaining.label}.`,
+    createdAt: replacedAt,
+    resellerId: account.resellerId || "",
+    whatsapp: normalizeWhatsappNumber(account.whatsapp || ""),
+    accountId: replacementAccount.id,
+    accountEmail: replacementAccount.email,
+    oldAccountId: account.id,
+    oldAccountEmail: oldEmail,
+    stockId: replacementStock.id,
+  });
+
+  return {
+    oldAccount: account,
+    newAccount: replacementAccount,
+    returnedStock,
+    replacementStock,
+    remaining,
+    shouldReturnOldStock: false,
+    shouldReleaseViaSheets,
+    warrantyCompleteText: buildWarrantyCompleteTextV2(replacementAccount, remaining.label),
+  };
+}
+
+function accountStartedAtMs(account = {}) {
+  return Number(toAccountDateTime(account.startedAt)?.getTime() || 0);
+}
+
+function findAccountForLookup(db, auth, email = "") {
+  const key = normalizeEmailKey(email);
+  if (!key) return null;
+  return visibleManagedAccountsForAuth(db, auth)
+    .filter(isNetflixManagedAccount)
+    .filter((item) => normalizeEmailKey(item.email) === key)
+    .sort((a, b) => {
+      const aStatus = accountStatusFromDate(a.expiresAt, a.durationDays);
+      const bStatus = accountStatusFromDate(b.expiresAt, b.durationDays);
+      const aActive = a.status !== "replaced" && a.status !== "disabled" && aStatus !== "expired" ? 1 : 0;
+      const bActive = b.status !== "replaced" && b.status !== "disabled" && bStatus !== "expired" ? 1 : 0;
+      return bActive - aActive || accountStartedAtMs(b) - accountStartedAtMs(a);
+    })[0] || null;
+}
+
+function normalizeLookupPhone(value = "") {
+  return normalizeWhatsappNumber(value || "");
+}
+
+function findDisneyAccountForLookup(db, auth, target = "") {
+  const key = normalizeLookupPhone(target);
+  if (!key) return null;
+  return visibleManagedAccountsForAuth(db, auth)
+    .filter(isDisneyManagedAccount)
+    .filter((item) => normalizeLookupPhone(item.loginPhone || item.email || "") === key)
+    .sort((a, b) => {
+      const aStatus = accountStatusFromDate(a.expiresAt, a.durationDays);
+      const bStatus = accountStatusFromDate(b.expiresAt, b.durationDays);
+      const aActive = a.status !== "replaced" && a.status !== "disabled" && aStatus !== "expired" ? 1 : 0;
+      const bActive = b.status !== "replaced" && b.status !== "disabled" && bStatus !== "expired" ? 1 : 0;
+      return bActive - aActive || accountStartedAtMs(b) - accountStartedAtMs(a);
+    })[0] || null;
+}
+
+function historicalAccountForLookup(db, auth, email = "") {
+  const key = normalizeEmailKey(email);
+  if (!key || auth?.role !== "reseller") return null;
+  const reseller = authReseller(db, auth);
+  if (!reseller) return null;
+  const resellerWhatsapp = primaryResellerWhatsapp(reseller);
+  const ownedStockIds = ownedStockIdsForReseller(db, auth);
+  return (db.managedAccounts || [])
+    .filter((item) => normalizeEmailKey(item.email) === key)
+    .filter((item) => managedAccountBelongsToReseller(db, auth, item, { reseller, resellerWhatsapp, ownedStockIds }))
+    .sort((a, b) => accountStartedAtMs(b) - accountStartedAtMs(a))[0] || null;
+}
+
+function historicalDisneyAccountForLookup(db, auth, target = "") {
+  const key = normalizeLookupPhone(target);
+  if (!key || auth?.role !== "reseller") return null;
+  const reseller = authReseller(db, auth);
+  if (!reseller) return null;
+  const resellerWhatsapp = primaryResellerWhatsapp(reseller);
+  const ownedStockIds = ownedStockIdsForReseller(db, auth);
+  return (db.managedAccounts || [])
+    .filter(isDisneyManagedAccount)
+    .filter((item) => normalizeLookupPhone(item.loginPhone || item.email || "") === key)
+    .filter((item) => managedAccountBelongsToReseller(db, auth, item, { reseller, resellerWhatsapp, ownedStockIds }))
+    .sort((a, b) => accountStartedAtMs(b) - accountStartedAtMs(a))[0] || null;
+}
+
+function inactiveLookupResult(account, type = "") {
+  const reason = account?.status === "replaced"
+    ? "account_replaced"
+    : account?.status === "disabled"
+      ? "account_disabled"
+      : account?.returnedToStockAt || account?.hidden
+        ? "account_archived"
+        : "account_expired";
+  const error = reason === "account_replaced"
+    ? "Akun sudah replaced, lookup kode tidak aktif."
+    : reason === "account_disabled"
+      ? "Akun sudah nonaktif, lookup kode tidak aktif."
+      : reason === "account_archived"
+        ? "Akun ini sudah tidak aktif dan sudah dipindahkan dari akses reseller aktif."
+        : "Akun sudah expired, lookup kode tidak aktif.";
+  return {
+    source: "history",
+    kind: ["reset", "household"].includes(type) ? "link" : "code",
+    value: "",
+    reason,
+    error,
+  };
+}
+
+function gmailOAuthState() {
+  const createdAt = Date.now();
+  const payload = `${createdAt}`;
+  return `${payload}.${crypto.createHmac("sha256", authSecret()).update(payload).digest("base64url")}`;
+}
+
+function verifyGmailOAuthState(state) {
+  const [payload, signature] = String(state || "").split(".");
+  if (!payload || !signature) return false;
+  const expected = crypto.createHmac("sha256", authSecret()).update(payload).digest("base64url");
+  if (expected !== signature) return false;
+  return Date.now() - Number(payload) < 10 * 60 * 1000;
+}
+
+function gmailOAuthConfigured(db) {
+  const settings = ownerIntegrationSettings(db);
+  return Boolean(settings.gmail.clientId && settings.gmail.clientSecret && settings.gmail.redirectUri);
+}
+
+function isGmailOAuthInvalidError(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  return message.includes("expired or revoked") || message.includes("invalid_grant") || message.includes("token has been expired") || message.includes("token has been revoked");
+}
+
+function gmailConnectionInfo(db) {
+  const settings = ownerIntegrationSettings(db);
+  const imapConfigured = gmailImapConfigured(db);
+  const oauthConfigured = gmailOAuthConfigured(db);
+  const mode = imapConfigured ? "imap" : "oauth";
+  const configured = imapConfigured || oauthConfigured;
+  const hasToken = Boolean(firstUsableSecret(db.settings?.gmailRefreshToken, process.env.GMAIL_REFRESH_TOKEN));
+  const invalid = String(db.settings?.gmailOAuthStatus || "").toLowerCase() === "invalid";
+  return {
+    configured,
+    mode,
+    connected: imapConfigured ? true : oauthConfigured && hasToken && !invalid,
+    needsOAuth: imapConfigured ? false : oauthConfigured && (!hasToken || invalid),
+    error: imapConfigured ? "" : invalid ? String(db.settings?.gmailLastError || "OAuth Gmail perlu disambungkan ulang") : "",
+  };
+}
+
+function gmailImapConfigured(db) {
+  const settings = ownerIntegrationSettings(db);
+  return Boolean(settings.gmail.imapHost && settings.gmail.imapPort && settings.gmail.imapUser && settings.gmail.imapPassword);
+}
+
+function gmailLookupMode(db) {
+  const settings = ownerIntegrationSettings(db);
+  if (gmailImapConfigured(db)) return "imap";
+  if (settings.gmail.mode === "oauth" && gmailOAuthConfigured(db) && firstUsableSecret(db.settings?.gmailRefreshToken, process.env.GMAIL_REFRESH_TOKEN)) return "oauth";
+  if (gmailOAuthConfigured(db) && firstUsableSecret(db.settings?.gmailRefreshToken, process.env.GMAIL_REFRESH_TOKEN)) return "oauth";
+  return "";
+}
+
+async function validateGmailConnectionForStatus(db) {
+  if (gmailImapConfigured(db)) return;
+  if (!gmailOAuthConfigured(db)) return;
+  const refreshToken = firstUsableSecret(db.settings?.gmailRefreshToken, process.env.GMAIL_REFRESH_TOKEN);
+  if (!refreshToken) return;
+  try {
+    await gmailAccessToken(db);
+    db.settings = db.settings || {};
+    if (String(db.settings.gmailOAuthStatus || "").toLowerCase() === "invalid") {
+      db.settings.gmailOAuthStatus = "connected";
+      db.settings.gmailLastError = "";
+      db.settings.gmailLastErrorAt = "";
+    }
+  } catch (error) {
+    if (error?.oauthInvalid || isGmailOAuthInvalidError(error)) {
+      db.settings = db.settings || {};
+      db.settings.gmailOAuthStatus = "invalid";
+      db.settings.gmailLastError = error.message || "OAuth Gmail perlu disambungkan ulang";
+      db.settings.gmailLastErrorAt = nowText();
+    }
+  }
+}
+
+async function gmailAccessToken(db) {
+  const settings = ownerIntegrationSettings(db);
+  const refreshToken = firstUsableSecret(db.settings?.gmailRefreshToken, process.env.GMAIL_REFRESH_TOKEN);
+  if (!settings.gmail.clientId || !settings.gmail.clientSecret || !refreshToken) return null;
+
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: settings.gmail.clientId,
+      client_secret: settings.gmail.clientSecret,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.access_token) {
+    const error = new Error(payload.error_description || payload.error || "Gmail OAuth perlu disambungkan ulang");
+    if (isGmailOAuthInvalidError(error)) error.oauthInvalid = true;
+    throw error;
+  }
+  return payload.access_token;
+}
+
+function decodeBase64Url(data = "") {
+  const normalized = String(data || "").replace(/-/g, "+").replace(/_/g, "/");
+  return Buffer.from(normalized, "base64").toString("utf8");
+}
+
+function htmlToText(value = "") {
+  return String(value || "")
+    .replace(/<(?:blockquote|div|table|tr|td|tbody|thead|tfoot|section|article|aside|font|span|p)[^>]*(?:gmail_quote|gmail_extra|protonmail_quote|outlook_message_header|MsoQuote|yahoo_quoted|apple-mail-quote|gmail_attr)[^>]*>[\s\S]*?<\/(?:blockquote|div|table|tr|td|tbody|thead|tfoot|section|article|aside|font|span|p)>/gi, " ")
+    .replace(/<blockquote[\s\S]*?<\/blockquote>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#x([0-9a-f]+);/gi, (_match, code) => String.fromCodePoint(Number.parseInt(code, 16)))
+    .replace(/&#(\d+);/g, (_match, code) => String.fromCodePoint(Number.parseInt(code, 10)))
+    .replace(/[\u034F\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n\s+/g, "\n")
+    .trim();
+}
+
+function collectGmailBodyParts(payload, acc = []) {
+  if (!payload) return acc;
+  if (payload.body?.data) {
+    acc.push({
+      mimeType: payload.mimeType || "",
+      text: decodeBase64Url(payload.body.data),
+    });
+  }
+  for (const part of payload.parts || []) {
+    collectGmailBodyParts(part, acc);
+  }
+  return acc;
+}
+
+function gmailHeader(message, name) {
+  return (message.payload?.headers || []).find((header) => String(header.name || "").toLowerCase() === name.toLowerCase())?.value || "";
+}
+
+function trimQuotedEmailText(text = "") {
+  const lines = String(text || "")
+    .replace(/\r/g, "")
+    .split("\n");
+  const cleaned = [];
+  for (const line of lines) {
+    if (/^\s*(?:>+|on .+ wrote:|wrote:|-----original message-----|----- forwarded message -----|original message|forwarded message|from:\s|sent:\s|to:\s|subject:\s|gmail_quote|show quoted text|see more|view entire message)/i.test(line)) break;
+    cleaned.push(line);
+  }
+  return cleaned.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function gmailMessageText(message) {
+  const parts = collectGmailBodyParts(message.payload || {});
+  const html = parts.filter((part) => part.mimeType.includes("html")).map((part) => part.text).join("\n");
+  const plain = parts.filter((part) => part.mimeType.includes("plain")).map((part) => part.text).join("\n");
+  const htmlText = trimQuotedEmailText(htmlToText(html));
+  const plainText = trimQuotedEmailText(plain);
+  return {
+    html,
+    htmlText,
+    text: [htmlText, plainText].filter(Boolean).join("\n"),
+  };
+}
+
+function decodeQuotedPrintable(value = "") {
+  return String(value || "")
+    .replace(/=\r?\n/g, "")
+    .replace(/=([0-9A-F]{2})/gi, (_match, hex) => String.fromCharCode(Number.parseInt(hex, 16)));
+}
+
+function decodeMimeWord(value = "") {
+  return String(value || "").replace(/=\?([^?]+)\?([BQ])\?([^?]+)\?=/gi, (_match, charset, encoding, encoded) => {
+    try {
+      const normalizedCharset = String(charset || "utf-8").toLowerCase();
+      const bytes = String(encoding).toUpperCase() === "B"
+        ? Buffer.from(encoded, "base64")
+        : Buffer.from(decodeQuotedPrintable(String(encoded).replace(/_/g, " ")), "binary");
+      if (normalizedCharset.includes("utf") || normalizedCharset.includes("ascii")) return bytes.toString("utf8");
+      if (normalizedCharset.includes("iso-8859-1") || normalizedCharset.includes("latin")) return bytes.toString("latin1");
+      return bytes.toString("utf8");
+    } catch {
+      return _match;
+    }
+  });
+}
+
+function parseRawEmailHeaders(raw = "") {
+  const headerText = String(raw || "").split(/\r?\n\r?\n/)[0] || "";
+  const unfolded = headerText.replace(/\r?\n[ \t]+/g, " ");
+  return unfolded
+    .split(/\r?\n/)
+    .map((line) => {
+      const separator = line.indexOf(":");
+      if (separator === -1) return null;
+      return {
+        name: line.slice(0, separator).trim(),
+        value: decodeMimeWord(line.slice(separator + 1).trim()),
+      };
+    })
+    .filter(Boolean);
+}
+
+function rawEmailBody(raw = "") {
+  const text = String(raw || "");
+  const separator = text.search(/\r?\n\r?\n/);
+  if (separator === -1) return text;
+  return text.slice(separator).trim();
+}
+
+function headerValue(headers = [], name = "") {
+  return headers.find((header) => header.name.toLowerCase() === String(name || "").toLowerCase())?.value || "";
+}
+
+function parseContentType(value = "") {
+  const source = String(value || "");
+  const mimeType = (source.split(";")[0] || "text/plain").trim().toLowerCase();
+  const boundary = source.match(/boundary=(?:"([^"]+)"|([^;\s]+))/i)?.[1]
+    || source.match(/boundary=(?:"([^"]+)"|([^;\s]+))/i)?.[2]
+    || "";
+  return { mimeType, boundary };
+}
+
+function splitMimeMultipart(body = "", boundary = "") {
+  if (!boundary) return [];
+  const lines = String(body || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  const marker = `--${boundary}`;
+  const parts = [];
+  let current = null;
+  for (const line of lines) {
+    if (line === marker || line === `${marker}--`) {
+      if (current) parts.push(current.join("\n").trim());
+      current = line === `${marker}--` ? null : [];
+      if (line === `${marker}--`) break;
+      continue;
+    }
+    if (current) current.push(line);
+  }
+  if (current?.length) parts.push(current.join("\n").trim());
+  return parts.filter(Boolean);
+}
+
+function decodeMimeBody(body = "", encoding = "") {
+  const normalized = String(body || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  if (/base64/i.test(encoding)) {
+    try {
+      return Buffer.from(normalized.replace(/\s+/g, ""), "base64").toString("utf8");
+    } catch {
+      return normalized;
+    }
+  }
+  const decoded = /quoted-printable/i.test(encoding) || /=\r?\n|=[0-9A-F]{2}/i.test(normalized)
+    ? decodeQuotedPrintable(normalized)
+    : normalized;
+  return decoded.replace(/\n{3,}/g, "\n\n");
+}
+
+function collectRawEmailTextParts(raw = "", acc = { html: [], plain: [] }) {
+  const headers = parseRawEmailHeaders(raw);
+  const body = rawEmailBody(raw);
+  const { mimeType, boundary } = parseContentType(headerValue(headers, "content-type"));
+  if (mimeType.startsWith("multipart/")) {
+    for (const part of splitMimeMultipart(body, boundary)) {
+      collectRawEmailTextParts(part, acc);
+    }
+    return acc;
+  }
+
+  const encoding = headerValue(headers, "content-transfer-encoding");
+  const decoded = decodeMimeBody(body, encoding);
+  if (mimeType.includes("html")) {
+    acc.html.push(decoded);
+  } else if (mimeType.includes("plain") || !mimeType || mimeType === "text/plain") {
+    acc.plain.push(decoded);
+  }
+  return acc;
+}
+
+function imapRawToGmailMessage(raw = "", uid = "", internalDate = "") {
+  const headers = parseRawEmailHeaders(raw);
+  const parts = collectRawEmailTextParts(raw);
+  const html = parts.html.join("\n");
+  const plain = parts.plain.join("\n");
+  const payloadParts = [];
+  if (html) {
+    payloadParts.push({
+      mimeType: "text/html",
+      body: { data: Buffer.from(html).toString("base64url") },
+    });
+  }
+  if (plain) {
+    payloadParts.push({
+      mimeType: "text/plain",
+      body: { data: Buffer.from(plain).toString("base64url") },
+    });
+  }
+  const htmlText = trimQuotedEmailText(htmlToText(html));
+  const plainText = trimQuotedEmailText(plain);
+  const fallbackBody = html || plain || decodeMimeBody(rawEmailBody(raw), headerValue(headers, "content-transfer-encoding"));
+  return {
+    id: String(uid || ""),
+    snippet: [htmlText, plainText].filter(Boolean).join("\n").slice(0, 500),
+    internalDate: internalDate ? String(new Date(internalDate).getTime()) : "",
+    payload: {
+      mimeType: payloadParts.length > 1 ? "multipart/alternative" : payloadParts[0]?.mimeType || "text/plain",
+      headers,
+      body: payloadParts.length ? {} : { data: Buffer.from(fallbackBody).toString("base64url") },
+      parts: payloadParts,
+    },
+  };
+}
+
+const unicodeDigitRanges = [
+  [0xff10, 0xff19], // Fullwidth
+  [0x0660, 0x0669], // Arabic-Indic
+  [0x06f0, 0x06f9], // Eastern Arabic / Persian
+  [0x0966, 0x096f], // Devanagari
+  [0x09e6, 0x09ef], // Bengali
+  [0x0e50, 0x0e59], // Thai
+  [0x0ed0, 0x0ed9], // Lao
+  [0x1040, 0x1049], // Myanmar
+];
+
+function normalizeUnicodeDigits(value = "") {
+  return String(value || "").replace(
+    /[\uFF10-\uFF19\u0660-\u0669\u06F0-\u06F9\u0966-\u096F\u09E6-\u09EF\u0E50-\u0E59\u0ED0-\u0ED9\u1040-\u1049]/g,
+    (char) => {
+      const codePoint = char.codePointAt(0);
+      const range = unicodeDigitRanges.find(([start, end]) => codePoint >= start && codePoint <= end);
+      return range ? String(codePoint - range[0]) : char;
+    },
+  );
+}
+
+function normalizeAccessText(value = "") {
+  return normalizeUnicodeDigits(value).replace(/[\u200B-\u200D\uFEFF]/g, "");
+}
+
+function normalizeAccessCode(value = "") {
+  return normalizeAccessText(value).replace(/[\s-]+/g, "").trim();
+}
+
+function expectedCodeLengths(expectedLength) {
+  const values = Array.isArray(expectedLength) ? expectedLength : [expectedLength];
+  return new Set(values.map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0));
+}
+
+function isLikelyAccessCode(value = "", acceptedLengths = new Set()) {
+  const code = normalizeAccessCode(value).toUpperCase();
+  if (!code || !acceptedLengths.has(code.length)) return false;
+  if (!/\d/.test(code)) return false;
+  if (!/^[A-Z0-9]+$/.test(code)) return false;
+  const ignoredWords = new Set([
+    "YOUR",
+    "KODE",
+    "CODE",
+    "LINK",
+    "GET",
+    "LOGIN",
+    "RESET",
+    "HOUSE",
+    "EMAIL",
+    "AKUN",
+    "SANDI",
+    "PIN",
+  ]);
+  return !ignoredWords.has(code);
+}
+
+function findAccessCodesInText(text = "", acceptedLengths = new Set()) {
+  const source = normalizeAccessText(text);
+  return Array.from(source.matchAll(/(?:^|[^A-Z0-9])((?:[A-Z0-9][\s-]*){4,10})(?:[^A-Z0-9]|$)/gi))
+    .map((match) => normalizeAccessCode(match[1]))
+    .filter((code) => isLikelyAccessCode(code, acceptedLengths));
+}
+
+function findDigitAccessCodesInText(text = "", acceptedLengths = new Set()) {
+  const source = normalizeAccessText(text);
+  return Array.from(source.matchAll(/(?:^|[^\d])((?:\d[\s-]*){4,8})(?:[^\d]|$)/g))
+    .map((match) => normalizeAccessCode(match[1]))
+    .filter((code) => isLikelyAccessCode(code, acceptedLengths));
+}
+
+function extractNearbyCode(text, hints, expectedLength) {
+  const source = normalizeAccessText(text);
+  const acceptedLengths = expectedCodeLengths(expectedLength);
+  for (const hint of hints) {
+    const normalizedHint = normalizeAccessText(hint).toLowerCase();
+    const index = source.toLowerCase().indexOf(normalizedHint);
+    if (index === -1) continue;
+    const area = source.slice(Math.max(0, index - 260), index + 360);
+    const spaced = findDigitAccessCodesInText(area, acceptedLengths)
+      .find((code) => isLikelyAccessCode(code, acceptedLengths));
+    if (spaced) return spaced;
+    const nearby = findAccessCodesInText(area, acceptedLengths)
+      .find((code) => isLikelyAccessCode(code, acceptedLengths));
+    if (nearby) return nearby;
+    const alnum = Array.from(area.matchAll(/(?:code|kode|verification|sign[-\s]?in)[\s\S]{0,80}?([A-Z0-9]{4,10})/gi))
+      .map((match) => normalizeAccessCode(match[1]))
+      .find((code) => isLikelyAccessCode(code, acceptedLengths));
+    if (alnum) return alnum;
+  }
+  return "";
+}
+
+function extractNetflixSigninCode(text = "") {
+  const source = String(text || "");
+  const acceptedLengths = expectedCodeLengths(4);
+  const titlePattern = /(?:masukkan\s+kode\s+ini\s+untuk\s+masuk|enter\s+this\s+code\s+to\s+sign\s+in)/gi;
+  const titleMatches = Array.from(source.matchAll(titlePattern));
+  for (let index = titleMatches.length - 1; index >= 0; index -= 1) {
+    const titleMatch = titleMatches[index];
+    const afterTitle = source.slice((titleMatch.index || 0) + titleMatch[0].length, (titleMatch.index || 0) + titleMatch[0].length + 260);
+    const lines = afterTitle
+      .split(/\r?\n/)
+      .map((line) => normalizeAccessCode(line))
+      .filter(Boolean);
+    const directLine = lines.find((line) => isLikelyAccessCode(line, acceptedLengths));
+    if (directLine) return directLine;
+    const directCode = findDigitAccessCodesInText(afterTitle, acceptedLengths)
+      .find((code) => isLikelyAccessCode(code, acceptedLengths));
+    if (directCode) return directCode;
+  }
+  const patterns = [
+    /(?:enter\s+this\s+code\s+to\s+sign\s+in|masukkan\s+kode\s+(?:di\s+atas\s+)?(?:di\s+)?(?:perangkatmu|perangkat|device))[\s\S]{0,260}?((?:\d[\s-]*){4})/i,
+    /((?:\d[\s-]*){4})[\s\S]{0,260}?(?:masukkan\s+kode\s+(?:di\s+atas\s+)?(?:di\s+)?(?:perangkatmu|perangkat|device)|untuk\s+masuk\s+ke\s+netflix|enter\s+this\s+code\s+to\s+sign\s+in|enter\s+this\s+code\s+on)/i,
+    /(?:kode\s+masuk(?:mu)?|sign[-\s]?in\s+code|login\s+code|kode\s+login)[^\d]{0,260}?((?:\d[\s-]*){4})/i,
+  ];
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    const code = normalizeAccessCode(match?.[1] || "");
+    if (isLikelyAccessCode(code, acceptedLengths)) return code;
+  }
+  const hints = ["kode masukmu", "kode masuk", "kode login", "untuk masuk ke netflix", "masukkan kode di atas", "enter this code to sign in"];
+  return extractNearbyCode(source, hints, 4);
+}
+
+function extractNetflixVerificationCode(text = "") {
+  const source = String(text || "");
+  const acceptedLengths = expectedCodeLengths(6);
+  const headlinePattern = /(?:verifikasi\s+dengan\s+kode\s+ini|verify\s+with\s+this\s+code)/gi;
+  const headlineMatches = Array.from(source.matchAll(headlinePattern));
+  for (let index = headlineMatches.length - 1; index >= 0; index -= 1) {
+    const match = headlineMatches[index];
+    const afterTitle = source.slice((match.index || 0) + match[0].length, (match.index || 0) + match[0].length + 260);
+    const lines = afterTitle
+      .split(/\r?\n/)
+      .map((line) => normalizeAccessCode(line))
+      .filter(Boolean);
+    const directLine = lines.find((line) => isLikelyAccessCode(line, acceptedLengths));
+    if (directLine) return directLine;
+    const directCode = findDigitAccessCodesInText(afterTitle, acceptedLengths)
+      .find((code) => isLikelyAccessCode(code, acceptedLengths));
+    if (directCode) return directCode;
+  }
+  const patterns = [
+    /(?:verifikasi\s+dengan\s+kode\s+ini|verify\s+with\s+this\s+code)[^\d]{0,220}?((?:\d[\s-]*){6})/i,
+    /(?:kode\s+verifikasi|verification\s+code|kode\s+keamanan|security\s+code)[^\d]{0,180}?((?:\d[\s-]*){6})/i,
+    /((?:\d[\s-]*){6})[\s\S]{0,260}?(?:kode\s+ini\s+akan\s+(?:kedaluwarsa|kadaluarsa|berakhir)|you(?:'|\u2019)?ll\s+have\s+15\s+minutes|kode\s+verifikasi|verification\s+code|kedaluwarsa|kadaluarsa|expires?|valid)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    const code = normalizeAccessCode(match?.[1] || "");
+    if (isLikelyAccessCode(code, acceptedLengths)) return code;
+  }
+  const hints = ["verifikasi dengan kode ini", "verify with this code", "kode ini akan kedaluwarsa", "kode verifikasi. kedaluwarsa", "verification code. expires", "kode verifikasi", "verification code", "kode keamanan", "security code"];
+  return extractNearbyCode(source, hints, 6);
+}
+
+function stripAccessUrlTail(value = "") {
+  let output = String(value || "")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .trim();
+
+  for (let index = 0; index < 8; index += 1) {
+    const before = output;
+    output = output
+      .replace(/(?:%5D|%29|%7D|%3E|%22|%27|%2C|%2E|%3B|%0A|%0D)+$/gi, "")
+      .replace(/(?:\]\)|\]\}|\)\]|\]\]|&gt;)+$/gi, "")
+      .replace(/[\]\)}>"',.;]+$/g, "")
+      .trim();
+    if (output === before) break;
+  }
+
+  const firstWhitespace = output.search(/\s/);
+  if (firstWhitespace > -1) output = output.slice(0, firstWhitespace);
+  return output
+    .replace(/(?:%5D|%29|%7D|%3E|\]|\)|\})+$/gi, "")
+    .trim();
+}
+
+function decodeAccessHtmlEntities(value = "") {
+  return String(value || "")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#x([0-9a-f]+);/gi, (_match, hex) => {
+      const code = Number.parseInt(hex, 16);
+      return Number.isFinite(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : "";
+    })
+    .replace(/&#(\d+);/g, (_match, num) => {
+      const code = Number.parseInt(num, 10);
+      return Number.isFinite(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : "";
+    });
+}
+
+function decodeAccessEscapes(value = "") {
+  return String(value || "")
+    .replace(/\\u([0-9a-f]{4})/gi, (_match, hex) => String.fromCharCode(Number.parseInt(hex, 16)))
+    .replace(/\\x([0-9a-f]{2})/gi, (_match, hex) => String.fromCharCode(Number.parseInt(hex, 16)));
+}
+
+function unwrapAccessRedirectUrl(value = "") {
+  const url = String(value || "").trim();
+  try {
+    const parsed = new URL(url);
+    const isRedirectHost = /(^|\.)google\.[a-z.]+$|(^|\.)googleusercontent\.com$|(^|\.)youtube\.com$/i.test(parsed.hostname);
+    const nested = parsed.searchParams.get("url") || parsed.searchParams.get("q") || parsed.searchParams.get("u");
+    if (isRedirectHost && nested && /^https?:\/\//i.test(nested)) return nested;
+  } catch {
+    // keep original URL when it is not a redirect wrapper
+  }
+  return url;
+}
+
+function decodeAccessUrl(value = "") {
+  const compact = decodeAccessEscapes(decodeAccessHtmlEntities(String(value || "")))
+    .replace(/=\r?\n/g, "")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\s+/g, "")
+    .trim();
+  const decoded = stripAccessUrlTail(decodeAccessHtmlEntities(decodeAccessEscapes(decodeQuotedPrintable(compact))));
+  const unwrapped = unwrapAccessRedirectUrl(decoded);
+  return stripAccessUrlTail(unwrapped);
+}
+
+function strongestAccessUrl(urls = [], predicate = () => true) {
+  const clean = Array.from(new Set(urls.map((url) => decodeAccessUrl(url)).filter((url) => /^https?:\/\//i.test(url))));
+  return clean
+    .filter(predicate)
+    .sort((a, b) => b.length - a.length)[0] || "";
+}
+
+function accessAnchorLinksFromMessage(html = "") {
+  return Array.from(String(html || "").matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi))
+    .map((match) => ({
+      url: decodeAccessUrl(match[1]),
+      text: htmlToText(match[2]),
+    }))
+    .filter((link) => /^https?:\/\//i.test(link.url));
+}
+
+function accessLinksFromMessage(html = "", combined = "") {
+  const anchorLinks = accessAnchorLinksFromMessage(html);
+  const priorityLinks = anchorLinks
+    .filter((link) => /dapatkan\s+kode|get\s+(?:the\s+)?code|access\s+code|kode|reset\s+password|password\s+reset|atur\s+ulang\s+(?:kata\s+)?sandi|ubah\s+(?:kata\s+)?sandi|ganti\s+(?:kata\s+)?sandi|change\s+password/i.test(link.text))
+    .map((link) => link.url);
+  const hrefs = anchorLinks.map((link) => link.url);
+  const textUrls = Array.from(String(combined || "").matchAll(/https?:\/\/[^\s<>"']+/gi)).map((match) => decodeAccessUrl(match[0]));
+  return Array.from(new Set([...priorityLinks, ...hrefs, ...textUrls])).filter((url) => /^https?:\/\//i.test(url));
+}
+
+function pickAccessLink(links, keywords, allowFallback = false) {
+  const ignored = /helpcenter|help\.netflix|privacy|terms|unsubscribe|notification|preference|support/i;
+  const cleanLinks = links.filter((url) => !ignored.test(url));
+  const matched = strongestAccessUrl(cleanLinks, (url) => keywords.some((keyword) => url.toLowerCase().includes(keyword)));
+  return matched || (allowFallback ? strongestAccessUrl(cleanLinks) : "") || "";
+}
+
+function isNetflixResetPasswordUrl(url = "") {
+  const value = String(url || "").trim();
+  try {
+    const parsed = new URL(value);
+    const hostOk = /(?:^|\.)netflix\.com$/i.test(parsed.hostname);
+    const pathOk = /^\/password\/?$/i.test(parsed.pathname);
+    const tokenOk = parsed.searchParams.has("nftoken") || /[?&]nftoken=/i.test(value);
+    return hostOk && pathOk && tokenOk;
+  } catch {
+    return /^https?:\/\/(?:www\.)?netflix\.com\/password\b/i.test(value) && /[?&]nftoken=/i.test(value);
+  }
+}
+
+function pickResetPasswordLink(html = "", combined = "") {
+  const resetText = /reset\s+(?:your\s+)?password|password\s+reset|atur\s+ulang\s+(?:kata\s+)?sandi|mengatur\s+ulang\s+(?:kata\s+)?sandi|set\s+a\s+new\s+password|forgot\s+(?:your\s+)?password/i;
+  const buttonLinks = accessAnchorLinksFromMessage(html)
+    .filter((link) => resetText.test(link.text) && isNetflixResetPasswordUrl(link.url))
+    .map((link) => decodeAccessUrl(link.url))
+    .filter((url) => isNetflixResetPasswordUrl(url));
+  if (buttonLinks.length) return strongestAccessUrl(buttonLinks, isNetflixResetPasswordUrl);
+
+  const otherLinks = accessLinksFromMessage(html, combined)
+    .map((url) => decodeAccessUrl(url))
+    .filter((url) => isNetflixResetPasswordUrl(url));
+  return strongestAccessUrl(otherLinks, isNetflixResetPasswordUrl);
+}
+
+function extractNetflixPageHouseholdCode(body = "") {
+  const text = htmlToText(body);
+  const compact = [text, String(body || "").replace(/<[^>]+>/g, " ")].join("\n");
+  const patterns = [
+    /(?:gunakan|masukkan|enter|use)\s+(?:kode|code)[\s\S]{0,220}?((?:\d[\s-]*){4})/i,
+    /((?:\d[\s-]*){4})[\s\S]{0,80}(?:kode\s+ini\s+akan|this\s+code\s+(?:will\s+)?(?:expire|expires)|kedaluwarsa|expires?\s+in\s+15)/i,
+    /(?:temporary\s+access\s+code|kode\s+akses\s+sementara)[\s\S]{0,260}?((?:\d[\s-]*){4})/i,
+  ];
+  const acceptedLengths = expectedCodeLengths(4);
+  for (const pattern of patterns) {
+    const match = compact.match(pattern);
+    const code = normalizeAccessCode(match?.[1] || "");
+    if (isLikelyAccessCode(code, acceptedLengths)) return code;
+  }
+  return "";
+}
+
+async function fetchNetflixHouseholdCode(url = "") {
+  const link = String(url || "").trim();
+  if (!/^https?:\/\/(?:www\.)?netflix\.com\//i.test(link)) return "";
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 9000);
+  try {
+    const response = await fetch(link, {
+      redirect: "follow",
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+      },
+    });
+    const body = await response.text().catch(() => "");
+    return extractNetflixPageHouseholdCode(body);
+  } catch {
+    return "";
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function extractExplicitHouseholdEmailCode(text = "") {
+  const acceptedLengths = expectedCodeLengths(4);
+  const source = normalizeAccessText(text);
+  const patterns = [
+    /(?:kode|code)\s*(?:akses|access)?\s*[:\-]\s*((?:\d[\s-]*){4})/i,
+    /(?:kode\s+ini|this\s+code\s+is)\s*[:\-]?\s*((?:\d[\s-]*){4})/i,
+  ];
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    const code = normalizeAccessCode(match?.[1] || "");
+    if (isLikelyAccessCode(code, acceptedLengths)) return code;
+  }
+  return "";
+}
+
+function extractFirstAccessCode(text = "", expectedLength) {
+  const source = normalizeAccessText(text);
+  const acceptedLengths = expectedCodeLengths(expectedLength);
+  const directLine = source
+    .split(/\r?\n/)
+    .map((line) => normalizeAccessCode(line))
+    .find((code) => isLikelyAccessCode(code, acceptedLengths));
+  if (directLine) return directLine;
+  return (
+    findDigitAccessCodesInText(source, acceptedLengths).find((code) => isLikelyAccessCode(code, acceptedLengths)) ||
+    findAccessCodesInText(source, acceptedLengths).find((code) => isLikelyAccessCode(code, acceptedLengths)) ||
+    ""
+  );
+}
+
+function extractCodeFromLabeledMessage(text = "", hints = [], expectedLength) {
+  return extractNearbyCode(text, hints, expectedLength) || extractFirstAccessCode(text, expectedLength);
+}
+
+function isNetflixAccount(account = {}) {
+  return /netflix|net\b|nf\b/i.test([account.product, account.productName, account.variant, account.variantCode, account.variantName, account.productId, account.variantId].join(" "));
+}
+
+function isNetflixMessage(message, combined = "") {
+  const from = gmailHeader(message, "From");
+  return /netflix/i.test([from, gmailHeader(message, "Subject"), combined].join(" "));
+}
+
+const ACCOUNT_ACCESS_MAX_AGE_MS = 15 * 60 * 1000;
+const ACCOUNT_ACCESS_LINK_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const ACCOUNT_ACCESS_CLOCK_SKEW_MS = 2 * 60 * 1000;
+const accountAccessLookupInflight = new Map();
+
+function accountAccessMaxAgeMs(type = "") {
+  return ["reset", "household"].includes(String(type || "").toLowerCase())
+    ? ACCOUNT_ACCESS_LINK_MAX_AGE_MS
+    : ACCOUNT_ACCESS_MAX_AGE_MS;
+}
+
+function accountAccessCandidateWindowMs(type = "") {
+  return ["reset", "household"].includes(String(type || "").toLowerCase())
+    ? ACCOUNT_ACCESS_LINK_MAX_AGE_MS
+    : 20 * 60 * 1000;
+}
+
+function accountAccessLabelNames(type = "") {
+  const key = String(type || "").toLowerCase();
+  if (key === "signin") return ["NF_SIGNIN"];
+  if (key === "verification") return ["NF_VERIF"];
+  if (key === "reset") return ["NF_RESET"];
+  if (key === "household") return ["NF_HOUSE"];
+  if (key === "disney_otp") return ["DISNEY_CODE"];
+  return [];
+}
+
+function accountAccessTargetAddress(account = {}, type = "") {
+  if (String(type || "").toLowerCase() === "disney_otp") {
+    return String(account.otpEmail || account.email || "").trim().toLowerCase();
+  }
+  return String(account.email || "").trim().toLowerCase();
+}
+
+function isFreshAccountAccessMessage(dateMs = 0, nowMs = Date.now(), type = "") {
+  const value = Number(dateMs || 0);
+  if (!Number.isFinite(value) || value <= 0) return false;
+  return value >= nowMs - accountAccessMaxAgeMs(type) && value <= nowMs + ACCOUNT_ACCESS_CLOCK_SKEW_MS;
+}
+
+function hasFifteenMinuteExpiry(text = "") {
+  return /(?:kedaluwarsa|kadaluarsa|berakhir|expired|expires|valid)[\s\S]{0,60}(?:15\s*(?:mnt|menit|min|mins|minutes?))|(?:15\s*(?:mnt|menit|min|mins|minutes?))[\s\S]{0,60}(?:kedaluwarsa|kadaluarsa|berakhir|expired|expires|valid)/i.test(String(text || ""));
+}
+
+function isNetflixAccountChangeVerification(text = "") {
+  const source = String(text || "");
+  return /konfirmasikan\s+perubahan\s+akun|perubahan\s+akun(?:mu)?|mengubah\s+informasi\s+akun|kode\s+ini\s+untuk\s+mengonfirmasi|confirm(?:asikan)?\s+(?:perubahan|change)|change\s+(?:your\s+)?account|account\s+information|10\s*(?:menit|min|mins|minutes?)/i.test(source);
+}
+
+function isNetflixResetPasswordMessage(text = "") {
+  const source = String(text || "");
+  return /selesaikan\s+permintaan(?:mu)?\s+untuk\s+(?:mengatur|atur)\s+ulang\s+(?:kata\s+)?sandi|(?:ayo\s+)?atur\s+ulang\s+(?:kata\s+)?sandi|mengatur\s+ulang\s+(?:kata\s+)?sandi|reset\s+(?:your\s+)?password|password\s+reset|set\s+a\s+new\s+password|forgot\s+(?:your\s+)?password/i.test(source);
+}
+
+function isNetflixSecurityNoticeMessage(text = "") {
+  const source = String(text || "");
+  return /perangkat\s+baru\s+menggunakan\s+akun(?:mu)?|new\s+device\s+(?:is\s+)?using\s+your\s+account/i.test(source);
+}
+
+function isNetflixSigninMessage(text = "") {
+  const source = String(text || "");
+  return /enter\s+this\s+code\s+to\s+sign\s+in|your\s+sign[-\s]?in\s+code|kode\s+masuk(?:mu)?|masukkan\s+kode\s+(?:di\s+atas\s+)?(?:di\s+)?(?:perangkatmu|perangkat|device)[\s\S]{0,120}(?:masuk|netflix)|untuk\s+masuk\s+ke\s+netflix/i.test(source);
+}
+
+function isNetflixAccessVerification(text = "") {
+  const source = String(text || "");
+  return /verification\s+code\s*[.:]?\s*expires\s+in\s+15|verify\s+with\s+this\s+code|someone\s+is\s+trying\s+to\s+access\s+your\s+account|you(?:'|\u2019)ll\s+have\s+15\s+minutes|verifikasi\s+dengan\s+kode\s+ini|kode\s+verifikasi[\s\S]{0,90}15\s*(?:mnt|menit|min)|kode\s+ini\s+akan\s+(?:kedaluwarsa|kadaluarsa|berakhir)[\s\S]{0,80}15\s*(?:mnt|menit|min)|(?:seseorang|ada\s+yang)\s+(?:mencoba|ingin)\s+(?:mengakses|akses)\s+akun(?:mu| kamu)?/i.test(source);
+}
+
+function isNetflixHouseholdAccessMessage(text = "") {
+  const source = String(text || "");
+  if (isNetflixSigninMessage(source) || isNetflixAccessVerification(source) || isNetflixAccountChangeVerification(source)) return false;
+  return /kode\s+akses\s+sementara(?:mu| netflix-mu)?|temporary\s+access\s+code|akses\s+sementara\s+untuk\s+menonton\s+netflix|temporary\s+access\s+outside\s+your\s+netflix\s+household|outside\s+your\s+netflix\s+household|kode\s+ini\s+digunakan\s+saat\s+kamu\s+bepergian|kode\s+akses\s+sementara\s+dari\s+perangkat|we\s+received\s+a\s+request\s+for\s+a\s+temporary\s+access\s+code|kami\s+menerima\s+permintaan\s+kode\s+akses\s+sementara/i.test(source);
+}
+
+async function extractAccessValue(type, message, account = {}) {
+  const subject = gmailHeader(message, "Subject");
+  const { html, htmlText, text } = gmailMessageText(message);
+  const bodyVisible = htmlText || text;
+  const combined = [subject, text].join("\n");
+  const visibleCombined = [subject, bodyVisible].join("\n");
+  const extractionVisible = bodyVisible || combined;
+  const extractionText = text || combined;
+  const normalizedVisible = normalizeAccessText(extractionVisible);
+  const normalizedCombined = normalizeAccessText(combined);
+  const normalizedText = normalizeAccessText(extractionText);
+  const normalizedAll = normalizeAccessText([subject, bodyVisible, text].filter(Boolean).join("\n"));
+  if (type === "disney_otp") {
+    const source = [subject, bodyVisible, text].filter(Boolean).join("\n");
+    const sender = gmailHeader(message, "From");
+    if (!/disney/i.test(sender) && !/kode otp|kode otp anda|kata sandi verifikasi email anda|disney/i.test(source)) return null;
+    const code =
+      source.match(/\b(\d{4})\b/)?.[1]
+      || normalizedAll.match(/\b(\d{4})\b/)?.[1]
+      || "";
+    return code
+      ? { kind: "code", value: code, label: "Disney OTP 4 digit", score: /disney/i.test(source) ? 95 : 70 }
+      : null;
+  }
+  if (type === "reset") {
+    const preferred =
+      pickResetPasswordLink(html, extractionVisible) ||
+      pickResetPasswordLink(html, extractionText) ||
+      pickResetPasswordLink(html, combined);
+    return preferred ? { kind: "link", value: preferred, label: "Link reset password", score: 20 } : null;
+  }
+  if (type === "household") {
+    const preferred = pickAccessLink(
+      accessLinksFromMessage(html, extractionVisible).concat(accessLinksFromMessage(html, extractionText)),
+      ["household", "updatehousehold", "verify", "travel", "temporary", "simplesetup", "getcode"],
+      true,
+    );
+    if (preferred) {
+      const codeFromNetflix = await fetchNetflixHouseholdCode(preferred);
+      if (codeFromNetflix) {
+        return { kind: "code", value: codeFromNetflix, label: "Kode akses household", score: 95, resolvedFrom: "netflix_link" };
+      }
+      return { kind: "link", value: preferred, label: "Link household", score: 40 };
+    }
+    const explicitCode =
+      extractExplicitHouseholdEmailCode(normalizedCombined || combined) ||
+      extractFirstAccessCode(normalizedVisible || normalizedCombined || combined, 4);
+    return explicitCode ? { kind: "code", value: explicitCode, label: "Kode akses household", score: 50 } : null;
+  }
+  if (type === "verification") {
+    const source = normalizedAll || normalizedVisible || normalizedCombined;
+    if (isNetflixAccountChangeVerification(source)) return null;
+    if (/10\s*(?:menit|min|mins|minutes?)/i.test(source) && !hasFifteenMinuteExpiry(source)) return null;
+  }
+  const hints = type === "signin"
+    ? ["enter this code to sign in", "your sign-in code", "sign-in code", "sign in code", "kode masuk", "kode login", "login code"]
+    : ["kode verifikasi. kedaluwarsa", "verification code. expires", "kode verifikasi", "verification code", "kode keamanan", "security code", "verify"];
+  const expectedLength = type === "signin" ? 4 : 6;
+  const code =
+    (type === "signin" ? extractNetflixSigninCode(normalizedVisible) : extractNetflixVerificationCode(normalizedVisible)) ||
+    (type === "signin" ? extractNetflixSigninCode(normalizedText) : extractNetflixVerificationCode(normalizedText)) ||
+    (type === "signin" ? extractNetflixSigninCode(normalizedCombined) : extractNetflixVerificationCode(normalizedCombined)) ||
+    extractCodeFromLabeledMessage(normalizedVisible || normalizedCombined || extractionVisible || combined, hints, expectedLength);
+  return code
+    ? {
+        kind: "code",
+        value: code,
+        label: type === "verification" ? "Kode verifikasi 15 menit" : type === "signin" ? "Sign-in code 4 digit" : undefined,
+        score:
+          (type === "signin" ? 80 : 0) +
+          (type === "verification" ? 80 : 0) +
+          (isNetflixMessage(message, combined) ? 10 : 0),
+      }
+    : null;
+}
+
+async function lookupGmailAccessValue(db, account, type) {
+  const key = [
+    String(type || "").toLowerCase(),
+    String(account?.id || ""),
+    accountAccessTargetAddress(account, type),
+  ].join(":");
+  if (accountAccessLookupInflight.has(key)) return accountAccessLookupInflight.get(key);
+  const promise = lookupGmailAccessValueFresh(db, account, type).finally(() => {
+    accountAccessLookupInflight.delete(key);
+  });
+  accountAccessLookupInflight.set(key, promise);
+  return promise;
+}
+
+async function lookupGmailAccessValueFresh(db, account, type) {
+  const mode = gmailLookupMode(db);
+  if (mode === "imap") return lookupImapAccessValue(db, account, type);
+
+  const token = await gmailAccessToken(db);
+  if (!token) {
+    if (gmailImapConfigured(db)) return lookupImapAccessValue(db, account, type);
+    return { source: "fallback", reason: "gmail_not_connected", value: "" };
+  }
+
+  const email = accountAccessTargetAddress(account, type);
+  const labelQueries = accountAccessLabelNames(type).map((label) => `label:${label} to:${email} newer_than:2d`);
+  if (!labelQueries.length) return { source: "gmail", reason: "label_not_configured", value: "" };
+  const messageMap = new Map();
+  for (const query of labelQueries) {
+    const listUrl = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
+    listUrl.searchParams.set("q", query);
+    listUrl.searchParams.set("maxResults", "50");
+    listUrl.searchParams.set("includeSpamTrash", "true");
+
+    const listResponse = await fetch(listUrl, { headers: { Authorization: `Bearer ${token}` } });
+    const listPayload = await listResponse.json().catch(() => ({}));
+    if (!listResponse.ok) throw new Error(listPayload.error?.message || "Gmail lookup gagal");
+    for (const item of listPayload.messages || []) {
+      if (item?.id && !messageMap.has(item.id)) messageMap.set(item.id, item);
+    }
+  }
+
+  const messages = Array.from(messageMap.values());
+  const nowMs = Date.now();
+  const hydratedMessages = [];
+  for (const item of messages) {
+    const messageResponse = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${item.id}?format=full`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const message = await messageResponse.json().catch(() => ({}));
+    if (!messageResponse.ok) continue;
+    const dateMs = Number(message.internalDate || 0) || Date.parse(gmailHeader(message, "Date") || "") || 0;
+    if (!isFreshAccountAccessMessage(dateMs, nowMs, type)) continue;
+    hydratedMessages.push({
+      message,
+      dateMs,
+    });
+  }
+
+  hydratedMessages.sort((a, b) => Number(b.dateMs || 0) - Number(a.dateMs || 0));
+  const newestFreshDateMs = Number(hydratedMessages[0]?.dateMs || 0);
+  const candidateWindowMs = accountAccessCandidateWindowMs(type);
+
+  for (const item of hydratedMessages) {
+    if (newestFreshDateMs && Number(item.dateMs || 0) < newestFreshDateMs - candidateWindowMs) break;
+    const extracted = await extractAccessValue(type, item.message, account);
+    if (!extracted?.value) continue;
+    return {
+      source: "gmail",
+      messageId: item.message.id,
+      subject: gmailHeader(item.message, "Subject"),
+      from: gmailHeader(item.message, "From"),
+      date: gmailHeader(item.message, "Date"),
+      internalDate: item.message.internalDate || "",
+      dateMs: item.dateMs,
+      ...extracted,
+    };
+  }
+
+  if (gmailImapConfigured(db) && mode !== "imap") {
+    return lookupImapAccessValue(db, account, type);
+  }
+  return { source: "gmail", reason: "not_found", value: "" };
+}
+
+async function lookupImapAccessValue(db, account, type) {
+  const settings = ownerIntegrationSettings(db).gmail;
+  if (!gmailImapConfigured(db)) return { source: "fallback", reason: "imap_not_connected", value: "" };
+
+  const email = accountAccessTargetAddress(account, type);
+  if (!email) return { source: "gmail", reason: "missing_email", value: "" };
+
+  const client = new ImapFlow({
+    host: settings.imapHost,
+    port: settings.imapPort,
+    secure: settings.imapSecure,
+    auth: {
+      user: settings.imapUser,
+      pass: settings.imapPassword,
+    },
+    logger: false,
+  });
+
+  try {
+    await client.connect();
+    const mailboxes = accountAccessLabelNames(type);
+    const hydratedMessages = [];
+    const nowMs = Date.now();
+    const mailboxErrors = [];
+
+    for (const mailbox of mailboxes) {
+      let lock = null;
+      try {
+        lock = await client.getMailboxLock(mailbox);
+        const since = new Date(Date.now() - accountAccessMaxAgeMs(type) - 5 * 60 * 1000);
+        const matches = await client.search({ since }, { uid: true });
+        const uids = Array.from(matches || [])
+          .map((uid) => Number(uid))
+          .filter((uid) => Number.isFinite(uid))
+          .sort((a, b) => b - a)
+          .slice(0, 80);
+
+        for await (const item of client.fetch(uids, { uid: true, envelope: true, internalDate: true, source: true }, { uid: true })) {
+          const raw = Buffer.isBuffer(item.source) ? item.source.toString("utf8") : Buffer.from(item.source || "").toString("utf8");
+          const rawLower = raw.toLowerCase();
+          const envelopeTargets = [
+            ...(item.envelope?.to || []),
+            ...(item.envelope?.cc || []),
+            ...(item.envelope?.bcc || []),
+          ].map((address) => String(address?.address || "").toLowerCase());
+          if (!rawLower.includes(email) && !envelopeTargets.includes(email)) continue;
+          if (type !== "disney_otp" && isNetflixAccount(account) && !/netflix/i.test(raw)) continue;
+
+          const message = imapRawToGmailMessage(raw, item.uid, item.internalDate);
+          const dateMs = Number(message.internalDate || 0) || Date.parse(gmailHeader(message, "Date") || "") || 0;
+          if (!isFreshAccountAccessMessage(dateMs, nowMs, type)) continue;
+          hydratedMessages.push({
+            mailbox,
+            dateMs,
+            uid: String(item.uid || ""),
+            message,
+          });
+        }
+      } catch (error) {
+        mailboxErrors.push(`${mailbox}: ${error.message || "label tidak bisa dibuka"}`);
+      } finally {
+        if (lock) lock.release();
+      }
+    }
+
+    hydratedMessages.sort((a, b) => Number(b.dateMs || 0) - Number(a.dateMs || 0));
+    const newestFreshDateMs = Number(hydratedMessages[0]?.dateMs || 0);
+    const candidateWindowMs = accountAccessCandidateWindowMs(type);
+    for (const item of hydratedMessages) {
+      if (newestFreshDateMs && Number(item.dateMs || 0) < newestFreshDateMs - candidateWindowMs) break;
+      const extracted = await extractAccessValue(type, item.message, account);
+      if (!extracted?.value) continue;
+      return {
+        source: "gmail",
+        mode: "imap",
+        mailbox: item.mailbox,
+        messageId: item.uid,
+        subject: gmailHeader(item.message, "Subject"),
+        from: gmailHeader(item.message, "From"),
+        date: gmailHeader(item.message, "Date"),
+        internalDate: item.message.internalDate || "",
+        dateMs: item.dateMs,
+        ...extracted,
+      };
+    }
+
+    if (mailboxes.length && mailboxErrors.length === mailboxes.length) {
+      return { source: "gmail", mode: "imap", reason: "label_not_found", error: `Label Gmail tidak bisa dibuka: ${mailboxErrors.join("; ")}`, value: "" };
+    }
+    return { source: "gmail", mode: "imap", reason: "not_found", value: "" };
+  } finally {
+    await client.logout().catch(() => {});
+  }
+}
+
+async function lookupAccountAccessValue(db, account, type) {
+  let gmailResult = null;
+  try {
+    gmailResult = await lookupGmailAccessValue(db, account, type);
+  } catch (error) {
+    gmailResult = { source: "gmail", reason: "gmail_error", error: error.message || "Gmail lookup gagal", value: "" };
+    if (error?.oauthInvalid || isGmailOAuthInvalidError(error)) {
+      db.settings = db.settings || {};
+      db.settings.gmailOAuthStatus = "invalid";
+      db.settings.gmailLastError = error.message || "OAuth Gmail perlu disambungkan ulang";
+      db.settings.gmailLastErrorAt = nowText();
+    }
+  }
+
+  if (gmailResult?.value) return gmailResult;
+  return {
+    ...gmailResult,
+    source: gmailResult?.source || "fallback",
+    kind: ["reset", "household"].includes(type) ? "link" : "code",
+    value: "",
+  };
+}
+
+const accessLookupLabels = {
+  signin: "Sign-in code",
+  verification: "Verification code",
+  reset: "Reset password link",
+  household: "Household code/link",
+  disney_otp: "Disney OTP code",
+};
+
+function accessLookupLabel(type = "") {
+  return accessLookupLabels[type] || "Account access";
+}
+
+function accessLookupSourceLabel(source = "") {
+  if (source === "gmail") return "Gmail owner";
+  if (source === "managed_account") return "data manual akun";
+  if (source === "fallback") return "fallback";
+  return source || "unknown";
+}
+
+function appendAccessLookupActivity(db, auth, { account = null, email = "", type = "", result = {}, status = "" } = {}) {
+  if (!db || !auth) return;
+  const reseller = authReseller(db, auth);
+  const resellerName = reseller?.name || reseller?.username || account?.reseller || account?.buyer || "Reseller";
+  const resellerWhatsapp = normalizeWhatsappNumber(account?.whatsapp || reseller?.whatsapp || "");
+  const label = accessLookupLabel(type);
+  const valueFound = Boolean(String(result?.value || "").trim());
+  const normalizedStatus = status || (valueFound ? "success" : result?.reason || result?.error || "not_found");
+  const targetEmail = type === "disney_otp"
+    ? normalizeLookupPhone(account?.loginPhone || email)
+    : normalizeEmailKey(account?.email || email);
+  const source = accessLookupSourceLabel(result?.source);
+  const statusLabel = valueFound ? "berhasil" : "belum tersedia";
+  const productLabel = [account?.product, account?.variant].filter(Boolean).join(" - ");
+  db.activities = db.activities || [];
+  db.activities.unshift({
+    id: makeId("act"),
+    type: "security",
+    title: `${resellerName}: ${label} ${statusLabel}`,
+    description: valueFound
+      ? `${resellerName} mengambil ${label} untuk ${targetEmail || "-"}${productLabel ? ` (${productLabel})` : ""} dari ${source}.`
+      : `${resellerName} mencoba ${label} untuk ${targetEmail || "-"}${productLabel ? ` (${productLabel})` : ""}, tetapi belum tersedia (${normalizedStatus}).`,
+    createdAt: nowText(),
+    resellerId: reseller?.id || account?.resellerId || auth.sub || "",
+    whatsapp: resellerWhatsapp,
+    actorName: resellerName,
+    actorRole: auth.role || "reseller",
+    actorWhatsapp: resellerWhatsapp,
+    accountId: account?.id || "",
+    accountEmail: targetEmail,
+    product: account?.product || "",
+    variant: account?.variant || "",
+    lookupLabel: label,
+    lookupType: type,
+    lookupSource: result?.source || "",
+    lookupStatus: normalizedStatus,
+    lookupSuccess: valueFound,
+  });
+}
+
+function getPakasirCredentials(db) {
+  const project = firstConfigured(db.settings?.pakasirMerchantId, db.settings?.pakasirProject, process.env.PAKASIR_PROJECT);
+  const apiKey = firstUsableSecret(db.settings?.pakasirApiKey, process.env.PAKASIR_API_KEY);
+  return {
+    project,
+    apiKey,
+    configured: Boolean(project && apiKey),
+  };
+}
+
+function buildPakasirPaymentLink({ project, amount, orderId }) {
+  if (!project || !amount || !orderId) return "";
+  const url = new URL(`https://app.pakasir.com/pay/${project}/${amount}`);
+  url.searchParams.set("order_id", orderId);
+  url.searchParams.set("qris_only", "1");
+  return url.toString();
+}
+
+function derivePakasirTotalPayment(amount = 0, fee = 0, providerTotal = 0) {
+  const nominal = Math.max(0, Number(amount || 0));
+  const adminFee = Math.max(0, Number(fee || 0));
+  const reportedTotal = Math.max(0, Number(providerTotal || 0));
+  const computedTotal = nominal > 0 ? nominal + adminFee : 0;
+  return Math.max(reportedTotal, computedTotal);
+}
+
+function parsePakasirTransaction(payload = {}) {
+  const payment = payload?.payment && typeof payload.payment === "object" ? payload.payment : null;
+  const transaction = payload?.transaction && typeof payload.transaction === "object" ? payload.transaction : payment;
+  const amount = Number(transaction?.amount || payment?.amount || 0);
+  const fee = Number(transaction?.fee || payment?.fee || 0);
+  const providerTotal = Number(transaction?.total_payment || payment?.total_payment || 0);
+  return {
+    orderId: String(transaction?.order_id || payment?.order_id || "").trim(),
+    amount,
+    fee,
+    totalPayment: derivePakasirTotalPayment(amount, fee, providerTotal),
+    paymentMethod: String(transaction?.payment_method || payment?.payment_method || "qris").trim(),
+    paymentNumber: String(transaction?.payment_number || payment?.payment_number || transaction?.qr_string || payment?.qr_string || "").trim(),
+    qrString: String(transaction?.qr_string || payment?.qr_string || "").trim(),
+    qrImageUrl: String(transaction?.qr_image_url || payment?.qr_image_url || "").trim(),
+    expiredAt: transaction?.expired_at || payment?.expired_at || null,
+    raw: transaction || payment || payload || {},
+  };
+}
+
+async function fetchPakasirTransactionDetail(db, order = {}, payment = {}) {
+  const credentials = getPakasirCredentials(db);
+  const amount = Math.max(0, Number(payment.amount || order.paymentDue || order.qrisAmount || order.total || 0));
+  const orderId = String(payment.ref || order.paymentRef || order.id || "").trim();
+  if (!credentials.configured || !amount || !orderId) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: !credentials.configured ? "pakasir_not_configured" : !amount ? "amount_missing" : "order_id_missing",
+    };
+  }
+
+  const url = new URL("https://app.pakasir.com/api/transactiondetail");
+  url.searchParams.set("project", credentials.project);
+  url.searchParams.set("amount", String(amount));
+  url.searchParams.set("order_id", orderId);
+  url.searchParams.set("api_key", credentials.apiKey);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Number(process.env.PAKASIR_TIMEOUT_MS || 8000));
+  try {
+    const response = await fetch(url, {
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
+    const payload = await response.json().catch(() => ({}));
+    const transaction = parsePakasirTransaction(payload);
+    const raw = transaction.raw || payload?.transaction || payload?.payment || payload?.data || payload || {};
+    const status = String(raw.status || raw.payment_status || payload?.status || "").trim().toLowerCase();
+    if (!response.ok) {
+      return {
+        ok: false,
+        status,
+        httpStatus: response.status,
+        error: payload?.message || payload?.error || `Pakasir detail gagal (${response.status})`,
+        payload,
+      };
+    }
+    return {
+      ok: true,
+      status,
+      paid: pakasirStatusIsPaid(status),
+      paidAt: raw.completed_at || raw.paid_at || raw.settled_at || "",
+      transaction,
+      payload,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error.name === "AbortError" ? "Pakasir detail timeout." : error.message || "Pakasir detail gagal.",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function createPakasirQris(db, order) {
+  const credentials = getPakasirCredentials(db);
+  const amount = Math.max(0, Number(order.paymentDue ?? order.qrisAmount ?? order.total ?? 0));
+  const paymentUrl = buildPakasirPaymentLink({
+    project: credentials.project,
+    amount,
+    orderId: order.paymentRef,
+  });
+  const fallback = {
+    provider: "pakasir",
+    paymentUrl,
+    qrisText: paymentUrl || `QRIS ${order.paymentRef} ${order.total}`,
+  };
+
+  if (!credentials.configured) {
+    return {
+      ...fallback,
+      providerStatus: "not_configured",
+      providerError: "PAKASIR_PROJECT atau PAKASIR_API_KEY belum tersedia.",
+    };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Number(process.env.PAKASIR_TIMEOUT_MS || 8000));
+  try {
+    const response = await fetch("https://app.pakasir.com/api/transactioncreate/qris", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project: credentials.project,
+        order_id: order.paymentRef,
+        amount,
+        api_key: credentials.apiKey,
+      }),
+      signal: controller.signal,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload?.error || `Pakasir QRIS gagal dibuat (${response.status})`);
+    }
+    const transaction = parsePakasirTransaction(payload);
+    let fee = Number(transaction.fee || 0);
+    let totalPayment = derivePakasirTotalPayment(amount, fee, transaction.totalPayment);
+    let providerDetail = null;
+    if (!fee || totalPayment <= amount) {
+      providerDetail = await fetchPakasirTransactionDetail(db, order, {
+        ref: order.paymentRef,
+        amount,
+      }).catch((error) => ({ ok: false, error: error.message || "Pakasir detail gagal." }));
+      if (providerDetail?.transaction) {
+        fee = Number(providerDetail.transaction.fee || fee || 0);
+        totalPayment = derivePakasirTotalPayment(amount, fee, providerDetail.transaction.totalPayment || totalPayment);
+      }
+    }
+    return {
+      ...fallback,
+      providerStatus: "created",
+      providerRaw: payload,
+      providerDetailStatus: providerDetail?.status || "",
+      providerDetailError: providerDetail && !providerDetail.ok ? providerDetail.error || providerDetail.reason || "" : "",
+      providerDetailRaw: providerDetail?.payload || undefined,
+      paymentMethod: transaction.paymentMethod,
+      paymentNumber: transaction.paymentNumber,
+      qrString: transaction.qrString,
+      qrImageUrl: transaction.qrImageUrl,
+      fee,
+      totalPayment,
+      providerExpiresAt: transaction.expiredAt,
+      qrisText: transaction.qrString || transaction.paymentNumber || paymentUrl || fallback.qrisText,
+    };
+  } catch (error) {
+    return {
+      ...fallback,
+      providerStatus: "error",
+      providerError: error.name === "AbortError" ? "Pakasir timeout." : error.message || "Pakasir tidak tersedia.",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function readDbWithExpiredOrders() {
+  const db = await readDb();
+  let changed = false;
+  if (hasExpiredPendingOrders(db)) {
+    expirePendingOrders(db);
+    changed = true;
+  }
+  if (syncOrderResellerMetadata(db)) changed = true;
+  if (reconcileGoogleSheetsStockOrderLinks(db)) changed = true;
+  if (backfillManagedAccountsFromCompletedOrders(db)) changed = true;
+  if (syncManagedAccountCredentialsFromOrders(db)) changed = true;
+  if (syncNetflixManagedPasswordConsensus(db)) changed = true;
+  if (refreshManagedAccountStatuses(db)) changed = true;
+  if (syncManagedAccountWhatsappFromOrders(db)) changed = true;
+  if (syncSoldStockMetadata(db)) changed = true;
+  if (syncHistoricalStockConflicts(db)) changed = true;
+  if (repairHistoricalStockReuse(db)) changed = true;
+  if (!changed) return db;
+  await writeDb(db, { notify: true, reason: "db:self-heal" });
+  return readDb();
+}
+
+function shouldRefreshGoogleSheetsForResellerView(db, auth) {
+  if (auth?.role !== "reseller") return false;
+  if (!googleSheetsConfigured(db)) return false;
+  const maxAgeMs = Math.max(60_000, Number(process.env.RESELLER_VIEW_SHEETS_MAX_AGE_MS || 300_000));
+  const lastSyncAt = toDateTime(db.settings?.googleSheetsLastSyncAt || "");
+  if (!lastSyncAt) return true;
+  return Date.now() - lastSyncAt.getTime() >= maxAgeMs;
+}
+
+async function refreshResellerViewFromGoogleSheets(db, auth, reason = "reseller_view_refresh", options = {}) {
+  const bypassStaleWindow = options.forceRecent === true;
+  if (!bypassStaleWindow && !shouldRefreshGoogleSheetsForResellerView(db, auth)) return false;
+  try {
+    await syncGoogleSheetsStockSafely(db, { silent: true, reason });
+    return true;
+  } catch (error) {
+    const friendly = friendlyGoogleSheetsError(error);
+    if (friendly.code !== "google_sheets_rate_limited") {
+      console.warn(`[ResellerView] Google Sheets refresh skipped: ${friendly.message || friendly}`);
+    }
+    return false;
+  }
+}
+
+function normalizeResellerInput(body, fallback = {}) {
+  const name = String(body.name ?? fallback.name ?? "").trim();
+  const username = String(body.username ?? fallback.username ?? (name || "reseller"))
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ".");
+  return {
+    name,
+    username,
+    password: String(body.password ?? fallback.password ?? "").trim(),
+    email: String(body.email ?? fallback.email ?? "").trim(),
+    whatsapp: normalizeWhatsappNumber(
+      body.whatsapp ??
+        body.phone ??
+        body.telepon ??
+        body.telp ??
+        body.contact ??
+        fallback.whatsapp ??
+        fallback.phone ??
+        fallback.telepon ??
+        fallback.telp ??
+        fallback.contact ??
+        "",
+    ),
+    isActive: body.isActive === undefined ? fallback.isActive !== false : Boolean(body.isActive),
+    orders: Number(body.orders ?? fallback.orders ?? 0),
+    revenue: Number(body.revenue ?? fallback.revenue ?? 0),
+    deposit: Number(body.deposit ?? fallback.deposit ?? 0),
+    joinedAt: String(body.joinedAt ?? fallback.joinedAt ?? todayText()).trim(),
+    allowedAccessTools: normalizeResellerAccessTools(
+      body.allowedAccessTools === undefined ? fallback.allowedAccessTools : body.allowedAccessTools,
+      fallback.allowedAccessTools,
+    ),
+  };
+}
+
+function findDuplicateReseller(db, input = {}, exceptId = "") {
+  const whatsapp = normalizeWhatsappNumber(input.whatsapp || "");
+  if (whatsapp) {
+    const duplicate = (db.resellers || []).find((item) => {
+      if (exceptId && item.id === exceptId) return false;
+      return resellerNumberCandidates(item).has(whatsapp);
+    });
+    if (duplicate) return { field: "whatsapp", reseller: duplicate };
+  }
+
+  const username = normalizeLoginIdentifier(input.username || "");
+  if (username) {
+    const duplicate = (db.resellers || []).find((item) => {
+      if (exceptId && item.id === exceptId) return false;
+      return normalizeLoginIdentifier(item.username || "") === username;
+    });
+    if (duplicate) return { field: "username", reseller: duplicate };
+  }
+
+  const email = normalizeLoginIdentifier(input.email || "");
+  if (email) {
+    const duplicate = (db.resellers || []).find((item) => {
+      if (exceptId && item.id === exceptId) return false;
+      return normalizeLoginIdentifier(item.email || "") === email;
+    });
+    if (duplicate) return { field: "email", reseller: duplicate };
+  }
+
+  return null;
+}
+
+function throwDuplicateResellerError(duplicate) {
+  const reseller = duplicate?.reseller || {};
+  const status = reseller.isActive === false ? "nonaktif" : "aktif";
+  const fieldLabel = duplicate?.field === "whatsapp" ? "nomor WhatsApp" : duplicate?.field === "username" ? "username" : "email";
+  const identity = reseller.name || reseller.username || primaryResellerWhatsapp(reseller) || reseller.id;
+  const error = new Error(`Reseller sudah ${status}: ${identity}. ${fieldLabel} ini sudah dipakai, edit akun reseller yang sudah ada.`);
+  error.status = 409;
+  throw error;
+}
+
+function normalizeResellerSelfInput(body, current = {}) {
+  const name = String(body.name ?? current.name ?? "").trim();
+  const username = String(body.username ?? current.username ?? (name || "reseller"))
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ".");
+  return {
+    name,
+    username,
+    email: String(body.email ?? current.email ?? "").trim(),
+    whatsapp: current.whatsapp,
+    phone: current.phone,
+    telepon: current.telepon,
+    telp: current.telp,
+    contact: current.contact,
+    isActive: current.isActive !== false,
+    orders: Number(current.orders || 0),
+    revenue: Number(current.revenue || 0),
+    deposit: Number(current.deposit || 0),
+    joinedAt: String(current.joinedAt || todayText()).trim(),
+    allowedAccessTools: resellerAccessTools(current),
+  };
+}
+
+function safeResellerForSelf(reseller = {}) {
+  const { password, ...safe } = reseller;
+  return {
+    ...safe,
+    allowedAccessTools: resellerAccessTools(safe),
+  };
+}
+
+function safePublicOrder(order = {}, options = {}) {
+  const includeFulfillment = options.includeFulfillment === true;
+  const delivered = (
+    order.orderStatus === "completed"
+    || order.deliveryStatus === "sent"
+    || order.deliveryStatus === "stock_unavailable_deposit"
+    || (order.qrisStatus === "paid" && order.fulfillmentText)
+  );
+  return {
+    id: order.id,
+    paymentRef: order.paymentRef,
+    product: order.product,
+    productId: order.productId,
+    variant: order.variant,
+    variantId: order.variantId,
+    variantCode: order.variantCode,
+    customerVariant: order.customerVariant,
+    customerVariantId: order.customerVariantId,
+    customerVariantCode: order.customerVariantCode,
+    duration: order.duration,
+    durationDays: order.durationDays,
+    qty: order.qty,
+    total: order.total,
+    paymentDue: order.paymentDue,
+    device: order.device,
+    qrisStatus: order.qrisStatus,
+    orderStatus: order.orderStatus,
+    deliveryStatus: order.deliveryStatus,
+    deliveryError: order.deliveryError,
+    paymentMethod: order.paymentMethod,
+    qrisUrl: order.qrisUrl,
+    paymentExpiresAt: order.paymentExpiresAt,
+    createdAt: order.createdAt,
+    expiresAt: order.expiresAt,
+    channel: order.channel,
+    type: order.type,
+    orderType: order.orderType,
+    stockPolicy: order.stockPolicy,
+    stockRaceDepositAmount: order.stockRaceDepositAmount,
+    stockRaceDepositCreditedAt: order.stockRaceDepositCreditedAt,
+    fulfillmentText: delivered && includeFulfillment ? order.fulfillmentText || "" : "",
+    snkText: delivered && includeFulfillment ? order.snkText || "" : "",
+  };
+}
+
+function safePublicPayment(payment = {}, order = null) {
+  const fee = Number(payment.fee || order?.paymentFee || 0);
+  const amount = Number(payment.amount || order?.paymentDue || 0);
+  return {
+    ref: payment.ref,
+    orderId: payment.orderId,
+    status: payment.status,
+    amount: payment.amount,
+    provider: payment.provider,
+    createdAt: payment.createdAt,
+    expiresAt: payment.expiresAt,
+    paymentUrl: payment.paymentUrl || order?.qrisUrl || "",
+    qrisText: payment.qrisText || payment.qrString || payment.paymentNumber || payment.paymentUrl || `QRIS ${payment.ref} ${payment.amount}`,
+    qrString: payment.qrString || "",
+    qrImageUrl: payment.qrImageUrl || "",
+    paymentNumber: payment.paymentNumber || "",
+    providerStatus: payment.providerStatus || "pending",
+    providerError: payment.providerError || "",
+    fee,
+    totalPayment: derivePakasirTotalPayment(amount, fee, payment.totalPayment),
+    paymentMethod: payment.paymentMethod,
+    order: order ? safePublicOrder(order) : null,
+  };
+}
+
+function pakasirStatusIsPaid(status = "") {
+  const text = String(status || "").toLowerCase();
+  return ["paid", "success", "settlement", "settled", "completed", "complete", "berhasil", "sukses"].some((word) => text.includes(word));
+}
+
+function paymentPaidAmount(payment = {}, order = {}) {
+  return Math.max(
+    0,
+    derivePakasirTotalPayment(payment.amount || order.paymentDue || 0, payment.fee || order.paymentFee || 0, payment.totalPayment || 0),
+    Number(payment.amount || 0),
+    Number(order.paymentDue || 0),
+  );
+}
+
+async function reconcilePakasirPaymentInDb(db, ref, options = {}) {
+  const payment = (db.payments || []).find((item) => item.ref === ref || item.orderId === ref);
+  const order = (db.orders || []).find((item) => item.paymentRef === ref || item.id === ref || item.id === payment?.orderId);
+  if (!payment || !order) return { ok: false, skipped: true, reason: "payment_or_order_missing" };
+  if (payment.provider !== "pakasir") return { ok: true, skipped: true, reason: "not_pakasir", order, payment };
+  if (order.deliveryStatus === "sent" && order.whatsappNotificationStatus === "sent") {
+    return { ok: true, skipped: true, reason: "already_sent", order, payment };
+  }
+
+  const status = String(payment.status || order.qrisStatus || "").toLowerCase();
+  const shouldCheck = ["pending", "expired", "created", "waiting_payment", ""].includes(status)
+    || ["pending", "expired", "created", "waiting_payment", "cancelled"].includes(String(order.qrisStatus || "").toLowerCase())
+    || ["cancelled"].includes(String(order.orderStatus || "").toLowerCase());
+  if (!shouldCheck) return { ok: true, skipped: true, reason: "status_not_checkable", order, payment };
+
+  const lastChecked = toDateTime(payment.providerLastCheckedAt);
+  const throttleMs = Number(options.throttleMs || 0);
+  if (throttleMs > 0 && lastChecked && Date.now() - lastChecked.getTime() < throttleMs) {
+    return { ok: true, skipped: true, reason: "throttled", order, payment };
+  }
+
+  const checkedAt = nowText();
+  const detail = await fetchPakasirTransactionDetail(db, order, payment);
+  payment.providerLastCheckedAt = checkedAt;
+  payment.providerDetailStatus = detail.status || "";
+  payment.providerDetailError = detail.ok ? "" : detail.error || detail.reason || "pakasir_detail_failed";
+  if (detail.payload) payment.providerDetailRaw = detail.payload;
+  if (detail.transaction?.totalPayment) payment.totalPayment = detail.transaction.totalPayment;
+  if (detail.transaction?.fee) payment.fee = detail.transaction.fee;
+  if (detail.transaction?.paymentMethod) payment.paymentMethod = detail.transaction.paymentMethod;
+
+  if (!detail.paid) return { ok: detail.ok, checked: true, paid: false, detail, order, payment };
+
+  payment.status = "paid";
+  payment.paidAt = payment.paidAt || (detail.paidAt ? dateTimeText(toDateTime(detail.paidAt) || new Date()) : checkedAt);
+  order.paidAt = order.paidAt || payment.paidAt;
+  order.paymentProviderStatus = "paid";
+  order.paymentProviderCheckedAt = checkedAt;
+
+  const prepared = preparePaidOrderForFulfillment(db, order, payment);
+  if (prepared.reply && prepared.order.deliveryStatus === "late_paid_deposit") return prepared;
+  return fulfillPaidOrderAndNotify(db, order.id);
+}
+
+function creditLatePaidQrisToDeposit(db, order, payment, amount) {
+  const reseller = (db.resellers || []).find((item) => item.id === order.resellerId) || activeResellerByWhatsapp(db, order.whatsapp);
+  if (!reseller || !amount || order.latePaidDepositCredited) {
+    return { ok: true, order, reply: order.fulfillmentText || "Pembayaran terlambat sudah tercatat." };
+  }
+
+  const creditedAt = nowText();
+  const depositBefore = Math.max(0, Number(reseller.deposit || 0));
+  const depositAfter = depositBefore + amount;
+  reseller.deposit = depositAfter;
+  order.qrisStatus = "paid";
+  order.orderStatus = "cancelled";
+  order.deliveryStatus = "late_paid_deposit";
+  order.latePaidDepositCredited = true;
+  order.latePaidDepositCreditedAt = creditedAt;
+  order.latePaidDepositAmount = amount;
+  order.fulfillmentText = `Pembayaran ${formatRupiah(amount)} diterima setelah order expired. Nominal masuk ke saldo reseller. Saldo sekarang ${formatRupiah(depositAfter)}.`;
+  payment.status = "paid";
+  payment.paidAt = payment.paidAt || creditedAt;
+  payment.latePaidDepositCredited = true;
+  payment.latePaidDepositAmount = amount;
+  payment.depositBefore = depositBefore;
+  payment.depositAfter = depositAfter;
+
+  db.activities = db.activities || [];
+  db.activities.unshift({
+    id: makeId("act"),
+    type: "order",
+    title: `Pembayaran ${order.paymentRef || order.id} terlambat`,
+    description: `${formatRupiah(amount)} diterima setelah order expired dan dikreditkan ke deposit ${reseller.name || reseller.username || order.whatsapp}.`,
+    createdAt: creditedAt,
+    orderId: order.id,
+    resellerId: reseller.id || order.resellerId || "",
+    whatsapp: normalizeWhatsappNumber(order.whatsapp || reseller.whatsapp || ""),
+  });
+
+  return { ok: true, order, reply: order.fulfillmentText };
+}
+
+function preparePaidOrderForFulfillment(db, order, payment) {
+  const paidAt = nowText();
+  const wasExpired = order.qrisStatus === "expired" || order.orderStatus === "cancelled";
+  const amount = paymentPaidAmount(payment, order);
+  payment.status = "paid";
+  payment.paidAt = payment.paidAt || paidAt;
+  order.paidAt = order.paidAt || paidAt;
+
+  if (wasExpired && Number(order.depositUsed || 0) > 0 && order.depositRefunded && amount < Number(order.total || 0)) {
+    return creditLatePaidQrisToDeposit(db, order, payment, amount);
+  }
+
+  if (wasExpired) {
+    order.latePaymentRecovered = true;
+    order.latePaymentRecoveredAt = paidAt;
+    order.previousExpiredStatus = order.previousExpiredStatus || `${order.qrisStatus || ""}/${order.orderStatus || ""}`;
+    db.activities = db.activities || [];
+    db.activities.unshift({
+      id: makeId("act"),
+      type: "order",
+      title: `Pembayaran ${order.paymentRef || order.id} diterima setelah expired`,
+      description: `${order.product} ${order.variant} tetap diproses karena pembayaran Pakasir sudah paid.`,
+      createdAt: paidAt,
+      orderId: order.id,
+      resellerId: order.resellerId || "",
+      whatsapp: normalizeWhatsappNumber(order.whatsapp || ""),
+    });
+  }
+
+  order.qrisStatus = "paid";
+  order.orderStatus = order.deliveryStatus === "sent" ? "completed" : "processing";
+  if (order.deliveryStatus === "waiting_payment") order.deliveryStatus = wasExpired ? "paid_after_expired" : "paid";
+  return { ok: true, order };
+}
+
+function prepareManualApprovedOrderForFulfillment(db, order, payment, options = {}) {
+  const approvedAt = nowText();
+  const actor = String(options.actor || "owner").trim() || "owner";
+  const reason = String(options.reason || "").trim() || "manual approval";
+  payment.status = "manual";
+  payment.paidAt = payment.paidAt || approvedAt;
+  payment.providerStatus = "owner_approved";
+  payment.providerWebhookStatus = "owner_approved";
+  payment.manualApproved = true;
+  payment.manualApprovedAt = approvedAt;
+  payment.manualApprovedBy = actor;
+  payment.manualApprovalReason = reason;
+  order.paidAt = order.paidAt || approvedAt;
+  order.qrisStatus = "manual";
+  order.orderStatus = order.deliveryStatus === "sent" ? "completed" : "processing";
+  if (order.deliveryStatus === "waiting_payment" || order.deliveryStatus === "paid_after_expired") {
+    order.deliveryStatus = "manual_approved";
+  }
+  order.paymentMethod = order.paymentMethod || "Owner manual approval";
+  order.manualApproved = true;
+  order.manualApprovedAt = approvedAt;
+  order.manualApprovedBy = actor;
+  order.manualApprovalReason = reason;
+  db.activities = db.activities || [];
+  db.activities.unshift({
+    id: makeId("act"),
+    type: "order",
+    title: `Order ${order.id} di-approve manual`,
+    description: `${actor} melanjutkan order tanpa pembayaran QRIS otomatis. Alasan: ${reason}.`,
+    createdAt: approvedAt,
+    orderId: order.id,
+    resellerId: order.resellerId || "",
+    whatsapp: normalizeWhatsappNumber(order.whatsapp || ""),
+  });
+  return { ok: true, order };
+}
+
+async function getWhatsAppBotStatus(db) {
+  const tokens = configuredTokens(
+    firstUsableSecret(db.settings?.whatsappBotToken),
+    firstUsableSecret(process.env.WHATSAPP_BOT_TOKEN),
+  );
+  const botUrl = firstConfigured(process.env.WHATSAPP_BOT_URL, db.settings?.whatsappBotUrl, "http://127.0.0.1:4016");
+  const integrations = ownerIntegrationSettings(db);
+  const base = {
+    connected: false,
+    state: "disconnected",
+    ownerWhatsAppNumber: db.settings.ownerWhatsAppNumber,
+    inboundWebhookUrl: integrations.bailey.webhookUrl,
+    publicUrl: integrations.bailey.publicUrl,
+    botUrl,
+    supportedCommands: ["#balance", "#deposit NOMINAL", ".addbalance NOMINAL (owner)"],
+  };
+  if (!tokens.length || !botUrl) return { ...base, error: "whatsapp_bot_not_configured" };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Number(process.env.WHATSAPP_BOT_TIMEOUT_MS || 3000));
+  try {
+    const url = new URL("/session/status", botUrl);
+    let lastError = null;
+    for (const token of tokens) {
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
+      });
+      const body = await response.json().catch(() => ({}));
+      if (response.ok && body.success !== false) {
+        return {
+          ...base,
+          ...body,
+          connected: Boolean(body.connected),
+          state: body.state || (body.connected ? "open" : "disconnected"),
+          qrAvailable: Boolean(body.qr_available || body.qrAvailable),
+          publicQrUrl: body.public_qr_url || body.publicQrUrl || "",
+        };
+      }
+      lastError = new Error(body.error || `whatsapp_bot_http_${response.status}`);
+    }
+    throw lastError || new Error("whatsapp_bot_unavailable");
+  } catch (error) {
+    return {
+      ...base,
+      error: error.name === "AbortError" ? "whatsapp_bot_timeout" : error.message || "whatsapp_bot_unavailable",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function execFileText(command, args = [], options = {}) {
+  return new Promise((resolve) => {
+    execFile(command, args, { timeout: 2500, ...options }, (error, stdout) => {
+      if (error) {
+        resolve("");
+        return;
+      }
+      resolve(String(stdout || ""));
+    });
+  });
+}
+
+function bytesFromKb(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) ? number * 1024 : 0;
+}
+
+async function readSwapInfo() {
+  if (process.platform !== "linux") {
+    return { total: 0, used: 0, free: 0, enabled: false };
+  }
+  const raw = await fs.readFile("/proc/meminfo", "utf8").catch(() => "");
+  const values = Object.fromEntries(
+    raw
+      .split("\n")
+      .map((line) => line.match(/^(\w+):\s+(\d+)/))
+      .filter(Boolean)
+      .map((match) => [match[1], Number(match[2])]),
+  );
+  const total = bytesFromKb(values.SwapTotal);
+  const free = bytesFromKb(values.SwapFree);
+  return {
+    total,
+    free,
+    used: Math.max(0, total - free),
+    enabled: total > 0,
+  };
+}
+
+async function readDiskInfo() {
+  if (process.platform !== "linux") {
+    return { mount: "/", total: 0, used: 0, free: 0, percent: 0 };
+  }
+  const raw = await execFileText("df", ["-kP", "/"]);
+  const [, line = ""] = raw.trim().split("\n");
+  const parts = line.trim().split(/\s+/);
+  const total = bytesFromKb(parts[1]);
+  const used = bytesFromKb(parts[2]);
+  const free = bytesFromKb(parts[3]);
+  return {
+    mount: parts[5] || "/",
+    total,
+    used,
+    free,
+    percent: total ? Math.round((used / total) * 100) : 0,
+  };
+}
+
+async function readPm2Info() {
+  const raw = await execFileText("pm2", ["jlist"]);
+  try {
+    const apps = JSON.parse(raw || "[]");
+    const app = apps.find((item) => item.name === "kavya") || apps[0] || null;
+    if (!app) {
+      return { available: false, name: "kavya", status: "unknown", restartCount: 0, memory: 0, cpu: 0, uptime: 0 };
+    }
+    const startedAt = Number(app.pm2_env?.pm_uptime || 0);
+    return {
+      available: true,
+      name: app.name || "kavya",
+      status: app.pm2_env?.status || "unknown",
+      restartCount: Number(app.pm2_env?.restart_time || 0),
+      memory: Number(app.monit?.memory || 0),
+      cpu: Number(app.monit?.cpu || 0),
+      uptime: startedAt ? Math.max(0, Date.now() - startedAt) : 0,
+    };
+  } catch {
+    return { available: false, name: "kavya", status: "unknown", restartCount: 0, memory: 0, cpu: 0, uptime: 0 };
+  }
+}
+
+async function readTunnelInfo(db) {
+  const configured = Boolean(firstUsableSecret(process.env.CLOUDFLARED_TOKEN, db.settings?.cloudflareTunnelToken));
+  const raw = process.platform === "linux" ? await execFileText("pgrep", ["-fa", "cloudflared"]) : "";
+  return {
+    configured,
+    running: /cloudflared/i.test(raw),
+    publicDomain: firstConfigured(db.settings?.publicDomain, process.env.PUBLIC_DOMAIN, "https://vya.baby"),
+  };
+}
+
+function systemWarnings({ memory, disk, swap, pm2, whatsapp, tunnel }) {
+  const warnings = [];
+  if (memory.available < 300 * 1024 * 1024) warnings.push("RAM available di bawah 300 MB.");
+  if (disk.percent >= 80) warnings.push("Disk usage sudah di atas 80%.");
+  if (!swap.enabled) warnings.push("Swap belum aktif.");
+  if (pm2.status !== "online") warnings.push("PM2 Kavya tidak online.");
+  if (!whatsapp.connected) warnings.push("WhatsApp belum connected.");
+  if (tunnel.configured && !tunnel.running) warnings.push("Cloudflare Tunnel belum running.");
+  return warnings;
+}
+
+async function statFileSafe(targetPath) {
+  try {
+    return await fs.stat(targetPath);
+  } catch {
+    return null;
+  }
+}
+
+async function directorySummary(dirPath) {
+  const resolved = path.resolve(dirPath);
+  try {
+    const entries = await fs.readdir(resolved, { withFileTypes: true });
+    const files = [];
+    let totalSize = 0;
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const filePath = path.join(resolved, entry.name);
+      const stat = await statFileSafe(filePath);
+      if (!stat) continue;
+      totalSize += stat.size;
+      files.push({
+        name: entry.name,
+        size: stat.size,
+        mtimeMs: stat.mtimeMs,
+        modifiedAt: stat.mtime.toISOString(),
+      });
+    }
+    files.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    const latest = files[0] || null;
+    return {
+      path: resolved,
+      exists: true,
+      count: files.length,
+      totalSize,
+      latestName: latest?.name || "",
+      latestSize: latest?.size || 0,
+      latestAt: latest?.modifiedAt || "",
+    };
+  } catch {
+    return {
+      path: resolved,
+      exists: false,
+      count: 0,
+      totalSize: 0,
+      latestName: "",
+      latestSize: 0,
+      latestAt: "",
+    };
+  }
+}
+
+async function readDatabaseInfo() {
+  const stat = await statFileSafe(databasePath);
+  return {
+    path: databasePath,
+    exists: Boolean(stat),
+    size: stat?.size || 0,
+    modifiedAt: stat?.mtime?.toISOString?.() || "",
+    version: getDbVersion(),
+  };
+}
+
+async function readBackupInfo() {
+  const fallbackDir = path.join(path.dirname(databasePath), "backups");
+  return directorySummary(process.env.RUNTIME_BACKUP_DIR || process.env.BACKUP_DIR || fallbackDir);
+}
+
+function readIntegrationInfo(db, whatsapp, tunnel) {
+  const pakasir = getPakasirCredentials(db);
+  const gmailInfo = gmailConnectionInfo(db);
+  const whatsappInboundConfigured = Boolean(firstUsableSecret(db.settings?.whatsappInboundToken, process.env.WHATSAPP_INBOUND_TOKEN));
+  const ownerWhatsAppNumber = normalizeWhatsappNumber(db.settings?.ownerWhatsAppNumber || process.env.OWNER_WHATSAPP_NUMBER || "");
+  return {
+    pakasir: {
+      configured: pakasir.configured,
+      merchantId: pakasir.project || "",
+    },
+    gmail: {
+      connected: gmailInfo.connected,
+      needsOAuth: gmailInfo.needsOAuth,
+      error: gmailInfo.error,
+      inboxEmail: firstConfigured(db.settings?.gmailInboxEmail, process.env.GMAIL_INBOX_EMAIL),
+    },
+    googleSheets: {
+      configured: googleSheetsConfigured(db),
+      lastSyncAt: db.settings?.googleSheetsLastSyncAt || "",
+      lastSyncSummary: db.settings?.googleSheetsLastSyncSummary || null,
+    },
+    whatsapp: {
+      connected: Boolean(whatsapp.connected),
+      state: whatsapp.state || "disconnected",
+      inboundConfigured: whatsappInboundConfigured,
+      ownerWhatsAppNumber,
+    },
+    cloudflare: {
+      configured: Boolean(tunnel.configured),
+      running: Boolean(tunnel.running),
+      publicDomain: tunnel.publicDomain || "",
+    },
+  };
+}
+
+async function buildSystemStatus(db) {
+  const totalMemory = os.totalmem();
+  const freeMemory = os.freemem();
+  const [disk, swap, pm2, whatsapp, tunnel, database, backup] = await Promise.all([
+    readDiskInfo(),
+    readSwapInfo(),
+    readPm2Info(),
+    getWhatsAppBotStatus(db),
+    readTunnelInfo(db),
+    readDatabaseInfo(),
+    readBackupInfo(),
+  ]);
+  const memory = {
+    total: totalMemory,
+    free: freeMemory,
+    used: Math.max(0, totalMemory - freeMemory),
+    available: freeMemory,
+    percent: totalMemory ? Math.round(((totalMemory - freeMemory) / totalMemory) * 100) : 0,
+  };
+  const status = {
+    ok: true,
+    checkedAt: new Date().toISOString(),
+    server: {
+      hostname: os.hostname(),
+      platform: os.platform(),
+      arch: os.arch(),
+      os: `${os.type()} ${os.release()}`,
+      cpus: os.cpus().length,
+      uptime: os.uptime(),
+      loadavg: os.loadavg(),
+    },
+    memory,
+    disk,
+    swap,
+    pm2,
+    whatsapp: {
+      connected: Boolean(whatsapp.connected),
+      state: whatsapp.state || "disconnected",
+      error: whatsapp.error || whatsapp.last_error || "",
+    },
+    tunnel,
+    integrations: readIntegrationInfo(db, whatsapp, tunnel),
+    database,
+    backup,
+    warnings: [],
+  };
+  status.warnings = systemWarnings(status);
+  return status;
+}
+
+function createdAtMs(value = "") {
+  const date = toAccountDateTime(value, { endOfDay: !hasTimePart(value) });
+  return date?.getTime?.() || 0;
+}
+
+function newestFirst(left = {}, right = {}) {
+  return createdAtMs(right.createdAt || right.reviewedAt || right.paidAt || right.expiresAt || right.startedAt)
+    - createdAtMs(left.createdAt || left.reviewedAt || left.paidAt || left.expiresAt || left.startedAt);
+}
+
+function severityRank(value = "") {
+  if (value === "high") return 3;
+  if (value === "medium") return 2;
+  if (value === "low") return 1;
+  return 0;
+}
+
+function compareQueueItems(left = {}, right = {}) {
+  const severityDiff = severityRank(right.severity || "") - severityRank(left.severity || "");
+  if (severityDiff) return severityDiff;
+  return newestFirst(left, right);
+}
+
+function truncText(value = "", max = 180) {
+  const text = String(value || "").trim().replace(/\s+/g, " ");
+  if (!text || text.length <= max) return text;
+  return `${text.slice(0, Math.max(0, max - 1))}...`;
+}
+
+function daysLeftUntil(value = "") {
+  const date = toAccountDateTime(value, { endOfDay: !hasTimePart(value) });
+  if (!date) return null;
+  return Math.ceil((date.getTime() - Date.now()) / 86400000);
+}
+
+function resellerDisplayName(reseller = {}, fallback = "") {
+  return reseller?.name || reseller?.username || primaryResellerWhatsapp(reseller) || fallback || "";
+}
+
+function orderDisplayName(order = {}) {
+  const qty = Math.max(1, Number(order.qty || 1));
+  return [order.product || "Produk", order.variant || "", order.duration || "", qty > 1 ? `x${qty}` : ""].filter(Boolean).join(" ");
+}
+
+function operationLink({ orderId = "", accountId = "", stockId = "", requestId = "", groupId = "", resellerId = "", productId = "" } = {}) {
+  if (orderId) return `/dashboard/orders?order=${encodeURIComponent(orderId)}`;
+  if (accountId) return `/dashboard/accounts?account=${encodeURIComponent(accountId)}`;
+  if (stockId) return `/dashboard/stock?stock=${encodeURIComponent(stockId)}`;
+  if (requestId) return `/dashboard/resellers?deposit=${encodeURIComponent(requestId)}`;
+  if (resellerId) return `/dashboard/resellers?reseller=${encodeURIComponent(resellerId)}`;
+  if (productId) return `/dashboard/products?product=${encodeURIComponent(productId)}`;
+  if (groupId) return `/dashboard/whatsapp?group=${encodeURIComponent(groupId)}`;
+  return "/dashboard/operations";
+}
+
+function pushTraceEvent(events, event) {
+  if (!event?.createdAt) return;
+  if (events.some((item) => item.id === event.id)) return;
+  events.push(event);
+}
+
+function buildOrderTraceEvents(db, order = {}) {
+  const payment = (db.payments || []).find((item) => item.orderId === order.id || item.ref === order.paymentRef) || null;
+  const deliveredAccounts = deliveredAccountsForOrder(db, order, { includeHidden: true });
+  const deliveredAccountIds = new Set(deliveredAccounts.map((item) => String(item.id || "").trim()).filter(Boolean));
+  const reservedStocks = (Array.isArray(order.reservedStockIds) ? order.reservedStockIds : [])
+    .map((stockId) => (db.stock || []).find((item) => String(item.id || "").trim() === String(stockId || "").trim()))
+    .filter(Boolean);
+  const events = [];
+
+  pushTraceEvent(events, {
+    id: `${order.id}:created`,
+    type: "order",
+    tone: "slate",
+    title: "Order dibuat",
+    detail: `${orderDisplayName(order)} untuk ${order.customer || order.reseller || order.whatsapp || "reseller"}.`,
+    createdAt: order.createdAt || "",
+  });
+
+  if (payment?.createdAt) {
+    pushTraceEvent(events, {
+      id: `${order.id}:payment-created`,
+      type: "payment",
+      tone: "amber",
+      title: "Invoice pembayaran dibuat",
+      detail: `${payment.provider || order.paymentMethod || "payment"} ${payment.ref || order.paymentRef || ""}`.trim(),
+      createdAt: payment.createdAt,
+    });
+  }
+
+  if (reservedStocks.length) {
+    pushTraceEvent(events, {
+      id: `${order.id}:reserved`,
+      type: "stock",
+      tone: "amber",
+      title: "Stok direserve untuk invoice ini",
+      detail: `${reservedStocks.length} stok ditahan sementara sampai batas bayar.`,
+      createdAt: reservedStocks[0]?.reservedAt || order.createdAt || "",
+    });
+  }
+
+  if (Number(order.depositUsed || 0) > 0) {
+    pushTraceEvent(events, {
+      id: `${order.id}:deposit-used`,
+      type: "deposit",
+      tone: "amber",
+      title: "Deposit reseller terpakai",
+      detail: `${formatRupiah(Number(order.depositUsed || 0))} dipakai untuk order ini.`,
+      createdAt: order.createdAt || "",
+    });
+  }
+
+  if (payment?.paidAt || order.paidAt) {
+    pushTraceEvent(events, {
+      id: `${order.id}:paid`,
+      type: "payment",
+      tone: "emerald",
+      title: "Pembayaran diterima",
+      detail: `${formatRupiah(Number(payment?.totalPayment || order.paymentDue || order.total || 0))} diterima.`,
+      createdAt: payment?.paidAt || order.paidAt,
+    });
+  }
+
+  if (order.fulfillmentSentAt) {
+    pushTraceEvent(events, {
+      id: `${order.id}:fulfilled`,
+      type: "delivery",
+      tone: "emerald",
+      title: "Akun terkirim",
+      detail: `${Math.max(0, deliveredAccounts.length)} akun tertaut ke order ini.`,
+      createdAt: order.fulfillmentSentAt,
+    });
+  }
+
+  if (order.whatsappNotificationSentAt) {
+    pushTraceEvent(events, {
+      id: `${order.id}:notify`,
+      type: "whatsapp",
+      tone: "emerald",
+      title: "Notifikasi WhatsApp terkirim",
+      detail: order.whatsappNotificationStatus || "sent",
+      createdAt: order.whatsappNotificationSentAt,
+    });
+  }
+
+  if (order.googleSheetsSyncStatus === "synced") {
+    const syncAt = deliveredAccounts
+      .map((account) => String(account.googleSheetsSyncedAt || "").trim())
+      .filter(Boolean)
+      .sort()
+      .at(-1) || order.fulfillmentSentAt || order.createdAt || "";
+    pushTraceEvent(events, {
+      id: `${order.id}:sheets-synced`,
+      type: "sheet",
+      tone: "emerald",
+      title: "Google Sheets tersinkron",
+      detail: deliveredAccounts.length
+        ? `${deliveredAccounts.length} akun sudah terdorong ke Sheets.`
+        : "Data order berhasil tercatat ke Google Sheets.",
+      createdAt: syncAt,
+    });
+  }
+
+  if (order.googleSheetsSyncStatus === "failed") {
+    pushTraceEvent(events, {
+      id: `${order.id}:sheets-failed`,
+      type: "sheet",
+      tone: "red",
+      title: "Sync Google Sheets gagal",
+      detail: "Order ini perlu dicek karena dorongan ke Sheets gagal atau belum lengkap.",
+      createdAt: order.fulfillmentSentAt || order.paidAt || order.createdAt || "",
+    });
+  }
+
+  if (order.depositRefunded) {
+    pushTraceEvent(events, {
+      id: `${order.id}:refund`,
+      type: "deposit",
+      tone: "emerald",
+      title: "Deposit dikembalikan",
+      detail: `${formatRupiah(Number(order.depositUsed || 0))} dikreditkan kembali ke reseller.`,
+      createdAt: order.depositRefundedAt || order.paymentExpiresAt || order.createdAt || "",
+    });
+  }
+
+  if (order.stockRaceDepositCreditedAt) {
+    pushTraceEvent(events, {
+      id: `${order.id}:stock-race`,
+      type: "deposit",
+      tone: "red",
+      title: "Stok habis, dana masuk saldo",
+      detail: `${formatRupiah(Number(order.stockRaceDepositAmount || order.total || 0))} masuk ke saldo reseller.`,
+      createdAt: order.stockRaceDepositCreditedAt,
+    });
+  }
+
+  if (order.latePaidDepositCreditedAt) {
+    pushTraceEvent(events, {
+      id: `${order.id}:late-paid`,
+      type: "deposit",
+      tone: "amber",
+      title: "Pembayaran telat masuk saldo",
+      detail: `${formatRupiah(Number(order.latePaidDepositAmount || order.paymentDue || order.total || 0))} dikreditkan ke saldo reseller.`,
+      createdAt: order.latePaidDepositCreditedAt,
+    });
+  }
+
+  if (order.deliveryError) {
+    pushTraceEvent(events, {
+      id: `${order.id}:delivery-error`,
+      type: "delivery",
+      tone: "red",
+      title: "Delivery perlu perhatian",
+      detail: truncText(order.deliveryError, 220),
+      createdAt: order.fulfillmentSentAt || payment?.paidAt || order.paidAt || order.createdAt || "",
+    });
+  }
+
+  if (String(order.qrisStatus || "").toLowerCase() === "expired") {
+    pushTraceEvent(events, {
+      id: `${order.id}:expired`,
+      type: "payment",
+      tone: "red",
+      title: "Invoice expired",
+      detail: `Batas bayar order ini lewat di ${order.paymentExpiresAt || "-"}.`,
+      createdAt: order.paymentExpiresAt || order.createdAt || "",
+    });
+  }
+
+  for (const activity of db.activities || []) {
+    const activityOrderId = String(activity.orderId || "").trim();
+    const activityAccountId = String(activity.accountId || "").trim();
+    if (activityOrderId !== String(order.id || "").trim() && !deliveredAccountIds.has(activityAccountId)) continue;
+    pushTraceEvent(events, {
+      id: activity.id || `${order.id}:activity:${activity.title || activity.description}`,
+      type: activity.type || "activity",
+      tone: activity.type === "security" ? "violet" : activity.type === "account" ? "amber" : activity.type === "order" ? "slate" : activity.type === "whatsapp" ? "emerald" : "slate",
+      title: activity.title || "Aktivitas",
+      detail: truncText(activity.description, 220),
+      createdAt: activity.createdAt || "",
+    });
+  }
+
+  return events.sort((left, right) => createdAtMs(left.createdAt) - createdAtMs(right.createdAt));
+}
+
+function ownerSearchMatches(query = "", values = []) {
+  const wanted = String(query || "").trim().toLowerCase();
+  if (!wanted) return false;
+  return values.some((value) => String(value || "").toLowerCase().includes(wanted));
+}
+
+function buildOwnerSearch(db, rawQuery = "") {
+  const query = String(rawQuery || "").trim();
+  const empty = {
+    query,
+    total: 0,
+    groups: {
+      orders: [],
+      accounts: [],
+      stock: [],
+      resellers: [],
+      products: [],
+    },
+  };
+  if (!query) return empty;
+
+  const productsById = new Map((db.products || []).map((item) => [String(item.id || "").trim(), item]));
+  const productVariantMaps = new Map((db.products || []).map((product) => [
+    String(product.id || "").trim(),
+    new Map((product.variants || []).map((variant) => [String(variant.id || "").trim(), variant])),
+  ]));
+
+  const orders = (db.orders || [])
+    .filter((order) => ownerSearchMatches(query, [
+      order.id,
+      order.paymentRef,
+      order.customer,
+      order.reseller,
+      order.whatsapp,
+      order.product,
+      order.variant,
+      order.variantCode,
+      order.note,
+    ]))
+    .sort(newestFirst)
+    .slice(0, 8)
+    .map((order) => ({
+      id: order.id,
+      type: "order",
+      group: "orders",
+      title: `${order.id} - ${order.product} ${order.variant || ""}`.trim(),
+      subtitle: [order.reseller || order.customer || "-", order.whatsapp || "-", order.paymentRef || "-"].filter(Boolean).join(" • "),
+      detail: `${order.orderStatus || "-"} / ${order.deliveryStatus || "-"} / ${formatRupiah(Number(order.total || 0))}`,
+      href: operationLink({ orderId: order.id }),
+      createdAt: order.createdAt || "",
+      status: order.orderStatus || "",
+    }));
+
+  const accounts = (db.managedAccounts || [])
+    .filter((account) => ownerSearchMatches(query, [
+      account.id,
+      account.email,
+      account.stockId,
+      account.orderId,
+      account.sourceOrderId,
+      account.product,
+      account.variant,
+      account.reseller,
+      account.buyer,
+      account.whatsapp,
+      account.device,
+    ]))
+    .sort(newestFirst)
+    .slice(0, 8)
+    .map((account) => ({
+      id: account.id,
+      type: "account",
+      group: "accounts",
+      title: `${account.email || account.id} - ${account.product || "-"} ${account.variant || ""}`.trim(),
+      subtitle: [account.reseller || account.buyer || "-", account.orderId || account.sourceOrderId || "-", account.stockId || "-"].filter(Boolean).join(" • "),
+      detail: `${account.status || "-"} • mulai ${account.startedAt || "-"} • exp ${account.expiresAt || "-"}`,
+      href: operationLink({ accountId: account.id }),
+      createdAt: account.startedAt || account.createdAt || "",
+      status: account.status || "",
+    }));
+
+  const stock = (db.stock || [])
+    .filter((item) => {
+      const product = productsById.get(String(item.productId || "").trim());
+      const variant = productVariantMaps.get(String(item.productId || "").trim())?.get(String(item.variantId || "").trim());
+      return ownerSearchMatches(query, [
+        item.id,
+        item.email,
+        item.profile,
+        item.status,
+        item.productId,
+        item.variantId,
+        item.reservedFor,
+        item.sheetStockKey,
+        product?.name,
+        variant?.name,
+        variant?.code,
+      ]);
+    })
+    .sort(newestFirst)
+    .slice(0, 8)
+    .map((item) => {
+      const product = productsById.get(String(item.productId || "").trim());
+      const variant = productVariantMaps.get(String(item.productId || "").trim())?.get(String(item.variantId || "").trim());
+      return {
+        id: item.id,
+        type: "stock",
+        group: "stock",
+        title: `${item.email || item.id} - ${product?.name || item.productId || "-"} ${variant?.name || ""}`.trim(),
+        subtitle: [item.id, item.status || "-", item.reservedFor || item.sheetStockKey || "-"].filter(Boolean).join(" • "),
+        detail: [item.profile ? `profile ${item.profile}` : "", item.sheetName ? `${item.sheetName}:${item.sheetRow || "-"}` : ""].filter(Boolean).join(" • ") || "Stok account",
+        href: operationLink({ stockId: item.id }),
+        createdAt: item.soldAt || item.reservedAt || item.createdAt || "",
+        status: item.status || "",
+      };
+    });
+
+  const resellers = (db.resellers || [])
+    .filter((reseller) => ownerSearchMatches(query, [
+      reseller.id,
+      reseller.name,
+      reseller.username,
+      reseller.email,
+      reseller.whatsapp,
+    ]))
+    .sort((left, right) => String(left.name || left.username || "").localeCompare(String(right.name || right.username || "")))
+    .slice(0, 8)
+    .map((reseller) => ({
+      id: reseller.id,
+      type: "reseller",
+      group: "resellers",
+      title: reseller.name || reseller.username || reseller.id,
+      subtitle: [reseller.username || "-", reseller.whatsapp || "-", reseller.email || "-"].filter(Boolean).join(" • "),
+      detail: `${reseller.isActive === false ? "nonaktif" : "aktif"} • saldo ${formatRupiah(Number(reseller.deposit || 0))}`,
+      href: operationLink({ resellerId: reseller.id }),
+      createdAt: reseller.joinedAt || "",
+      status: reseller.isActive === false ? "inactive" : "active",
+    }));
+
+  const products = (db.products || [])
+    .filter((product) => ownerSearchMatches(query, [
+      product.id,
+      product.name,
+      product.code,
+      product.category,
+      ...(product.variants || []).flatMap((variant) => [variant.id, variant.name, variant.code]),
+    ]))
+    .slice(0, 8)
+    .map((product) => {
+      const lock = activeOrderLock(product, null);
+      return {
+        id: product.id,
+        type: "product",
+        group: "products",
+        title: `${product.name} (${product.code || "-"})`,
+        subtitle: [product.category || "-", `${(product.variants || []).length} variant`].join(" • "),
+        detail: lock?.enabled || lock ? `order locked${lock.reason ? ` • ${lock.reason}` : ""}` : (product.description || "Produk"),
+        href: operationLink({ productId: product.id }),
+        createdAt: product.archivedAt || "",
+        status: product.isArchived ? "archived" : product.isActive ? "active" : "inactive",
+      };
+    });
+
+  const groups = { orders, accounts, stock, resellers, products };
+  return {
+    query,
+    total: Object.values(groups).reduce((sum, list) => sum + list.length, 0),
+    groups,
+  };
+}
+
+function buildReconcileReport(db) {
+  const issues = [];
+  const stocks = db.stock || [];
+  const accounts = db.managedAccounts || [];
+  const orders = db.orders || [];
+  const stockById = new Map(stocks.map((item) => [String(item.id || "").trim(), item]));
+  const orderById = new Map(orders.map((item) => [String(item.id || "").trim(), item]));
+
+  for (const stock of stocks) {
+    const linkedAccounts = accounts.filter((account) => (
+      String(account.stockId || "").trim() === String(stock.id || "").trim()
+      || (stock.sheetStockKey && account.sheetStockKey && String(account.sheetStockKey) === String(stock.sheetStockKey))
+    ));
+    const activeLinked = linkedAccounts.filter((account) => !account.hidden && !account.returnedToStockAt && !isTerminalManagedAccountStatus(account.status || accountStatusFromDate(account.expiresAt, account.durationDays)));
+
+    if (stock.status === "available" && activeLinked.length) {
+      issues.push({
+        id: `stock-available-linked-${stock.id}`,
+        severity: "high",
+        kind: "stock",
+        title: "Stok available tapi masih dipakai akun aktif",
+        detail: `${stock.email || stock.id} masih tertaut ke ${activeLinked.length} akun aktif.`,
+        createdAt: stock.soldAt || stock.createdAt || "",
+        stockId: stock.id,
+        href: operationLink({ stockId: stock.id }),
+      });
+    }
+
+    if (stock.status === "reserved") {
+      const reservedOrder = orderById.get(String(stock.reservedFor || "").trim());
+      const expiredReservation = reservedOrder && (
+        reservedOrder.qrisStatus === "expired"
+        || reservedOrder.orderStatus === "cancelled"
+        || (reservedOrder.paymentExpiresAt && createdAtMs(reservedOrder.paymentExpiresAt) && createdAtMs(reservedOrder.paymentExpiresAt) < Date.now())
+      );
+      if (!reservedOrder || expiredReservation) {
+        issues.push({
+          id: `stock-reserved-stale-${stock.id}`,
+          severity: "high",
+          kind: "stock",
+          title: "Reservasi stok stale",
+          detail: `${stock.email || stock.id} masih reserved untuk ${stock.reservedFor || "order tidak dikenal"}.`,
+          createdAt: stock.reservedAt || stock.createdAt || "",
+          stockId: stock.id,
+          orderId: stock.reservedFor || "",
+          href: operationLink({ stockId: stock.id }),
+        });
+      }
+    }
+
+    if (stock.status === "sold" && !linkedAccounts.length && createdAtMs(stock.createdAt || "") >= Date.now() - 90 * 86400000) {
+      issues.push({
+        id: `stock-sold-orphan-${stock.id}`,
+        severity: "medium",
+        kind: "stock",
+        title: "Stok sold tanpa jejak akun",
+        detail: `${stock.email || stock.id} sudah sold tapi tidak ada managed account yang tertaut.`,
+        createdAt: stock.soldAt || stock.createdAt || "",
+        stockId: stock.id,
+        href: operationLink({ stockId: stock.id }),
+      });
+    }
+
+    if (stock.sheetSource === "google_sheets" && (!stock.sheetName || !stock.sheetRow)) {
+      issues.push({
+        id: `stock-sheet-meta-${stock.id}`,
+        severity: "low",
+        kind: "sheet",
+        title: "Metadata Sheets stok belum lengkap",
+        detail: `${stock.email || stock.id} belum punya sheetName/sheetRow yang lengkap.`,
+        createdAt: stock.createdAt || "",
+        stockId: stock.id,
+        href: operationLink({ stockId: stock.id }),
+      });
+    }
+
+    if (stock.historyConflict && Array.isArray(stock.historyConflictOrderIds) && stock.historyConflictOrderIds.length > 1) {
+      issues.push({
+        id: `stock-history-conflict-${stock.id}`,
+        severity: "high",
+        kind: "stock",
+        title: "Riwayat stok bentrok ke banyak order",
+        detail: `${stock.email || stock.id} / ${stock.profile || "-"} pernah tertaut ke ${stock.historyConflictOrderIds.length} order. Auto-backfill diblok agar slot ini tidak hidup lagi ke reseller lain.`,
+        createdAt: stock.soldAt || stock.historyConflictDetectedAt || stock.createdAt || "",
+        stockId: stock.id,
+        href: operationLink({ stockId: stock.id }),
+      });
+    }
+  }
+
+  for (const [key, duplicateAccounts] of managedAccountDuplicateGroups(db).entries()) {
+    const keeper = duplicateAccounts.slice().sort(compareManagedAccountPriority)[0];
+    issues.push({
+      id: `managed-duplicate-identity-${keeper?.id || key}`,
+      severity: "high",
+      kind: "account",
+      title: "Managed account aktif dobel untuk stok/order yang sama",
+      detail: `${duplicateAccounts.length} record aktif menunjuk identitas ${key}. Ini rawan bikin panel dobel dan salah baca stok.`,
+      createdAt: keeper?.startedAt || keeper?.snapshotAt || "",
+      accountId: keeper?.id || "",
+      stockId: keeper?.stockId || "",
+      orderId: keeper?.orderId || keeper?.sourceOrderId || "",
+      href: operationLink({ accountId: keeper?.id || "" }),
+    });
+  }
+
+  for (const account of accounts) {
+    if (account.hidden || account.returnedToStockAt) continue;
+    if (!isMalformedManagedAccount(account)) continue;
+    issues.push({
+      id: `managed-malformed-${account.id}`,
+      severity: "high",
+      kind: "account",
+      title: "Managed account malformed dari Google Sheets",
+      detail: `${account.id} punya data akun tidak valid (${account.email || "-"} / password kosong). Row ini disembunyikan dari panel reseller sampai Sheet dibetulkan.`,
+      createdAt: account.startedAt || account.snapshotAt || "",
+      accountId: account.id,
+      stockId: account.stockId || "",
+      orderId: account.orderId || account.sourceOrderId || "",
+      href: operationLink({ accountId: account.id }),
+    });
+  }
+
+  for (const account of accounts) {
+    const status = String(account.status || accountStatusFromDate(account.expiresAt, account.durationDays)).toLowerCase();
+    const startedAt = toAccountDateTime(account.startedAt);
+    const expiresAt = toAccountDateTime(account.expiresAt, { endOfDay: !hasTimePart(account.expiresAt), referenceDate: startedAt });
+    const relatedOrderId = String(account.orderId || account.sourceOrderId || "").trim();
+
+    if (account.stockId && !stockById.has(String(account.stockId || "").trim()) && !isVirtualManagedStockLink(account)) {
+      issues.push({
+        id: `account-stock-missing-${account.id}`,
+        severity: "medium",
+        kind: "account",
+        title: "Managed account kehilangan stock asal",
+        detail: `${account.email || account.id} tertaut ke stock ${account.stockId}, tapi stock itu tidak ada di database.`,
+        createdAt: account.startedAt || account.createdAt || "",
+        accountId: account.id,
+        stockId: account.stockId,
+        href: operationLink({ accountId: account.id }),
+      });
+    }
+
+    if (relatedOrderId && !orderById.has(relatedOrderId)) {
+      issues.push({
+        id: `account-order-missing-${account.id}`,
+        severity: "medium",
+        kind: "account",
+        title: "Managed account kehilangan order asal",
+        detail: `${account.email || account.id} masih mengarah ke order ${relatedOrderId}, tapi order itu tidak ditemukan.`,
+        createdAt: account.startedAt || account.createdAt || "",
+        accountId: account.id,
+        orderId: relatedOrderId,
+        href: operationLink({ accountId: account.id }),
+      });
+    }
+
+    if (startedAt && expiresAt && expiresAt.getTime() <= startedAt.getTime()) {
+      issues.push({
+        id: `account-duration-invalid-${account.id}`,
+        severity: "high",
+        kind: "account",
+        title: "Tanggal akun tidak valid",
+        detail: `${account.email || account.id} punya expiry <= start (${account.startedAt || "-"} -> ${account.expiresAt || "-"})`,
+        createdAt: account.startedAt || account.createdAt || "",
+        accountId: account.id,
+        href: operationLink({ accountId: account.id }),
+      });
+    }
+
+    if (status === "expired" && !account.hidden && !account.returnedToStockAt) {
+      issues.push({
+        id: `account-expired-live-${account.id}`,
+        severity: "high",
+        kind: "expiry",
+        title: "Akun sudah expired tapi belum dibersihkan",
+        detail: `${account.email || account.id} masih visible walau sudah expired.`,
+        createdAt: account.expiresAt || account.startedAt || "",
+        accountId: account.id,
+        href: operationLink({ accountId: account.id }),
+      });
+    }
+
+    if (account.sheetSource === "google_sheets" && (!account.sheetName || !account.sheetRow)) {
+      issues.push({
+        id: `account-sheet-meta-${account.id}`,
+        severity: "low",
+        kind: "sheet",
+        title: "Metadata Sheets akun belum lengkap",
+        detail: `${account.email || account.id} belum punya sheetName/sheetRow yang lengkap.`,
+        createdAt: account.startedAt || account.createdAt || "",
+        accountId: account.id,
+        href: operationLink({ accountId: account.id }),
+      });
+    }
+  }
+
+  for (const order of orders) {
+    if (order.type === "deposit_topup" || order.orderType === "deposit_topup") continue;
+    if (createdAtMs(order.createdAt || "") < Date.now() - 60 * 86400000) continue;
+    const linkedAccounts = deliveredAccountsForOrder(db, order, { includeHidden: true });
+    if ((order.deliveryStatus === "sent" || order.orderStatus === "completed") && !linkedAccounts.length) {
+      issues.push({
+        id: `order-missing-account-${order.id}`,
+        severity: "high",
+        kind: "order",
+        title: "Order selesai tanpa jejak akun",
+        detail: `${order.id} sudah ${order.deliveryStatus || order.orderStatus} tapi belum punya akun tertaut.`,
+        createdAt: order.fulfillmentSentAt || order.paidAt || order.createdAt || "",
+        orderId: order.id,
+        href: operationLink({ orderId: order.id }),
+      });
+    }
+  }
+
+  const sorted = issues.sort(compareQueueItems);
+  return {
+    summary: {
+      total: sorted.length,
+      high: sorted.filter((item) => item.severity === "high").length,
+      medium: sorted.filter((item) => item.severity === "medium").length,
+      low: sorted.filter((item) => item.severity === "low").length,
+      managedDuplicates: sorted.filter((item) => item.id.startsWith("managed-duplicate-identity-")).length,
+    },
+    issues: sorted.slice(0, 40),
+  };
+}
+
+function buildSheetsRowAudit(db) {
+  const rows = (db.stock || []).filter(isGoogleSheetsBackedStock);
+  const accounts = db.managedAccounts || [];
+  const orders = db.orders || [];
+  const issues = [];
+  const affectedStockIds = new Set();
+  const deliveredOwners = new Map();
+
+  for (const order of orders) {
+    for (const rawStockId of order.deliveredStockIds || []) {
+      const stockId = String(rawStockId || "").trim();
+      if (!stockId) continue;
+      const owners = deliveredOwners.get(stockId) || [];
+      owners.push(order);
+      deliveredOwners.set(stockId, owners);
+    }
+  }
+
+  const addIssue = (stock, severity, code, title, detail) => {
+    const stockId = String(stock?.id || "").trim();
+    if (stockId) affectedStockIds.add(stockId);
+    issues.push({
+      id: `sheet-row-${code}-${stockId || issues.length}`,
+      severity,
+      kind: "sheet",
+      code,
+      title,
+      detail,
+      stockId,
+      sheetName: stock?.sheetName || "",
+      sheetRow: Number(stock?.sheetRow || 0),
+      identity: stock?.loginPhone || stock?.email || stock?.profile || stockId,
+      createdAt: stock?.sheetLastSyncedAt || stock?.soldAt || "",
+      href: operationLink({ stockId }),
+    });
+  };
+
+  for (const stock of rows) {
+    const sold = String(stock.status || "").toLowerCase() === "sold";
+    const linked = accounts.filter((account) => String(account.stockId || "").trim() === String(stock.id || "").trim() && !account.hidden && !account.returnedToStockAt);
+    const sellerInput = String(stock.sheetSellerInput || "").trim();
+    const resolvedSeller = sellerInput ? resellerBySellerText(db, sellerInput) : null;
+
+    if (!stock.sheetName || !Number(stock.sheetRow || 0) || (!stock.email && !stock.loginPhone && !stock.password)) {
+      addIssue(stock, "high", "invalid", "Baris Sheets tidak valid", "Identitas akun atau metadata sheet/row belum lengkap.");
+    }
+    if (stock.sheetResellerConflict || (sold && sellerInput && !resolvedSeller)) {
+      addIssue(stock, "high", "ambiguous", "Seller Sheets ambigu", `SELLER '${sellerInput || "-"}' belum mengarah ke tepat satu reseller aktif.`);
+    }
+    if (sold && (!stock.soldAt || !Number(stock.soldDurationDays || 0))) {
+      addIssue(stock, "high", "invalid", "Assignment Sheets belum lengkap", "SELLER terisi tetapi TANGGAL atau DURASI belum valid.");
+    }
+    if (sold && linked.length === 0) {
+      addIssue(stock, "high", "mismatch", "Akun sold belum tampil di Manage Account", "Baris terjual di Sheets belum mempunyai managed account aktif.");
+    }
+    if (!sold && linked.length > 0) {
+      addIssue(stock, "high", "mismatch", "Baris kosong masih memiliki akun aktif", `${linked.length} managed account masih aktif walau SELLER di Sheets kosong.`);
+    }
+    if (sold && linked.length > 1) {
+      addIssue(stock, "high", "duplicate", "Satu baris memiliki beberapa akun aktif", `${linked.length} managed account aktif menunjuk Stock ID yang sama.`);
+    }
+    const ownerOrders = deliveredOwners.get(String(stock.id || "").trim()) || [];
+    if (ownerOrders.length > 1) {
+      addIssue(stock, "high", "duplicate", "Stock ID dipakai beberapa order", `${ownerOrders.length} order masih mencantumkan Stock ID ini.`);
+    }
+    if (sold && linked[0]) {
+      const account = linked[0];
+      const temporalMismatch = String(account.startedAt || "").trim() !== String(stock.soldAt || "").trim()
+        || Number(account.durationDays || 0) !== Number(stock.soldDurationDays || 0)
+        || String(account.expiresAt || "").trim() !== String(stock.soldExpiresAt || stock.expiresAt || "").trim();
+      const sellerMismatch = resolvedSeller?.id && String(account.resellerId || "").trim() !== String(resolvedSeller.id || "").trim();
+      if (temporalMismatch || sellerMismatch) {
+        addIssue(stock, "high", "mismatch", "Data web berbeda dari Sheets", [temporalMismatch ? "tanggal/durasi" : "", sellerMismatch ? "seller" : ""].filter(Boolean).join(" dan ") + " tidak sama.");
+      }
+    }
+  }
+
+  const paidNotDelivered = orders.filter((order) => (
+    String(order.qrisStatus || "").toLowerCase() === "paid"
+    && String(order.deliveryStatus || "").toLowerCase() !== "sent"
+    && !["deposit_topup"].includes(String(order.orderType || order.type || "").toLowerCase())
+  )).length;
+  const sorted = issues.sort(compareQueueItems);
+  return {
+    checkedAt: new Date().toISOString(),
+    summary: {
+      rowsRead: rows.length,
+      matched: Math.max(0, rows.length - affectedStockIds.size),
+      invalid: sorted.filter((item) => item.code === "invalid").length,
+      ambiguous: sorted.filter((item) => item.code === "ambiguous").length,
+      mismatch: sorted.filter((item) => item.code === "mismatch").length,
+      duplicateStock: sorted.filter((item) => item.code === "duplicate").length,
+      paidNotDelivered,
+    },
+    issues: sorted.slice(0, 100),
+  };
+}
+
+function buildDeliveryAuditQueue(db) {
+  const issues = [];
+  const orders = (db.orders || []).filter((order) => order.type !== "deposit_topup" && order.orderType !== "deposit_topup");
+
+  for (const order of orders) {
+    const recentMoment = Math.max(
+      createdAtMs(order.fulfillmentSentAt || ""),
+      createdAtMs(order.paidAt || ""),
+      createdAtMs(order.createdAt || ""),
+    );
+    if (recentMoment && recentMoment < Date.now() - 90 * 86400000) continue;
+
+    const delivery = String(order.deliveryStatus || "").toLowerCase();
+    const status = String(order.orderStatus || "").toLowerCase();
+    const qty = Math.max(1, Number(order.qty || 1));
+    const linkedAccounts = deliveredAccountsForOrder(db, order, { includeHidden: true })
+      .filter((account) => !account.returnedToStockAt && !account.hidden);
+    const removedConflictStocks = Array.isArray(order.historyConflictRemovedStockIds) ? order.historyConflictRemovedStockIds.filter(Boolean) : [];
+    const missingSheetAccounts = linkedAccounts.filter((account) => (
+      String(account.sheetSource || "").toLowerCase() === "google_sheets"
+      && (!account.sheetName || !account.sheetRow)
+    ));
+
+    if (delivery === "needs_redelivery" || removedConflictStocks.length) {
+      issues.push({
+        id: `delivery-order-redelivery-${order.id}`,
+        severity: "high",
+        kind: "delivery",
+        title: "Order perlu redelivery",
+        detail: `${order.id} kehilangan stock delivery karena konflik histori${removedConflictStocks.length ? ` (${removedConflictStocks.length} stock dicabut)` : ""}. Order ini perlu akun pengganti atau follow-up manual.`,
+        createdAt: order.redeliveryFlaggedAt || order.historyConflictRemovedAt || order.fulfillmentSentAt || order.paidAt || order.createdAt || "",
+        orderId: order.id,
+        href: operationLink({ orderId: order.id }),
+      });
+    }
+
+    if ((delivery === "sent" || status === "completed") && linkedAccounts.length === 0) {
+      issues.push({
+        id: `delivery-order-missing-${order.id}`,
+        severity: "high",
+        kind: "delivery",
+        title: "Order selesai tapi akun belum tertaut",
+        detail: `${order.id} sudah ${order.deliveryStatus || order.orderStatus}, tapi belum ada akun yang tertaut ke history delivery.`,
+        createdAt: order.fulfillmentSentAt || order.paidAt || order.createdAt || "",
+        orderId: order.id,
+        href: operationLink({ orderId: order.id }),
+      });
+      continue;
+    }
+
+    if ((delivery === "sent" || status === "completed") && linkedAccounts.length < qty) {
+      issues.push({
+        id: `delivery-order-under-${order.id}`,
+        severity: "high",
+        kind: "delivery",
+        title: "Jumlah akun terkirim kurang dari qty order",
+        detail: `${order.id} butuh ${qty} akun, tapi baru ${linkedAccounts.length} akun yang tertaut.`,
+        createdAt: order.fulfillmentSentAt || order.paidAt || order.createdAt || "",
+        orderId: order.id,
+        href: operationLink({ orderId: order.id }),
+      });
+    }
+
+    if (linkedAccounts.length > qty) {
+      issues.push({
+        id: `delivery-order-over-${order.id}`,
+        severity: "high",
+        kind: "delivery",
+        title: "Jumlah akun tertaut melebihi qty order",
+        detail: `${order.id} qty ${qty}, tapi ada ${linkedAccounts.length} akun tertaut. Ini sinyal double drop atau rebuild ganda.`,
+        createdAt: order.fulfillmentSentAt || order.paidAt || order.createdAt || "",
+        orderId: order.id,
+        href: operationLink({ orderId: order.id }),
+      });
+    }
+
+    if (missingSheetAccounts.length) {
+      issues.push({
+        id: `delivery-sheet-pending-${order.id}`,
+        severity: linkedAccounts.length ? "medium" : "high",
+        kind: "sheet",
+        title: "Akun terkirim belum punya metadata Sheets lengkap",
+        detail: `${order.id} punya ${missingSheetAccounts.length} akun delivery tanpa sheetName/sheetRow lengkap.`,
+        createdAt: order.fulfillmentSentAt || order.paidAt || order.createdAt || "",
+        orderId: order.id,
+        href: operationLink({ orderId: order.id }),
+      });
+    }
+
+    if ((delivery === "sent" || status === "completed") && order.whatsappNotificationStatus === "failed") {
+      issues.push({
+        id: `delivery-wa-failed-${order.id}`,
+        severity: "medium",
+        kind: "whatsapp",
+        title: "Akun selesai diproses tapi notif WhatsApp gagal",
+        detail: truncText(order.whatsappNotificationError || order.deliveryError || `Notif untuk ${order.id} gagal terkirim.`, 220),
+        createdAt: order.whatsappNotificationSentAt || order.fulfillmentSentAt || order.paidAt || order.createdAt || "",
+        orderId: order.id,
+        href: operationLink({ orderId: order.id }),
+      });
+    }
+  }
+
+  const sorted = issues.sort(compareQueueItems);
+  return {
+    summary: {
+      total: sorted.length,
+      high: sorted.filter((item) => item.severity === "high").length,
+      missingAccounts: sorted.filter((item) => item.id.startsWith("delivery-order-missing-") || item.id.startsWith("delivery-order-under-")).length,
+      duplicateDrops: sorted.filter((item) => item.id.startsWith("delivery-order-over-")).length,
+      sheetPending: sorted.filter((item) => item.id.startsWith("delivery-sheet-pending-")).length,
+      whatsappFailed: sorted.filter((item) => item.id.startsWith("delivery-wa-failed-")).length,
+    },
+    items: sorted.slice(0, 40),
+  };
+}
+
+function buildReservedStockQueue(db) {
+  const issues = [];
+  const stocks = db.stock || [];
+  const ordersById = new Map((db.orders || []).map((item) => [String(item.id || "").trim(), item]));
+  const activeAccountsById = new Map(
+    (db.managedAccounts || [])
+      .filter((account) => !account.hidden && !account.returnedToStockAt)
+      .map((account) => [String(account.id || "").trim(), account]),
+  );
+
+  for (const stock of stocks) {
+    if (String(stock.status || "").toLowerCase() !== "reserved") continue;
+    const order = ordersById.get(String(stock.reservedFor || "").trim()) || null;
+    const linkedAccount = activeAccountsById.get(String(stock.reservedAccountId || "").trim()) || null;
+    const { product, variant } = stockProductVariant(db, stock);
+    const reservedUntilMs = createdAtMs(stock.reservedUntil || "");
+    const orderUntilMs = createdAtMs(order?.paymentExpiresAt || "");
+    const stale = !order
+      || String(order?.orderStatus || "").toLowerCase() === "cancelled"
+      || String(order?.qrisStatus || "").toLowerCase() === "expired"
+      || Boolean((reservedUntilMs && reservedUntilMs < Date.now()) || (orderUntilMs && orderUntilMs < Date.now()));
+    const waitingPayment = Boolean(order && !linkedAccount && !stale);
+    const linkedDaily = Boolean(linkedAccount);
+    const title = stale
+      ? "Reserved stock stale"
+      : linkedDaily
+        ? "Reserved stock dipakai akun harian"
+        : "Reserved stock menunggu order selesai";
+    issues.push({
+      id: `stock-lock-${stock.id}`,
+      severity: stale ? "high" : waitingPayment ? "medium" : "low",
+      kind: "stock_lock",
+      title,
+      detail: [
+        stock.email || stock.id,
+        product?.name || stock.productId || "-",
+        variant?.name || stock.variantId || "-",
+        linkedDaily ? `akun ${linkedAccount.email || linkedAccount.id}` : order ? `order ${order.id}` : "order hilang",
+        stock.reservedUntil ? `s/d ${stock.reservedUntil}` : "",
+      ].filter(Boolean).join(" • "),
+      createdAt: stock.reservedAt || order?.createdAt || stock.createdAt || "",
+      stockId: stock.id,
+      orderId: order?.id || "",
+      accountId: linkedAccount?.id || "",
+      href: operationLink({ stockId: stock.id }),
+    });
+  }
+
+  const sorted = issues.sort(compareQueueItems);
+  return {
+    summary: {
+      total: sorted.length,
+      stale: sorted.filter((item) => item.severity === "high").length,
+      waitingPayment: sorted.filter((item) => item.title === "Reserved stock menunggu order selesai").length,
+      linkedDaily: sorted.filter((item) => item.title === "Reserved stock dipakai akun harian").length,
+    },
+    items: sorted.slice(0, 50),
+  };
+}
+
+function buildExpiryQueue(db) {
+  const expiringSoon = [];
+  const expiredActive = [];
+  const durationAnomalies = [];
+
+  for (const account of db.managedAccounts || []) {
+    const status = String(account.status || accountStatusFromDate(account.expiresAt, account.durationDays)).toLowerCase();
+    const daysLeft = daysLeftUntil(account.expiresAt);
+    const startedAt = toAccountDateTime(account.startedAt);
+    const expiresAt = toAccountDateTime(account.expiresAt, { endOfDay: !hasTimePart(account.expiresAt), referenceDate: startedAt });
+    const row = {
+      id: account.id,
+      accountId: account.id,
+      stockId: account.stockId || "",
+      orderId: account.orderId || account.sourceOrderId || "",
+      product: account.product || "",
+      variant: account.variant || "",
+      email: account.email || "",
+      buyer: account.buyer || "",
+      reseller: account.reseller || "",
+      status,
+      startedAt: account.startedAt || "",
+      expiresAt: account.expiresAt || "",
+      daysLeft,
+      href: operationLink({ accountId: account.id }),
+    };
+
+    if (startedAt && expiresAt && expiresAt.getTime() <= startedAt.getTime()) {
+      durationAnomalies.push({
+        ...row,
+        severity: "high",
+        needsAction: "Periksa tanggal mulai dan expiry. Data durasi tidak valid.",
+      });
+    }
+
+    if (account.hidden || account.returnedToStockAt) continue;
+    if (status === "expired") {
+      expiredActive.push({
+        ...row,
+        severity: "high",
+        needsAction: "Return ke stok atau arsipkan jika memang sudah tidak dipakai.",
+      });
+      continue;
+    }
+    if (daysLeft !== null && daysLeft >= 0 && daysLeft <= 5) {
+      expiringSoon.push({
+        ...row,
+        severity: daysLeft <= 1 ? "high" : daysLeft <= 3 ? "medium" : "low",
+        needsAction: daysLeft <= 1 ? "Siapkan cleanup atau gantian akun." : "Monitor agar cleanup tepat waktu.",
+      });
+    }
+  }
+
+  return {
+    summary: {
+      expiringSoon: expiringSoon.length,
+      expiredActive: expiredActive.length,
+      durationAnomalies: durationAnomalies.length,
+    },
+    expiringSoon: expiringSoon.sort(compareQueueItems).slice(0, 30),
+    expiredActive: expiredActive.sort(compareQueueItems).slice(0, 30),
+    durationAnomalies: durationAnomalies.sort(compareQueueItems).slice(0, 20),
+  };
+}
+
+function buildWalletLedger(db) {
+  const entries = [];
+  const summaryByReseller = new Map();
+
+  const ensureResellerSummary = (resellerId = "", fallbackName = "", fallbackWhatsapp = "") => {
+    const reseller = (db.resellers || []).find((item) => item.id === resellerId) || null;
+    const key = resellerId || normalizeWhatsappNumber(fallbackWhatsapp) || normalizeLoginIdentifier(fallbackName) || "unknown";
+    if (!summaryByReseller.has(key)) {
+      summaryByReseller.set(key, {
+        resellerId: reseller?.id || resellerId || "",
+        resellerName: resellerDisplayName(reseller, fallbackName || fallbackWhatsapp || "Unknown"),
+        whatsapp: primaryResellerWhatsapp(reseller) || normalizeWhatsappNumber(fallbackWhatsapp) || "",
+        currentBalance: Number(reseller?.deposit || 0),
+        totalTopup: 0,
+        totalSpent: 0,
+        totalRefund: 0,
+        totalLateCredit: 0,
+        totalOrders: 0,
+      });
+    }
+    return summaryByReseller.get(key);
+  };
+
+  const pushEntry = (entry) => {
+    entries.push(entry);
+    const summary = ensureResellerSummary(entry.resellerId, entry.resellerName, entry.whatsapp);
+    if (entry.kind === "credit") summary.totalTopup += Number(entry.amount || 0);
+    if (entry.type === "order_spend") {
+      summary.totalSpent += Number(entry.amount || 0);
+      summary.totalOrders += 1;
+    }
+    if (entry.type === "deposit_refund" || entry.type === "stock_race_credit") {
+      summary.totalRefund += Number(entry.amount || 0);
+    }
+    if (entry.type === "late_paid_credit") {
+      summary.totalLateCredit += Number(entry.amount || 0);
+    }
+  };
+
+  for (const order of db.orders || []) {
+    const reseller = (db.resellers || []).find((item) => item.id === order.resellerId) || null;
+    const resellerName = resellerDisplayName(reseller, order.reseller || order.customer || order.whatsapp || "");
+    const whatsapp = primaryResellerWhatsapp(reseller) || normalizeWhatsappNumber(order.whatsapp || "");
+
+    if (Number(order.depositUsed || 0) > 0) {
+      pushEntry({
+        id: `ledger-spend-${order.id}`,
+        type: "order_spend",
+        kind: "debit",
+        resellerId: order.resellerId || "",
+        resellerName,
+        whatsapp,
+        amount: Number(order.depositUsed || 0),
+        balanceBefore: Number(order.depositBefore || 0),
+        balanceAfter: Number(order.depositAfter || 0),
+        orderId: order.id,
+        createdAt: order.createdAt || "",
+        status: order.orderStatus || "",
+        detail: `${orderDisplayName(order)} memakai deposit.`,
+      });
+    }
+
+    if (order.depositRefunded && Number(order.depositUsed || 0) > 0) {
+      pushEntry({
+        id: `ledger-refund-${order.id}`,
+        type: "deposit_refund",
+        kind: "credit",
+        resellerId: order.resellerId || "",
+        resellerName,
+        whatsapp,
+        amount: Number(order.depositUsed || 0),
+        orderId: order.id,
+        createdAt: order.depositRefundedAt || order.createdAt || "",
+        status: "refund",
+        detail: `Refund deposit untuk ${orderDisplayName(order)}.`,
+      });
+    }
+
+    if (order.stockRaceDepositCreditedAt) {
+      pushEntry({
+        id: `ledger-stock-race-${order.id}`,
+        type: "stock_race_credit",
+        kind: "credit",
+        resellerId: order.resellerId || "",
+        resellerName,
+        whatsapp,
+        amount: Number(order.stockRaceDepositAmount || order.total || 0),
+        balanceBefore: Number(order.depositBefore || 0),
+        balanceAfter: Number(order.depositAfter || 0),
+        orderId: order.id,
+        createdAt: order.stockRaceDepositCreditedAt,
+        status: "credited",
+        detail: `Dana order ${order.id} dikreditkan karena stok habis.`,
+      });
+    }
+
+    if (order.latePaidDepositCreditedAt) {
+      pushEntry({
+        id: `ledger-late-paid-${order.id}`,
+        type: "late_paid_credit",
+        kind: "credit",
+        resellerId: order.resellerId || "",
+        resellerName,
+        whatsapp,
+        amount: Number(order.latePaidDepositAmount || order.paymentDue || order.total || 0),
+        balanceBefore: Number(order.depositBefore || 0),
+        balanceAfter: Number(order.depositAfter || 0),
+        orderId: order.id,
+        createdAt: order.latePaidDepositCreditedAt,
+        status: "credited",
+        detail: `Pembayaran telat untuk ${order.id} masuk ke saldo reseller.`,
+      });
+    }
+
+    if ((order.type === "deposit_topup" || order.orderType === "deposit_topup") && (order.deliveryStatus === "sent" || order.orderStatus === "completed")) {
+      pushEntry({
+        id: `ledger-topup-${order.id}`,
+        type: "deposit_topup_paid",
+        kind: "credit",
+        resellerId: order.resellerId || "",
+        resellerName,
+        whatsapp,
+        amount: Number(order.depositAdded || order.total || 0),
+        balanceBefore: Number(order.depositBefore || 0),
+        balanceAfter: Number(order.depositAfter || 0),
+        orderId: order.id,
+        createdAt: order.paidAt || order.fulfillmentSentAt || order.createdAt || "",
+        status: "paid",
+        detail: "Top up saldo QRIS otomatis berhasil.",
+      });
+    }
+  }
+
+  for (const request of db.depositRequests || []) {
+    if (String(request.status || "").toLowerCase() !== "approved" || request.orderId) continue;
+    pushEntry({
+      id: `ledger-manual-${request.id}`,
+      type: "manual_topup",
+      kind: "credit",
+      resellerId: request.resellerId || "",
+      resellerName: request.resellerName || request.whatsapp || "Reseller",
+      whatsapp: normalizeWhatsappNumber(request.whatsapp || ""),
+      amount: Number(request.amount || 0),
+      requestId: request.id,
+      createdAt: request.reviewedAt || request.createdAt || "",
+      status: "approved",
+      detail: `Approve manual deposit ${request.method || "manual"}.`,
+    });
+  }
+
+  const resellerSummaries = Array.from(summaryByReseller.values())
+    .sort((left, right) => Number(right.currentBalance || 0) - Number(left.currentBalance || 0));
+  const allEntries = [...entries].sort(compareQueueItems);
+  const sortedEntries = allEntries.slice(0, 120);
+  return {
+    summary: {
+      totalBalance: resellerSummaries.reduce((sum, item) => sum + Number(item.currentBalance || 0), 0),
+      totalTopup: allEntries.filter((item) => item.kind === "credit").reduce((sum, item) => sum + Number(item.amount || 0), 0),
+      totalSpent: allEntries.filter((item) => item.type === "order_spend").reduce((sum, item) => sum + Number(item.amount || 0), 0),
+      resellerCount: resellerSummaries.length,
+      pendingRequests: (db.depositRequests || []).filter((item) => String(item.status || "pending").toLowerCase() === "pending").length,
+    },
+    resellerSummaries,
+    entries: sortedEntries,
+  };
+}
+
+function buildResellerHealthQueue(db) {
+  const issues = [];
+  const activeAccounts = (db.managedAccounts || []).filter((account) => !account.hidden && !account.returnedToStockAt);
+  const activeOrders = (db.orders || []).filter((order) => order.type !== "deposit_topup" && order.orderType !== "deposit_topup");
+
+  for (const account of activeAccounts) {
+    if (isMalformedManagedAccount(account)) {
+      issues.push({
+        id: `reseller-account-malformed-${account.id}`,
+        severity: "high",
+        kind: "reseller",
+        title: "Akun reseller tampil kosong karena row Sheets rusak",
+        detail: `${account.id} terbaca sebagai ${account.email || "-"} dengan password kosong. Biasanya kolom ACCOUNT/PASSWORD di Sheets bergeser atau tidak terisi benar.`,
+        createdAt: account.startedAt || account.createdAt || "",
+        accountId: account.id,
+        stockId: account.stockId || "",
+        orderId: account.orderId || account.sourceOrderId || "",
+        href: operationLink({ accountId: account.id }),
+        resellerId: account.resellerId || "",
+      });
+      continue;
+    }
+    const snapshot = managedAccountOwnershipSnapshot(db, account);
+    const currentResellerId = String(account.resellerId || "").trim();
+    const expectedResellerId = String(snapshot.expected?.resellerId || "").trim();
+    const currentWhatsapp = normalizeWhatsappNumber(account.whatsapp || "");
+    const expectedWhatsapp = normalizeWhatsappNumber(snapshot.expected?.whatsapp || "");
+    if (!expectedResellerId && !expectedWhatsapp) {
+      if (String(account.orderId || account.sourceOrderId || "").trim() || account.stockId) {
+        const isLegacyLink = ["link_pool_sheet", "canva_sheet"].includes(String(account.source || ""));
+        issues.push({
+          id: `${isLegacyLink ? "reseller-link-owner-missing" : "reseller-owner-missing"}-${account.id}`,
+          severity: "high",
+          kind: "reseller",
+          title: isLegacyLink ? "Akun link pool legacy belum punya owner reseller" : "Managed account belum punya owner reseller yang jelas",
+          detail: isLegacyLink
+            ? `${account.email || account.id} masih aktif di Canva/link pool, tapi metadata reseller kosong. Biasanya ini bikin Manage Account reseller tidak sinkron.`
+            : `${account.email || account.id} masih aktif, tapi owner reseller tidak bisa dipastikan dari order/WhatsApp.`,
+          createdAt: account.startedAt || account.createdAt || "",
+          accountId: account.id,
+          stockId: account.stockId || "",
+          orderId: account.orderId || account.sourceOrderId || "",
+          href: operationLink({ accountId: account.id }),
+          resellerId: "",
+        });
+      }
+      continue;
+    }
+    const resellerNameChanged = Boolean(snapshot.expected?.reseller && account.reseller !== snapshot.expected.reseller);
+    const resellerIdChanged = Boolean(expectedResellerId && currentResellerId !== expectedResellerId);
+    const whatsappChanged = Boolean(expectedWhatsapp && currentWhatsapp !== expectedWhatsapp);
+    const orderLinkMissing = Boolean(snapshot.order?.id && (!account.orderId || !account.sourceOrderId));
+    if (resellerIdChanged || whatsappChanged || resellerNameChanged || orderLinkMissing) {
+      issues.push({
+        id: `reseller-owner-drift-${account.id}`,
+        severity: resellerIdChanged || orderLinkMissing ? "high" : "medium",
+        kind: "reseller",
+        title: "Ownership akun reseller drift",
+        detail: `${account.email || account.id} tersimpan untuk ${account.reseller || account.resellerId || "-"}, tapi hasil resolve mengarah ke ${snapshot.expected?.reseller || expectedResellerId || expectedWhatsapp || "-"}.`,
+        createdAt: account.startedAt || account.createdAt || "",
+        accountId: account.id,
+        stockId: account.stockId || "",
+        orderId: snapshot.order?.id || account.orderId || account.sourceOrderId || "",
+        href: operationLink({ accountId: account.id }),
+        resellerId: expectedResellerId || currentResellerId || "",
+      });
+    }
+  }
+
+  for (const order of activeOrders) {
+    const orderMoment = createdAtMs(order.createdAt || "");
+    if (orderMoment && orderMoment < Date.now() - 90 * 86400000) continue;
+    const delivery = String(order.deliveryStatus || "").toLowerCase();
+    const status = String(order.orderStatus || "").toLowerCase();
+    const linkedAccounts = deliveredAccountsForOrder(db, order, { includeHidden: true })
+      .filter((account) => !account.returnedToStockAt && !isTerminalManagedAccountStatus(account.status || accountStatusFromDate(account.expiresAt, account.durationDays)));
+    const qty = Math.max(1, Number(order.qty || 1));
+    if ((delivery === "sent" || status === "completed") && linkedAccounts.length < qty) {
+      issues.push({
+        id: `reseller-order-missing-accounts-${order.id}`,
+        severity: "high",
+        kind: "reseller",
+        title: "Order reseller selesai tapi Manage Account belum lengkap",
+        detail: `${order.id} butuh ${qty} akun, tapi yang tertaut baru ${linkedAccounts.length}. Ini yang bikin panel reseller terasa kosong atau tidak sinkron.`,
+        createdAt: order.fulfillmentSentAt || order.paidAt || order.createdAt || "",
+        orderId: order.id,
+        href: operationLink({ orderId: order.id }),
+        resellerId: order.resellerId || "",
+      });
+    }
+    if (linkedAccounts.length > qty) {
+      issues.push({
+        id: `reseller-order-duplicate-${order.id}`,
+        severity: "high",
+        kind: "reseller",
+        title: "Order reseller terindikasi double drop",
+        detail: `${order.id} qty ${qty}, tapi ada ${linkedAccounts.length} akun aktif tertaut. Perlu cek sebelum reseller lihat data ganda.`,
+        createdAt: order.fulfillmentSentAt || order.paidAt || order.createdAt || "",
+        orderId: order.id,
+        href: operationLink({ orderId: order.id }),
+        resellerId: order.resellerId || "",
+      });
+    }
+  }
+
+  for (const [key, duplicateAccounts] of managedAccountDuplicateGroups(db).entries()) {
+    const keeper = duplicateAccounts.slice().sort(compareManagedAccountPriority)[0];
+    const resellerId = String(keeper?.resellerId || "").trim();
+    issues.push({
+      id: `reseller-managed-duplicate-${keeper?.id || key}`,
+      severity: "high",
+      kind: "reseller",
+      title: "Manage Account reseller dobel untuk stok/order yang sama",
+      detail: `${duplicateAccounts.length} record aktif menunjuk ${key}. Reseller bisa lihat akun ganda walau stok fisiknya satu.`,
+      createdAt: keeper?.startedAt || keeper?.snapshotAt || "",
+      accountId: keeper?.id || "",
+      stockId: keeper?.stockId || "",
+      orderId: keeper?.orderId || keeper?.sourceOrderId || "",
+      href: operationLink({ accountId: keeper?.id || "" }),
+      resellerId,
+    });
+  }
+
+  const netflixByEmail = new Map();
+  for (const account of activeAccounts) {
+    if (isMalformedManagedAccount(account)) continue;
+    if (!isNetflixManagedAccount(account)) continue;
+    const emailKey = String(account.email || "").trim().toLowerCase();
+    if (!emailKey) continue;
+    const list = netflixByEmail.get(emailKey) || [];
+    list.push(account);
+    netflixByEmail.set(emailKey, list);
+  }
+
+  for (const [email, accounts] of netflixByEmail.entries()) {
+    if (accounts.length < 2) continue;
+    const passwords = [...new Set(accounts.map((account) => String(account.password || "").trim()).filter(Boolean))];
+    if (passwords.length <= 1) continue;
+    const keeper = accounts.slice().sort(compareManagedAccountPriority)[0];
+    issues.push({
+      id: `reseller-password-drift-${keeper?.id || email}`,
+      severity: "high",
+      kind: "reseller",
+      title: "Password akun Netflix tidak konsisten untuk email yang sama",
+      detail: `${email} dipakai di ${accounts.length} slot aktif dengan ${passwords.length} password berbeda. Ini biasanya drift dari Sheets atau password account berubah sebagian.`,
+      createdAt: keeper?.startedAt || keeper?.snapshotAt || "",
+      accountId: keeper?.id || "",
+      stockId: keeper?.stockId || "",
+      orderId: keeper?.orderId || keeper?.sourceOrderId || "",
+      href: operationLink({ accountId: keeper?.id || "" }),
+      resellerId: keeper?.resellerId || "",
+    });
+  }
+
+  const sorted = issues.sort(compareQueueItems);
+  return {
+    summary: {
+      total: sorted.length,
+      high: sorted.filter((item) => item.severity === "high").length,
+      medium: sorted.filter((item) => item.severity === "medium").length,
+      missingOwner: sorted.filter((item) => item.id.startsWith("reseller-owner-missing-")).length,
+      legacyLinkOwnerless: sorted.filter((item) => item.id.startsWith("reseller-link-owner-missing-")).length,
+      orderMissingAccounts: sorted.filter((item) => item.id.startsWith("reseller-order-missing-accounts-")).length,
+      duplicateDrops: sorted.filter((item) => item.id.startsWith("reseller-order-duplicate-")).length,
+      managedDuplicates: sorted.filter((item) => item.id.startsWith("reseller-managed-duplicate-")).length,
+    },
+    items: sorted.slice(0, 50),
+  };
+}
+
+async function buildWhatsAppHealth(db) {
+  const [status, rentals] = await Promise.all([
+    getWhatsAppBotStatus(db),
+    mergedWhatsappRentals(db, { includeExpired: true }),
+  ]);
+  const recentMessages = (db.whatsappMessages || [])
+    .slice(0, 20)
+    .map((item) => ({
+      id: item.id,
+      direction: item.direction || "unknown",
+      from: item.from || "",
+      to: item.to || "",
+      body: truncText(item.body, 220),
+      createdAt: item.createdAt || "",
+    }));
+
+  const silentGroups = rentals
+    .filter((item) => item.status === "active")
+    .map((item) => {
+      const reasons = [];
+      if (!String(item.groupJid || "").trim().endsWith("@g.us")) reasons.push("JID grup belum tersinkron");
+      if (item.joinStatus !== "joined") reasons.push(item.joinError ? `Join error: ${item.joinError}` : "Bot belum benar-benar join");
+      if (Number(item.listCount || 0) <= 0) reasons.push("List grup masih kosong");
+      return {
+        id: item.id,
+        groupId: item.id,
+        name: item.name || item.groupJid || item.id,
+        groupJid: item.groupJid || "",
+        daysLeft: Number(item.daysLeft || 0),
+        joinStatus: item.joinStatus || "",
+        joinError: item.joinError || "",
+        listCount: Number(item.listCount || 0),
+        severity: reasons.length >= 2 ? "high" : reasons.length ? "medium" : "low",
+        reason: reasons.join(". "),
+        href: operationLink({ groupId: item.id }),
+      };
+    })
+    .filter((item) => item.reason)
+    .sort(compareQueueItems);
+
+  const recentFailures = [
+    ...(db.orders || [])
+      .filter((order) => order.whatsappNotificationStatus === "failed" || order.whatsappDeliveryStatus === "failed")
+      .map((order) => ({
+        id: `wa-fail-${order.id}`,
+        title: `Notif WhatsApp gagal untuk ${order.id}`,
+        detail: truncText(order.whatsappNotificationError || order.deliveryError || "Pengiriman WhatsApp gagal.", 220),
+        createdAt: order.whatsappNotificationSentAt || order.fulfillmentSentAt || order.createdAt || "",
+        severity: "high",
+        href: operationLink({ orderId: order.id }),
+      })),
+    ...silentGroups.map((group) => ({
+      id: `wa-group-${group.id}`,
+      title: `Grup ${group.name} perlu dicek`,
+      detail: group.reason,
+      createdAt: "",
+      severity: group.severity,
+      href: group.href,
+    })),
+  ].sort(compareQueueItems).slice(0, 20);
+
+  const last24h = Date.now() - 86400000;
+  return {
+    summary: {
+      connected: Boolean(status.connected),
+      recentInbound: recentMessages.filter((item) => item.direction === "inbound" && createdAtMs(item.createdAt) >= last24h).length,
+      recentOutbound: recentMessages.filter((item) => item.direction === "outbound" && createdAtMs(item.createdAt) >= last24h).length,
+      silentGroups: silentGroups.length,
+      failures: recentFailures.length,
+    },
+    connection: {
+      connected: Boolean(status.connected),
+      state: status.state || "disconnected",
+      error: status.error || status.last_error || "",
+      publicQrUrl: status.publicQrUrl || "",
+      ownerWhatsAppNumber: status.ownerWhatsAppNumber || "",
+      lastReconnectAt: status.last_reconnect_at || status.lastReconnectAt || "",
+      nextReconnectDelayMs: Number(status.next_reconnect_delay_ms || status.nextReconnectDelayMs || 0),
+      lastDisconnectAt: status.last_disconnect_at || status.lastDisconnectAt || "",
+      lastDisconnectReason: status.last_disconnect_reason || status.lastDisconnectReason || "",
+      reconnectAttempts: Number(status.reconnect_attempts || status.reconnectAttempts || 0),
+      warmingUp: Boolean(status.warming_up || status.warmingUp),
+    },
+    recentMessages,
+    silentGroups: silentGroups.slice(0, 20),
+    recentFailures,
+  };
+}
+
+function buildManualQueue(db, reconcile, expiry, wallet, whatsappHealth, resellerHealth) {
+  const items = [];
+
+  for (const order of db.orders || []) {
+    if (order.deliveryStatus === "failed") {
+      items.push({
+        id: `manual-order-failed-${order.id}`,
+        severity: "high",
+        kind: "order",
+        title: `Delivery gagal: ${order.id}`,
+        detail: truncText(order.deliveryError || `${orderDisplayName(order)} gagal terkirim.`, 220),
+        createdAt: order.fulfillmentSentAt || order.paidAt || order.createdAt || "",
+        orderId: order.id,
+        href: operationLink({ orderId: order.id }),
+      });
+      continue;
+    }
+    if (order.qrisStatus === "paid" && !["sent", "stock_unavailable_deposit", "late_paid_deposit"].includes(String(order.deliveryStatus || "")) && order.orderStatus !== "completed") {
+      items.push({
+        id: `manual-order-paid-${order.id}`,
+        severity: "high",
+        kind: "order",
+        title: `Order paid belum selesai: ${order.id}`,
+        detail: `${orderDisplayName(order)} sudah paid tapi status delivery masih ${order.deliveryStatus || order.orderStatus || "-"}.`,
+        createdAt: order.paidAt || order.createdAt || "",
+        orderId: order.id,
+        href: operationLink({ orderId: order.id }),
+      });
+    }
+    if (order.deliveryStatus === "stock_unavailable_deposit") {
+      items.push({
+        id: `manual-order-stockrace-${order.id}`,
+        severity: "medium",
+        kind: "order",
+        title: `Dana order ${order.id} jadi saldo`,
+        detail: "Pastikan reseller tahu order gagal fulfill dan dana sudah dipindah ke saldo.",
+        createdAt: order.stockRaceDepositCreditedAt || order.createdAt || "",
+        orderId: order.id,
+        href: operationLink({ orderId: order.id }),
+      });
+    }
+  }
+
+  for (const request of db.depositRequests || []) {
+    if (String(request.status || "pending").toLowerCase() !== "pending") continue;
+    items.push({
+      id: `manual-deposit-${request.id}`,
+      severity: "medium",
+      kind: "deposit",
+      title: `Deposit request menunggu review`,
+      detail: `${request.resellerName || request.whatsapp || "Reseller"} meminta ${formatRupiah(Number(request.amount || 0))}.`,
+      createdAt: request.createdAt || "",
+      requestId: request.id,
+      href: operationLink({ requestId: request.id }),
+    });
+  }
+
+  for (const issue of reconcile.issues.filter((item) => item.severity === "high").slice(0, 10)) {
+    items.push({
+      id: `manual-reconcile-${issue.id}`,
+      severity: issue.severity,
+      kind: issue.kind,
+      title: issue.title,
+      detail: issue.detail,
+      createdAt: issue.createdAt || "",
+      href: issue.href || "/dashboard/operations",
+      orderId: issue.orderId || "",
+      accountId: issue.accountId || "",
+      stockId: issue.stockId || "",
+    });
+  }
+
+  for (const group of whatsappHealth.silentGroups.slice(0, 10)) {
+    items.push({
+      id: `manual-wa-${group.id}`,
+      severity: group.severity || "medium",
+      kind: "whatsapp",
+      title: `Grup ${group.name} perlu sinkronisasi`,
+      detail: group.reason,
+      createdAt: "",
+      groupId: group.id,
+      href: group.href,
+    });
+  }
+
+  for (const account of expiry.expiredActive.slice(0, 10)) {
+    items.push({
+      id: `manual-expiry-${account.accountId}`,
+      severity: "high",
+      kind: "expiry",
+      title: `Akun expired belum dibersihkan`,
+      detail: `${account.email || account.accountId} (${account.product} ${account.variant}) masih aktif di daftar.`,
+      createdAt: account.expiresAt || "",
+      accountId: account.accountId,
+      href: account.href,
+    });
+  }
+
+  for (const issue of (resellerHealth?.items || []).filter((item) => item.severity === "high").slice(0, 10)) {
+    items.push({
+      id: `manual-reseller-${issue.id}`,
+      severity: issue.severity,
+      kind: issue.kind,
+      title: issue.title,
+      detail: issue.detail,
+      createdAt: issue.createdAt || "",
+      href: issue.href || "/dashboard/operations",
+      orderId: issue.orderId || "",
+      accountId: issue.accountId || "",
+      stockId: issue.stockId || "",
+      resellerId: issue.resellerId || "",
+    });
+  }
+
+  const sorted = items.sort(compareQueueItems).slice(0, 50);
+  return {
+    summary: {
+      total: sorted.length,
+      high: sorted.filter((item) => item.severity === "high").length,
+      medium: sorted.filter((item) => item.severity === "medium").length,
+      low: sorted.filter((item) => item.severity === "low").length,
+      pendingDeposits: wallet.summary.pendingRequests,
+    },
+    items: sorted,
+  };
+}
+
+let automatedSheetsAuditSnapshot = null;
+
+async function buildOperationsCenter(db) {
+  const deliveryAudit = buildDeliveryAuditQueue(db);
+  const stockLocks = buildReservedStockQueue(db);
+  const reconcile = buildReconcileReport(db);
+  const expiry = buildExpiryQueue(db);
+  const wallet = buildWalletLedger(db);
+  const reseller = buildResellerHealthQueue(db);
+  const sheetsAudit = buildSheetsRowAudit(db);
+  const whatsapp = await buildWhatsAppHealth(db);
+  const manual = buildManualQueue(db, reconcile, expiry, wallet, whatsapp, reseller);
+  return {
+    checkedAt: new Date().toISOString(),
+    deliveryAudit,
+    stockLocks,
+    reconcile,
+    expiry,
+    wallet,
+    reseller,
+    sheetsAudit: {
+      ...sheetsAudit,
+      automatedCheckedAt: automatedSheetsAuditSnapshot?.checkedAt || "",
+      automatedSummary: automatedSheetsAuditSnapshot?.summary || null,
+    },
+    whatsapp,
+    manual,
+  };
+}
+
+function scheduleKavyaRestart() {
+  const command = process.env.KAVYA_RESTART_COMMAND || "pm2 restart kavya --update-env";
+  const isWindows = process.platform === "win32";
+  const child = spawn(isWindows ? "cmd.exe" : "sh", isWindows ? ["/c", command] : ["-lc", `sleep 1; ${command}`], {
+    cwd: legacyRootDir,
+    detached: true,
+    stdio: "ignore",
+    env: process.env,
+  });
+  child.unref();
+}
+
+async function ensureRuntimeSettings() {
+  const db = await readDb();
+  db.settings = { ...(db.settings || {}) };
+  const settings = db.settings;
+  let changed = false;
+  const setDefault = (key, value) => {
+    if (settings[key]) return;
+    const normalized = String(value || "").trim();
+    if (!normalized) return;
+    settings[key] = normalized;
+    changed = true;
+  };
+
+  const defaultPublicDomain = firstConfigured(
+    settings.publicDomain,
+    process.env.PUBLIC_DOMAIN,
+    settings.botPublicUrl,
+    `http://${host}:${port}`,
+  ).replace(/\/$/, "");
+  const envCloudflaredToken = firstUsableSecret(process.env.CLOUDFLARED_TOKEN);
+
+  if (envCloudflaredToken) {
+    if (settings.cloudflareTunnelToken !== envCloudflaredToken) {
+      settings.cloudflareTunnelToken = envCloudflaredToken;
+      changed = true;
+    }
+  } else if (settings.cloudflareTunnelToken) {
+    delete settings.cloudflareTunnelToken;
+    changed = true;
+  }
+
+  setDefault("publicDomain", defaultPublicDomain);
+  setDefault("botPublicUrl", defaultPublicDomain);
+  const envOwnerPassword = firstUsableSecret(process.env.OWNER_PASSWORD, process.env.OWNER_LOGIN_PASSWORD);
+  if (settings.ownerPassword === "admin12345" && envOwnerPassword) {
+    settings.ownerPassword = envOwnerPassword;
+    changed = true;
+  } else {
+    setDefault("ownerPassword", envOwnerPassword);
+  }
+  setDefault("baileySessionId", process.env.WHATSAPP_BAILEY_SESSION_ID || "kavya-main");
+  setDefault("baileyBotNumber", process.env.WHATSAPP_BOT_NUMBER || settings.ownerWhatsAppNumber || process.env.OWNER_WHATSAPP_NUMBER || "");
+  setDefault("whatsappBotPublicUrl", process.env.WHATSAPP_BOT_PUBLIC_URL || `${defaultPublicDomain}/whatsapp-bot`);
+  setDefault("baileyWebhookUrl", process.env.WHATSAPP_INBOUND_WEBHOOK_URL || `${defaultPublicDomain}/api/whatsapp/inbound`);
+  setDefault("baileyQrisGenerateUrl", `${defaultPublicDomain}/api/orders`);
+  setDefault("gmailRedirectUri", process.env.GMAIL_REDIRECT_URI || `${defaultPublicDomain}/api/gmail/oauth/callback`);
+  setDefault("whatsappBotToken", firstUsableSecret(process.env.WHATSAPP_BOT_TOKEN) || randomSecret("wabot"));
+  setDefault("whatsappInboundToken", firstUsableSecret(process.env.WHATSAPP_INBOUND_TOKEN) || randomSecret("wain"));
+  setDefault("pakasirApiKey", firstUsableSecret(process.env.PAKASIR_API_KEY));
+  setDefault("pakasirWebhookSecret", firstUsableSecret(process.env.PAKASIR_WEBHOOK_SECRET));
+  setDefault("gmailClientSecret", firstUsableSecret(process.env.GMAIL_CLIENT_SECRET));
+
+  if (!settings.managedAccountsBackfilledAt) {
+    backfillManagedAccountsFromCompletedOrders(db);
+    settings.managedAccountsBackfilledAt = nowText();
+    changed = true;
+  }
+
+  if (!settings.managedAccountsFulfillmentBackfilledAt) {
+    backfillManagedAccountsFromCompletedOrders(db);
+    settings.managedAccountsFulfillmentBackfilledAt = nowText();
+    changed = true;
+  }
+
+  if (!settings.managedAccountsPasswordBackfilledAt) {
+    syncManagedAccountCredentialsFromOrders(db);
+    syncNetflixManagedPasswordConsensus(db);
+    settings.managedAccountsPasswordBackfilledAt = nowText();
+    changed = true;
+  }
+
+  if (!settings.managedAccountsWhatsappBackfilledAt) {
+    syncManagedAccountWhatsappFromOrders(db);
+    settings.managedAccountsWhatsappBackfilledAt = nowText();
+    changed = true;
+  }
+
+  if (!settings.managedAccountsThirtyDayBackfilledAt) {
+    normalizeManagedAccountDurations(db);
+    settings.managedAccountsThirtyDayBackfilledAt = nowText();
+    changed = true;
+  }
+
+  if (reconcileGoogleSheetsStockOrderLinks(db)) {
+    changed = true;
+  }
+
+  if (backfillManagedAccountsFromCompletedOrders(db)) {
+    changed = true;
+  }
+
+  if (syncNetflixManagedPasswordConsensus(db)) {
+    changed = true;
+  }
+
+  if (normalizeManagedAccountDurations(db)) {
+    changed = true;
+  }
+
+  if (syncSoldStockMetadata(db)) {
+    changed = true;
+  }
+
+  if (syncHistoricalStockConflicts(db)) {
+    changed = true;
+  }
+
+  if (changed) {
+    await writeDb(db);
+  }
+}
+
+async function proxyWhatsAppBotRequest(req, res, next) {
+  try {
+    const db = await readDb();
+    const botUrl = firstConfigured(process.env.WHATSAPP_BOT_URL, db.settings?.whatsappBotUrl, "http://127.0.0.1:4016");
+    const incoming = new URL(req.originalUrl || req.url, "http://localhost");
+    const upstream = new URL(botUrl);
+    upstream.pathname = incoming.pathname.replace(/^\/whatsapp-bot/, "") || "/";
+    upstream.search = incoming.search;
+
+    const headers = {};
+    if (req.get("accept")) headers.accept = req.get("accept");
+    if (req.get("authorization")) headers.authorization = req.get("authorization");
+    if (req.get("content-type")) headers["content-type"] = req.get("content-type");
+
+    const response = await fetch(upstream, {
+      method: req.method,
+      headers,
+      body: req.method === "GET" || req.method === "HEAD" ? undefined : JSON.stringify(req.body || {}),
+    });
+    const contentType = response.headers.get("content-type");
+    if (contentType) res.setHeader("content-type", contentType);
+    res.status(response.status).send(Buffer.from(await response.arrayBuffer()));
+  } catch (error) {
+    next(error);
+  }
+}
+
+app.get("/api/health", async (_req, res) => {
+  const db = await readDb();
+  const pakasir = getPakasirCredentials(db);
+  const [database, backup] = await Promise.all([readDatabaseInfo(), readBackupInfo()]);
+  res.json({
+    ok: true,
+    databasePath,
+    database,
+    backup,
+    googleSheetsConfigured: googleSheetsConfigured(db),
+    googleSheetsLastSyncAt: db.settings?.googleSheetsLastSyncAt || "",
+    ownerWhatsAppNumber: db.settings?.ownerWhatsAppNumber || process.env.OWNER_WHATSAPP_NUMBER || "",
+    warrantyWhatsAppNumber: warrantyWhatsAppNumber(db),
+    whatsappInboundConfigured: Boolean(firstConfigured(db.settings?.whatsappInboundToken, process.env.WHATSAPP_INBOUND_TOKEN)),
+    pakasirConfigured: pakasir.configured,
+    maintenance: maintenanceMode(db),
+  });
+});
+
+app.get("/api/maintenance", async (_req, res) => {
+  const db = await readDb();
+  res.json({ ok: true, maintenance: maintenanceMode(db) });
+});
+
+app.post("/api/maintenance", requireAuth(["owner"]), async (req, res) => {
+  const state = await updateDb((db) => {
+    setMaintenanceMode(db, Boolean(req.body.enabled), req.body.reason || "", "manual");
+    db.activities = db.activities || [];
+    db.activities.unshift({
+      id: makeId("act"),
+      type: "security",
+      title: Boolean(req.body.enabled) ? "Maintenance order diaktifkan" : "Maintenance order dimatikan",
+      description: Boolean(req.body.enabled)
+        ? `Order baru ditahan sementara. Alasan: ${req.body.reason || "manual"}`
+        : "Order baru kembali dibuka dari panel owner.",
+      createdAt: nowText(),
+    });
+    return maintenanceMode(db);
+  });
+  res.json({ ok: true, maintenance: state });
+});
+
+app.get("/api/bootstrap", requireAuth(["owner"]), async (_req, res) => {
+  const db = await readDbWithExpiredOrders();
+  db.whatsappRentals = await mergedWhatsappRentals(db);
+  db.whatsappGroupLists = await readActiveLegacyGroupLists();
+  res.json(db);
+});
+
+app.get("/api/events", async (req, res) => {
+  await ensureDb();
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+
+  let closed = false;
+  let unsubscribe = () => {};
+  let heartbeat = null;
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    if (heartbeat) clearInterval(heartbeat);
+    unsubscribe();
+  };
+  const send = (event) => {
+    if (closed || res.destroyed || res.writableEnded) return;
+    try {
+      res.write(`event: ${event.type}\n`);
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    } catch {
+      cleanup();
+    }
+  };
+
+  send({ type: "connected", version: getDbVersion(), at: nowText() });
+  unsubscribe = onDbChange(send);
+  heartbeat = setInterval(() => {
+    send({ type: "heartbeat", version: getDbVersion(), at: nowText() });
+  }, 25000);
+
+  req.on("close", cleanup);
+  res.on("close", cleanup);
+  res.on("error", cleanup);
+});
+
+app.post("/api/auth/login", async (req, res) => {
+  const db = await readDb();
+  const requestedRole = req.body.role === "owner" || req.body.role === "reseller" ? req.body.role : "auto";
+  const email = String(req.body.email || "").trim().toLowerCase();
+  const password = String(req.body.password || "");
+  const remember = req.body.remember === true;
+  assertLoginAllowed(req, email);
+
+  if (requestedRole === "owner" || requestedRole === "auto") {
+    const owner = ownerCredentials(db);
+    const profile = ownerProfile(db);
+    if (!owner.password) {
+      if (requestedRole === "owner") {
+        recordLoginFailure(req, email);
+        res.status(401).json({ error: "Password owner belum dikonfigurasi. Set OWNER_PASSWORD atau reset password owner lewat OTP WhatsApp." });
+        return;
+      }
+    } else {
+      const ownerCandidates = [owner.email, profile.email, profile.username, `${profile.username}@kavya.id`]
+        .filter(Boolean)
+        .map((value) => String(value).toLowerCase());
+      if (ownerCandidates.includes(email) && password === owner.password) {
+        const profile = ownerProfile(db);
+        const session = {
+          ok: true,
+          role: "owner",
+          user: { id: "owner", name: profile.name, email: profile.email, username: profile.username, whatsapp: profile.whatsapp },
+        };
+        clearLoginFailures(req, email);
+        res.json({ ...session, token: issueAuthToken(session, db.settings?.ownerSessionVersion || 0, { remember }) });
+        return;
+      }
+    }
+    if (requestedRole === "owner") {
+      recordLoginFailure(req, email);
+      res.status(401).json({ error: "Email atau password owner salah" });
+      return;
+    }
+  }
+
+  const reseller = db.resellers.find((item) => {
+    const candidates = [item.email, item.username, `${item.username}@kavya.id`].filter(Boolean).map((value) => String(value).toLowerCase());
+    return candidates.includes(email) && item.password === password;
+  });
+  if (!reseller) {
+    recordLoginFailure(req, email);
+    res.status(401).json({ error: "Email/username atau password salah" });
+    return;
+  }
+  if (reseller.isActive === false) {
+    recordLoginFailure(req, email);
+    res.status(403).json({ error: "Akun reseller sedang nonaktif" });
+    return;
+  }
+  const session = { ok: true, role: "reseller", user: publicUser(reseller) };
+  clearLoginFailures(req, email);
+  res.json({ ...session, token: issueAuthToken(session, reseller.sessionVersion || 0, { remember }) });
+});
+
+app.post("/api/auth/password-reset/request", async (req, res, next) => {
+  try {
+    const identifier = String(req.body.identifier || req.body.email || "").trim();
+    if (!identifier) {
+      res.status(400).json({ error: "Email atau username wajib diisi" });
+      return;
+    }
+
+    assertLoginAllowed(req, normalizeLoginIdentifier(identifier));
+    const dbForSend = await readDb();
+    const botConfigured = Boolean(
+      firstUsableSecret(dbForSend.settings?.whatsappBotToken, process.env.WHATSAPP_BOT_TOKEN)
+        && firstConfigured(process.env.WHATSAPP_BOT_URL, dbForSend.settings?.whatsappBotUrl, "http://127.0.0.1:4016"),
+    );
+
+    const created = await updateDb((db) => {
+      cleanupPasswordResets(db);
+      const account = findPasswordResetAccount(db, identifier);
+      const whatsapp = normalizeWhatsappNumber(account?.whatsapp);
+      if (!account) return { account: null, code: "", reason: "account_not_found" };
+      if (!whatsapp) return { account: { ...account, whatsapp: "" }, code: "", reason: "whatsapp_number_not_found" };
+      if (!botConfigured) return { account: { ...account, whatsapp }, code: "", reason: "whatsapp_bot_not_configured" };
+      const resetId = makeId("rst");
+      const code = String(crypto.randomInt(100000, 1000000));
+      db.passwordResets = db.passwordResets || [];
+      db.passwordResets.unshift({
+        id: resetId,
+        role: account.role,
+        accountId: account.id,
+        whatsapp,
+        codeHash: resetCodeHash(resetId, code),
+        attempts: 0,
+        createdAt: nowText(),
+        createdAtMs: Date.now(),
+        expiresAtMs: Date.now() + Number(process.env.PASSWORD_RESET_CODE_TTL_MS || 10 * 60 * 1000),
+        sent: false,
+      });
+      return { account: { ...account, whatsapp }, resetId, code, reason: "" };
+    });
+
+    if (!created.account || !created.code) {
+      const status = created.reason === "account_not_found" ? 404 : created.reason === "whatsapp_bot_not_configured" ? 503 : 400;
+      res.status(status).json({
+        ok: false,
+        botConfigured,
+        deliveryStatus: created.reason || "not_sent",
+        error: passwordResetDeliveryError(created.reason),
+      });
+      return;
+    }
+
+    const delivery = await sendResetCodeWhatsApp(dbForSend, {
+      to: created.account.whatsapp,
+      name: created.account.name,
+      code: created.code,
+    });
+    await updateDb((db) => {
+      const reset = (db.passwordResets || []).find((item) => item.id === created.resetId);
+      if (reset) {
+        reset.sent = Boolean(delivery.sent);
+        reset.deliveryError = delivery.reason || "";
+      }
+      return null;
+    });
+
+    if (!delivery.sent) {
+      res.status(502).json({
+        ok: false,
+        botConfigured,
+        deliveryStatus: delivery.reason || "send_failed",
+        error: passwordResetDeliveryError(delivery.reason),
+      });
+      return;
+    }
+
+    res.json({
+      ok: true,
+      botConfigured,
+      destination: "",
+      deliveryStatus: "sent",
+      message: "Kode OTP sudah dikirim ke nomor WhatsApp terdaftar.",
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/auth/password-reset/verify", async (req, res, next) => {
+  try {
+    const identifier = String(req.body.identifier || req.body.email || "").trim();
+    const code = String(req.body.code || "").replace(/[^\d]/g, "");
+    if (!identifier || code.length !== 6) {
+      res.status(400).json({ error: "Email/username dan kode 6 digit wajib diisi" });
+      return;
+    }
+
+    const result = await updateDb((db) => {
+      cleanupPasswordResets(db);
+      const account = findPasswordResetAccount(db, identifier);
+      if (!account) return { ok: false };
+      const reset = (db.passwordResets || []).find(
+        (item) => item.role === account.role && item.accountId === account.id && !item.usedAt && Number(item.expiresAtMs || 0) > Date.now(),
+      );
+      if (!reset) return { ok: false };
+      if (Number(reset.attempts || 0) >= Number(process.env.PASSWORD_RESET_MAX_ATTEMPTS || 5)) return { ok: false, locked: true };
+      if (reset.codeHash !== resetCodeHash(reset.id, code)) {
+        reset.attempts = Number(reset.attempts || 0) + 1;
+        return { ok: false };
+      }
+      const resetToken = randomSecret("reset");
+      reset.verifiedAt = nowText();
+      reset.resetTokenHash = resetTokenHash(resetToken);
+      reset.resetTokenExpiresAtMs = Date.now() + Number(process.env.PASSWORD_RESET_TOKEN_TTL_MS || 10 * 60 * 1000);
+      return { ok: true, resetToken };
+    });
+
+    if (!result.ok) {
+      res.status(400).json({ error: result.locked ? "Kode terlalu sering salah. Minta kode baru." : "Kode tidak valid atau sudah kadaluarsa" });
+      return;
+    }
+    res.json({ ok: true, resetToken: result.resetToken });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/auth/password-reset/confirm", async (req, res, next) => {
+  try {
+    const resetToken = String(req.body.resetToken || "").trim();
+    const newPassword = String(req.body.newPassword || "");
+    const confirmPassword = String(req.body.confirmPassword || "");
+    if (!resetToken || !newPassword) {
+      res.status(400).json({ error: "Token reset dan password baru wajib diisi" });
+      return;
+    }
+    if (newPassword.length < 8) {
+      res.status(400).json({ error: "Password baru minimal 8 karakter" });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      res.status(400).json({ error: "Konfirmasi password tidak sama" });
+      return;
+    }
+
+    const result = await updateDb((db) => {
+      cleanupPasswordResets(db);
+      const hash = resetTokenHash(resetToken);
+      const reset = (db.passwordResets || []).find(
+        (item) => item.resetTokenHash === hash && !item.usedAt && Number(item.resetTokenExpiresAtMs || 0) > Date.now(),
+      );
+      if (!reset) return { ok: false };
+      if (reset.role === "owner") {
+        db.settings = { ...(db.settings || {}) };
+        db.settings.ownerPassword = newPassword;
+        db.settings.ownerSessionVersion = Number(db.settings.ownerSessionVersion || 0) + 1;
+      } else {
+        const reseller = (db.resellers || []).find((item) => item.id === reset.accountId);
+        if (!reseller) return { ok: false };
+        reseller.password = newPassword;
+        reseller.sessionVersion = Number(reseller.sessionVersion || 0) + 1;
+      }
+      reset.usedAt = nowText();
+      db.activities = db.activities || [];
+      db.activities.unshift({
+        id: makeId("act"),
+        type: "security",
+        title: "Password panel direset",
+        description: `${reset.role === "owner" ? "Owner" : "Reseller"} berhasil reset password lewat OTP WhatsApp.`,
+        createdAt: nowText(),
+      });
+      return { ok: true };
+    });
+
+    if (!result.ok) {
+      res.status(400).json({ error: "Token reset tidak valid atau sudah kadaluarsa" });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/auth/change-password", requireAuth(["owner", "reseller"]), async (req, res) => {
+  const currentPassword = String(req.body.currentPassword || "");
+  const newPassword = String(req.body.newPassword || "");
+  const confirmPassword = String(req.body.confirmPassword || "");
+  if (!currentPassword || !newPassword) {
+    res.status(400).json({ error: "Password lama dan password baru wajib diisi" });
+    return;
+  }
+  if (newPassword.length < 8) {
+    res.status(400).json({ error: "Password baru minimal 8 karakter" });
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    res.status(400).json({ error: "Konfirmasi password tidak sama" });
+    return;
+  }
+
+  const nextSession = await updateDb((db) => {
+    if (req.auth.role === "owner") {
+      const owner = ownerCredentials(db);
+      if (currentPassword !== owner.password) {
+        const error = new Error("Password lama salah");
+        error.status = 401;
+        throw error;
+      }
+      const nextVersion = Number(db.settings?.ownerSessionVersion || 0) + 1;
+      db.settings = { ...(db.settings || {}), ownerPassword: newPassword, ownerSessionVersion: nextVersion };
+      const profile = ownerProfile(db);
+      return {
+        session: {
+          ok: true,
+          role: "owner",
+          user: { id: "owner", name: profile.name, email: profile.email, username: profile.username, whatsapp: profile.whatsapp },
+        },
+        sessionVersion: nextVersion,
+      };
+    }
+
+    const reseller = (db.resellers || []).find((item) => item.id === req.auth.sub);
+    if (!reseller) {
+      const error = new Error("Reseller tidak ditemukan");
+      error.status = 404;
+      throw error;
+    }
+    if (currentPassword !== reseller.password) {
+      const error = new Error("Password lama salah");
+      error.status = 401;
+      throw error;
+    }
+    reseller.password = newPassword;
+    reseller.sessionVersion = Number(reseller.sessionVersion || 0) + 1;
+    return {
+      session: { ok: true, role: "reseller", user: publicUser(reseller) },
+      sessionVersion: reseller.sessionVersion,
+    };
+  });
+  res.json({ ok: true, token: issueAuthToken(nextSession.session, nextSession.sessionVersion) });
+});
+
+app.get("/api/owner-profile", requireAuth(["owner"]), async (_req, res) => {
+  const db = await readDb();
+  res.json(ownerProfile(db));
+});
+
+app.put("/api/owner-profile", requireAuth(["owner"]), async (req, res) => {
+  const updated = await updateDb((db) => {
+    const current = ownerProfile(db);
+    const name = String(req.body.name ?? current.name).trim();
+    const username = String(req.body.username ?? current.username).trim().toLowerCase().replace(/\s+/g, ".");
+    const email = String(req.body.email ?? current.email).trim();
+    const whatsapp = String(req.body.whatsapp ?? current.whatsapp).replace(/[^\d]/g, "");
+    const initial = String(req.body.initial || name.slice(0, 1) || "O").trim().slice(0, 2).toUpperCase();
+    if (!name) {
+      const error = new Error("Nama owner wajib diisi");
+      error.status = 400;
+      throw error;
+    }
+    if (!email || !email.includes("@")) {
+      const error = new Error("Email owner tidak valid");
+      error.status = 400;
+      throw error;
+    }
+    if (!whatsapp) {
+      const error = new Error("Nomor WhatsApp owner wajib diisi");
+      error.status = 400;
+      throw error;
+    }
+    db.settings = {
+      ...(db.settings || {}),
+      ownerName: name,
+      ownerUsername: username,
+      ownerEmail: email,
+      ownerWhatsAppNumber: whatsapp,
+      ownerInitial: initial || "O",
+    };
+    return ownerProfile(db);
+  });
+  res.json(updated);
+});
+
+app.get("/api/owner-settings", requireAuth(["owner"]), async (_req, res) => {
+  const settings = await updateDb(async (db) => {
+    await validateGmailConnectionForStatus(db);
+    return ownerIntegrationSettings(db);
+  });
+  res.json(settings);
+});
+
+app.put("/api/owner-settings", requireAuth(["owner"]), async (req, res) => {
+  const updated = await updateDb((db) => {
+    db.settings = { ...(db.settings || {}) };
+    if (req.body.profile) {
+      const name = String(req.body.profile.name || "").trim();
+      const username = String(req.body.profile.username || "owner").trim().toLowerCase().replace(/\s+/g, ".");
+      const email = String(req.body.profile.email || "").trim();
+      const whatsapp = String(req.body.profile.whatsapp || "").replace(/[^\d]/g, "");
+      if (!name) {
+        const error = new Error("Nama owner wajib diisi");
+        error.status = 400;
+        throw error;
+      }
+      if (!email || !email.includes("@")) {
+        const error = new Error("Email owner tidak valid");
+        error.status = 400;
+        throw error;
+      }
+      db.settings.ownerName = name;
+      db.settings.ownerUsername = username;
+      db.settings.ownerEmail = email;
+      db.settings.ownerWhatsAppNumber = whatsapp;
+      db.settings.ownerInitial = String(req.body.profile.initial || name.slice(0, 1) || "O").trim().slice(0, 2).toUpperCase();
+    }
+    if (req.body.pakasir) {
+      db.settings.pakasirApiKey = String(req.body.pakasir.apiKey || "").trim();
+      db.settings.pakasirMerchantId = String(req.body.pakasir.merchantId || "").trim();
+      db.settings.pakasirProject = db.settings.pakasirMerchantId;
+      db.settings.pakasirWebhookSecret = String(req.body.pakasir.webhookSecret || "").trim();
+    }
+    if (req.body.bailey) {
+      const parsedPublicUrl = parseBotPublicUrlInput(req.body.bailey.publicUrl);
+      db.settings.baileySessionId = String(req.body.bailey.sessionId || "").trim();
+      db.settings.baileyBotNumber = String(req.body.bailey.botNumber || "").replace(/[^\d]/g, "");
+      db.settings.whatsappBotPublicUrl = parsedPublicUrl.publicUrl;
+      db.settings.baileyWebhookUrl = String(req.body.bailey.webhookUrl || "").trim();
+      db.settings.baileyQrisGenerateUrl = String(req.body.bailey.qrisGenerateUrl || "").trim();
+      db.settings.whatsappBotToken = String(req.body.bailey.botToken || parsedPublicUrl.tokenFromUrl || "").trim();
+      db.settings.whatsappInboundToken = String(req.body.bailey.inboundToken || "").trim();
+    }
+    if (req.body.gmail) {
+      const requestedMode = String(req.body.gmail.mode || "").trim().toLowerCase();
+      db.settings.gmailMode = requestedMode === "imap" ? "imap" : "oauth";
+      db.settings.gmailClientId = String(req.body.gmail.clientId || "").trim();
+      db.settings.gmailClientSecret = String(req.body.gmail.clientSecret || "").trim();
+      db.settings.gmailRedirectUri = String(req.body.gmail.redirectUri || "").trim();
+      db.settings.gmailInboxEmail = String(req.body.gmail.inboxEmail || "").trim();
+      db.settings.gmailImapHost = String(req.body.gmail.imapHost || "imap.gmail.com").trim();
+      db.settings.gmailImapPort = String(req.body.gmail.imapPort || "993").replace(/[^\d]/g, "") || "993";
+      db.settings.gmailImapUser = String(req.body.gmail.imapUser || req.body.gmail.inboxEmail || "").trim();
+      db.settings.gmailImapPassword = String(req.body.gmail.imapPassword || "").replace(/\s+/g, "").trim();
+      db.settings.gmailImapSecure = req.body.gmail.imapSecure === false ? "false" : "true";
+    }
+    if (req.body.googleSheets) {
+      Object.assign(
+        db.settings,
+        mergeGoogleSheetsSettings(db.settings, req.body.googleSheets, { storedSecretPlaceholder: STORED_SECRET_PLACEHOLDER }),
+      );
+    }
+    if (req.body.cloudflare) {
+      db.settings.publicDomain = String(req.body.cloudflare.publicDomain || "").trim().replace(/\/$/, "");
+      db.settings.botPublicUrl = db.settings.publicDomain || db.settings.botPublicUrl;
+      const envCloudflaredToken = firstUsableSecret(process.env.CLOUDFLARED_TOKEN);
+      if (envCloudflaredToken) {
+        db.settings.cloudflareTunnelToken = envCloudflaredToken;
+      } else {
+        delete db.settings.cloudflareTunnelToken;
+      }
+    }
+    if (req.body.payment) {
+      db.settings.ownerQrisImageUrl = String(req.body.payment.ownerQrisImageUrl || "").trim();
+      db.settings.ownerQrisNote = String(req.body.payment.ownerQrisNote || "").trim();
+      db.settings.danaNumber = String(req.body.payment.danaNumber || "").trim();
+      db.settings.danaName = String(req.body.payment.danaName || "").trim();
+      db.settings.livinNumber = String(req.body.payment.livinNumber || "").trim();
+      db.settings.livinName = String(req.body.payment.livinName || "").trim();
+      db.settings.bcaNumber = String(req.body.payment.bcaNumber || "").trim();
+      db.settings.bcaName = String(req.body.payment.bcaName || "").trim();
+      db.settings.gopayNumber = String(req.body.payment.gopayNumber || "").trim();
+      db.settings.gopayName = String(req.body.payment.gopayName || "").trim();
+      db.settings.shopeepayNumber = String(req.body.payment.shopeepayNumber || "").trim();
+      db.settings.shopeepayName = String(req.body.payment.shopeepayName || "").trim();
+    }
+    return ownerIntegrationSettings(db);
+  });
+  res.json(updated);
+});
+
+app.get("/api/resellers/deposit-instructions", requireAuth(["reseller"]), async (_req, res) => {
+  const db = await readDb();
+  const settings = ownerIntegrationSettings(db);
+  const payment = settings.payment || {};
+  const pakasirConnected = settings.status.pakasir === "connected";
+  const methods = {
+    qris_auto: {
+      label: "Deposit otomatis QRIS",
+      note: pakasirConnected
+        ? "Saldo otomatis diproses via Pakasir bila integrasi aktif."
+        : "Pakasir sedang disconnected. Pilih QRIS owner manual atau metode bank.",
+      available: pakasirConnected,
+    },
+    qris_owner: {
+      label: "QRIS owner manual",
+      imageUrl: payment.ownerQrisImageUrl || "",
+      note: payment.ownerQrisNote || "",
+      available: Boolean(payment.ownerQrisImageUrl),
+    },
+    dana: {
+      label: "DANA",
+      accountNumber: payment.danaNumber || "",
+      accountName: payment.danaName || "",
+      available: Boolean(payment.danaNumber),
+    },
+    livin: {
+      label: "Livin Mandiri",
+      accountNumber: payment.livinNumber || "",
+      accountName: payment.livinName || "",
+      available: Boolean(payment.livinNumber),
+    },
+    bca: {
+      label: "BCA",
+      accountNumber: payment.bcaNumber || "",
+      accountName: payment.bcaName || "",
+      available: Boolean(payment.bcaNumber),
+    },
+    gopay: {
+      label: "GoPay",
+      accountNumber: payment.gopayNumber || "",
+      accountName: payment.gopayName || "",
+      available: Boolean(payment.gopayNumber),
+    },
+    shopeepay: {
+      label: "ShopeePay",
+      accountNumber: payment.shopeepayNumber || "",
+      accountName: payment.shopeepayName || "",
+      available: Boolean(payment.shopeepayNumber),
+    },
+  };
+  res.json({
+    ownerName: settings.profile?.name || settings.profile?.username || "Owner",
+    ownerWhatsapp: settings.profile?.whatsapp || "",
+    pakasirConnected,
+    methods,
+  });
+});
+
+app.get("/api/gmail/oauth/start", requireAuth(["owner"]), async (_req, res) => {
+  const db = await readDb();
+  const settings = ownerIntegrationSettings(db);
+  if (!gmailOAuthConfigured(db)) {
+    res.status(400).json({ error: "Client ID, Client Secret, dan Redirect URI Gmail wajib diisi dulu" });
+    return;
+  }
+  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  url.searchParams.set("client_id", settings.gmail.clientId);
+  url.searchParams.set("redirect_uri", settings.gmail.redirectUri);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("scope", "https://www.googleapis.com/auth/gmail.readonly");
+  url.searchParams.set("access_type", "offline");
+  url.searchParams.set("prompt", "consent");
+  url.searchParams.set("state", gmailOAuthState());
+  res.json({ ok: true, url: url.toString() });
+});
+
+app.get("/api/gmail/oauth/callback", async (req, res, next) => {
+  try {
+    if (!verifyGmailOAuthState(req.query.state)) {
+      res.status(400).send("State OAuth Gmail tidak valid atau kadaluarsa.");
+      return;
+    }
+    const code = String(req.query.code || "").trim();
+    if (!code) {
+      res.status(400).send("Kode OAuth Gmail tidak ditemukan.");
+      return;
+    }
+
+    const db = await readDb();
+    const settings = ownerIntegrationSettings(db);
+    const response = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: settings.gmail.clientId,
+        client_secret: settings.gmail.clientSecret,
+        redirect_uri: settings.gmail.redirectUri,
+        grant_type: "authorization_code",
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.refresh_token) {
+      res.status(400).send(payload.error_description || payload.error || "Gagal menyambungkan Gmail. Pastikan consent diberikan dengan akses offline.");
+      return;
+    }
+
+    await updateDb((nextDb) => {
+      nextDb.settings.gmailRefreshToken = String(payload.refresh_token || "").trim();
+      nextDb.settings.gmailConnectedAt = nowText();
+      nextDb.settings.gmailOAuthStatus = "connected";
+      nextDb.settings.gmailLastError = "";
+      nextDb.settings.gmailLastErrorAt = "";
+      return null;
+    });
+    res.send("Gmail berhasil tersambung. Silakan kembali ke dashboard Kavya.");
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/products", requireAuth(["owner"]), async (_req, res) => {
+  const db = await readDb();
+  res.json(db.products);
+});
+
+app.get("/api/products/price-sync/preview", requireAuth(["owner"]), async (_req, res, next) => {
+  try {
+    const db = await readDb();
+    const source = await findWaPriceSource(legacyRootDir);
+    if (!source) {
+      res.status(404).json({ error: "Sumber pricelist WA reseller tidak ditemukan" });
+      return;
+    }
+    const preview = previewWaPriceSync(db, source.text);
+    res.json({
+      ok: true,
+      source: { keyword: source.keyword, groupJid: source.groupJid, filePath: source.filePath, score: source.score },
+      ...preview,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/products/price-sync/apply", requireAuth(["owner"]), async (_req, res, next) => {
+  try {
+    const result = await updateDb(async (db) => {
+      const source = await findWaPriceSource(legacyRootDir);
+      if (!source) {
+        const error = new Error("Sumber pricelist WA reseller tidak ditemukan");
+        error.status = 404;
+        throw error;
+      }
+      const preview = previewWaPriceSync(db, source.text);
+      const updated = applyWaPriceSync(db, preview);
+      db.activities = db.activities || [];
+      db.activities.unshift({
+        id: makeId("act"),
+        type: "stock",
+        title: "Harga produk disinkronkan dari list WA",
+        description: `${updated} harga produk diperbarui dari ${source.keyword}.`,
+        createdAt: nowText(),
+      });
+      return {
+        ok: true,
+        updated,
+        source: { keyword: source.keyword, groupJid: source.groupJid, filePath: source.filePath, score: source.score },
+        ...preview,
+      };
+    });
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/public/catalog", async (_req, res) => {
+  const db = await readDbWithExpiredOrders();
+  const includeEmpty = ["1", "true", "yes"].includes(String(_req.query.includeEmpty || "").toLowerCase());
+  res.json(publicCatalog(db, { includeEmpty }));
+});
+
+app.post("/api/public/catalog/precheck", async (req, res, next) => {
+  try {
+    const result = await updateDb(async (db) => {
+      const product = getProduct(db, req.body.productId);
+      const variant = product?.variants?.find((item) => item.id === req.body.variantId) || null;
+      if (!product || product.isArchived || product.isActive === false || !variant || !isVariantOrderable(product, variant)) {
+        const error = new Error("Produk atau varian tidak tersedia untuk order baru");
+        error.status = 409;
+        error.catalog = publicCatalog(db, { includeEmpty: false });
+        throw error;
+      }
+      await syncSheetsForProductOrThrow(db, product, "catalog_precheck", { force: true });
+      const lockError = orderLockError(product, variant);
+      if (lockError) {
+        lockError.catalog = publicCatalog(db, { includeEmpty: false });
+        throw lockError;
+      }
+      const duration = normalizeDurationLabel(req.body.duration || "", variant);
+      if (!durationAllowedForVariant(variant, duration)) {
+        const error = new Error(`Durasi ${duration} sedang tidak aktif untuk ${variant.name}.`);
+        error.status = 409;
+        error.catalog = publicCatalog(db, { includeEmpty: false });
+        throw error;
+      }
+      const stockCount = availableStockCount(db, product, variant);
+      return {
+        ok: true,
+        productId: product?.id || req.body.productId || "",
+        variantId: variant?.id || req.body.variantId || "",
+        stockCount,
+        catalog: publicCatalog(db, { includeEmpty: false }),
+      };
+    });
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/public/reseller-check", async (req, res) => {
+  const db = await readDb();
+  const reseller = activeResellerByWhatsapp(db, req.query.whatsapp || "");
+  res.json({
+    ok: true,
+    active: Boolean(reseller),
+    message: reseller ? "Nomor reseller aktif terverifikasi." : resellerRequiredMessage,
+  });
+});
+
+function normalizeCode(value, fallback) {
+  return String(value || fallback || "PRD").trim().toUpperCase().replace(/\s+/g, "-").slice(0, 24);
+}
+
+function normalizeCheckoutRequirementsInput(input = {}, fallback = {}) {
+  const source = input && typeof input === "object" ? input : {};
+  const previous = fallback && typeof fallback === "object" ? fallback : {};
+  const field = String(source.customerField ?? source.field ?? previous.customerField ?? previous.field ?? "").trim().toLowerCase();
+  const normalizedField = ["email", "device", "optional", "none"].includes(field) ? (field === "none" ? "optional" : field) : "";
+  if (!normalizedField) return previous && Object.keys(previous).length ? previous : undefined;
+  return {
+    customerField: normalizedField,
+    required: source.required === undefined ? previous.required !== undefined ? Boolean(previous.required) : normalizedField !== "optional" : Boolean(source.required),
+    minItems: Math.max(1, Math.floor(Number(source.minItems ?? previous.minItems ?? 1))),
+    label: String(source.label ?? source.customerLabel ?? previous.label ?? "").trim(),
+    placeholder: String(source.placeholder ?? previous.placeholder ?? "").trim(),
+    helper: String(source.helper ?? source.description ?? previous.helper ?? "").trim(),
+  };
+}
+
+function normalizeMessageTemplatesInput(input = {}, fallback = {}) {
+  const source = input && typeof input === "object" ? input : {};
+  const previous = fallback && typeof fallback === "object" ? fallback : {};
+  return {
+    delivery: String(source.delivery ?? previous.delivery ?? "").trim(),
+    warranty: String(source.warranty ?? previous.warranty ?? "").trim(),
+  };
+}
+
+function normalizeOrderLockInput(input = undefined, fallback = {}) {
+  const hasSource = input && typeof input === "object";
+  const source = hasSource ? input : {};
+  const previous = fallback && typeof fallback === "object" ? fallback : {};
+  const enabled = hasSource
+    ? Boolean(source.enabled ?? source.isLocked ?? previous.enabled ?? previous.isLocked ?? false)
+    : Boolean(previous.enabled ?? previous.isLocked ?? false);
+  return {
+    enabled,
+    reason: enabled ? String(source.reason ?? previous.reason ?? "").trim() : "",
+    updatedAt: String(source.updatedAt ?? previous.updatedAt ?? "").trim(),
+    updatedBy: String(source.updatedBy ?? previous.updatedBy ?? "").trim(),
+    scope: String(source.scope ?? previous.scope ?? "").trim() || "",
+  };
+}
+
+function activeOrderLock(product = {}, variant = null) {
+  if (product?.orderLock?.enabled) {
+    return {
+      scope: "product",
+      reason: String(product.orderLock.reason || "").trim(),
+      updatedAt: String(product.orderLock.updatedAt || "").trim(),
+      updatedBy: String(product.orderLock.updatedBy || "").trim(),
+    };
+  }
+  if (variant?.orderLock?.enabled) {
+    return {
+      scope: "variant",
+      reason: String(variant.orderLock.reason || "").trim(),
+      updatedAt: String(variant.orderLock.updatedAt || "").trim(),
+      updatedBy: String(variant.orderLock.updatedBy || "").trim(),
+    };
+  }
+  return null;
+}
+
+function isOrderLocked(product = {}, variant = null) {
+  return Boolean(activeOrderLock(product, variant));
+}
+
+function orderLockError(product = {}, variant = null) {
+  const lock = activeOrderLock(product, variant);
+  if (!lock) return null;
+  const target = lock.scope === "variant"
+    ? `${product?.name || "Produk"} ${variant?.name || ""}`.trim()
+    : product?.name || "Produk";
+  const reason = lock.reason ? ` Alasan: ${lock.reason}` : "";
+  const error = new Error(`Order untuk ${target} sedang dikunci owner.${reason}`);
+  error.status = 409;
+  error.code = "order_locked";
+  error.lock = lock;
+  return error;
+}
+
+function normalizeProductInput(body, fallback = {}) {
+  const code = normalizeCode(body.code, fallback.code || body.name || fallback.name);
+  const variants = Array.isArray(body.variants) ? body.variants : fallback.variants || [];
+  const productRequirements = normalizeCheckoutRequirementsInput(body.checkoutRequirements, fallback.checkoutRequirements);
+  const messageTemplates = normalizeMessageTemplatesInput(body.messageTemplates, fallback.messageTemplates);
+  const orderLock = normalizeOrderLockInput(body.orderLock, fallback.orderLock);
+
+  return {
+    name: String(body.name ?? fallback.name ?? "").trim(),
+    description: String(body.description ?? fallback.description ?? "Produk baru.").trim(),
+    category: String(body.category ?? fallback.category ?? "Custom").trim(),
+    isActive: body.isActive === undefined ? fallback.isActive !== false : Boolean(body.isActive),
+    isArchived: body.isArchived === undefined ? Boolean(fallback.isArchived) : Boolean(body.isArchived),
+    archivedAt: body.archivedAt === undefined ? String(fallback.archivedAt || "") : String(body.archivedAt || "").trim(),
+    resellerOnly: body.resellerOnly === undefined ? Boolean(fallback.resellerOnly) : Boolean(body.resellerOnly),
+    needsProfile: body.needsProfile === undefined ? Boolean(fallback.needsProfile) : Boolean(body.needsProfile),
+    needsPin: body.needsPin === undefined ? Boolean(fallback.needsPin) : Boolean(body.needsPin),
+    ...(productRequirements ? { checkoutRequirements: productRequirements } : {}),
+    messageTemplates,
+    orderLock,
+    code,
+    variants: variants.map((variant, index) => {
+      const fallbackVariant = (fallback.variants || []).find((item) => item.id === variant.id || item.code === variant.code) || {};
+      const variantCode = normalizeCode(variant.code, `${code}-${index + 1}`);
+      const prices = Object.fromEntries(
+        Object.entries(variant.prices || {})
+          .map(([duration, amount]) => [duration, Number(amount)])
+          .filter(([duration, amount]) => duration && Number.isFinite(amount)),
+      );
+      const snkMonthly = String(
+        variant.snkMonthly ??
+          variant.monthlySnk ??
+          variant.snk ??
+          fallbackVariant.snkMonthly ??
+          fallbackVariant.monthlySnk ??
+          fallbackVariant.snk ??
+          "",
+      ).trim();
+      const snkDaily = String(
+        variant.snkDaily ??
+          variant.dailySnk ??
+          fallbackVariant.snkDaily ??
+          fallbackVariant.dailySnk ??
+          "",
+      ).trim();
+
+      return {
+        id: String(variant.id || variantCode.toLowerCase()),
+        code: variantCode,
+        name: String(variant.name || variantCode).trim(),
+        description: String(variant.description || "").trim(),
+        isActive: variant.isActive === undefined ? variant.isActive !== false : Boolean(variant.isActive),
+        durationModes: normalizeDurationModes(variant.durationModes ?? fallbackVariant.durationModes),
+        prices: Object.keys(prices).length ? prices : { "1 Bulan": 0 },
+        snk: snkMonthly,
+        snkMonthly,
+        snkDaily,
+        ...(normalizeCheckoutRequirementsInput(variant.checkoutRequirements, fallbackVariant.checkoutRequirements) ? {
+          checkoutRequirements: normalizeCheckoutRequirementsInput(variant.checkoutRequirements, fallbackVariant.checkoutRequirements),
+        } : {}),
+        orderLock: normalizeOrderLockInput(variant.orderLock, fallbackVariant.orderLock),
+        deliveryTemplate: String(variant.deliveryTemplate ?? fallbackVariant.deliveryTemplate ?? "").trim(),
+        warrantyTemplate: String(variant.warrantyTemplate ?? fallbackVariant.warrantyTemplate ?? "").trim(),
+      };
+    }),
+  };
+}
+
+function productDependencySummary(db, product = {}) {
+  const productId = product.id || "";
+  const productName = String(product.name || "").trim().toLowerCase();
+  const productCode = String(product.code || "").trim().toLowerCase();
+  const productKeys = new Set([productId, productName, productCode].filter(Boolean));
+  const productMatches = (value) => value && productKeys.has(String(value).trim().toLowerCase());
+  const stock = (db.stock || []).filter((item) => item.productId === productId).length;
+  const accounts = (db.managedAccounts || []).filter((account) => {
+    return account.productId === productId || productMatches(account.product) || productMatches(account.productCode);
+  }).length;
+  const orders = (db.orders || []).filter((order) => {
+    return order.productId === productId || productMatches(order.product) || productMatches(order.productCode);
+  }).length;
+  return {
+    stock,
+    accounts,
+    orders,
+    total: stock + accounts + orders,
+  };
+}
+
+function productDependencyMessage(summary) {
+  return [
+    summary.stock ? `${summary.stock} stok` : "",
+    summary.accounts ? `${summary.accounts} akun reseller` : "",
+    summary.orders ? `${summary.orders} order` : "",
+  ].filter(Boolean).join(", ");
+}
+
+app.post("/api/products", requireAuth(["owner"]), async (req, res) => {
+  const created = await updateDb((db) => {
+    const product = {
+      ...normalizeProductInput(req.body),
+      isArchived: false,
+      archivedAt: "",
+      id: makeId("prod"),
+    };
+    db.products.unshift(product);
+    return product;
+  });
+  res.status(201).json(created);
+});
+
+app.put("/api/products/:id", requireAuth(["owner"]), async (req, res) => {
+  const updated = await updateDb((db) => {
+    const index = db.products.findIndex((product) => product.id === req.params.id);
+    if (index === -1) return null;
+    const current = db.products[index];
+    const product = {
+      ...current,
+      ...normalizeProductInput(req.body, current),
+      id: current.id,
+    };
+    db.products[index] = product;
+    return product;
+  });
+  if (!updated) return res.status(404).json({ error: "Produk tidak ditemukan" });
+  res.json(updated);
+});
+
+app.post("/api/products/:id/lock", requireAuth(["owner"]), async (req, res) => {
+  const updated = await updateDb((db) => {
+    const product = db.products.find((item) => item.id === req.params.id);
+    if (!product) return null;
+    const enabled = Boolean(req.body?.enabled);
+    const updatedAt = nowText();
+    product.orderLock = {
+      enabled,
+      reason: enabled ? String(req.body?.reason || "").trim() : "",
+      updatedAt,
+      updatedBy: "owner",
+      scope: "product",
+    };
+    db.activities = db.activities || [];
+    db.activities.unshift({
+      id: makeId("act"),
+      type: "stock",
+      title: enabled ? `${product.name} di-lock untuk order baru` : `Lock order ${product.name} dibuka`,
+      description: enabled
+        ? `Order baru untuk ${product.name} ditahan manual.${product.orderLock.reason ? ` Alasan: ${product.orderLock.reason}` : ""}`
+        : `Order baru untuk ${product.name} aktif lagi.`,
+      createdAt: updatedAt,
+      productId: product.id,
+    });
+    return product;
+  });
+  if (!updated) return res.status(404).json({ error: "Produk tidak ditemukan" });
+  res.json(updated);
+});
+
+app.post("/api/products/:id/variants/:variantId/lock", requireAuth(["owner"]), async (req, res) => {
+  const updated = await updateDb((db) => {
+    const product = db.products.find((item) => item.id === req.params.id);
+    const variant = product?.variants?.find((item) => item.id === req.params.variantId);
+    if (!product || !variant) return null;
+    const enabled = Boolean(req.body?.enabled);
+    const updatedAt = nowText();
+    variant.orderLock = {
+      enabled,
+      reason: enabled ? String(req.body?.reason || "").trim() : "",
+      updatedAt,
+      updatedBy: "owner",
+      scope: "variant",
+    };
+    db.activities = db.activities || [];
+    db.activities.unshift({
+      id: makeId("act"),
+      type: "stock",
+      title: enabled ? `${product.name} ${variant.name} di-lock` : `Lock order ${product.name} ${variant.name} dibuka`,
+      description: enabled
+        ? `Order baru untuk ${product.name} ${variant.name} ditahan manual.${variant.orderLock.reason ? ` Alasan: ${variant.orderLock.reason}` : ""}`
+        : `Order baru untuk ${product.name} ${variant.name} aktif lagi.`,
+      createdAt: updatedAt,
+      productId: product.id,
+      variant: variant.name,
+    });
+    return product;
+  });
+  if (!updated) return res.status(404).json({ error: "Produk atau variant tidak ditemukan" });
+  res.json(updated);
+});
+
+app.post("/api/products/:id/archive", requireAuth(["owner"]), async (req, res) => {
+  const archived = await updateDb((db) => {
+    const product = db.products.find((item) => item.id === req.params.id);
+    if (!product) return null;
+    const archivedAt = nowText();
+    product.isArchived = true;
+    product.isActive = false;
+    product.archivedAt = archivedAt;
+    db.activities = db.activities || [];
+    db.activities.unshift({
+      id: makeId("act"),
+      type: "stock",
+      title: `${product.name} diarsipkan`,
+      description: "Produk disembunyikan dari katalog dan order baru. Order, stok, dan akun lama tetap disimpan.",
+      createdAt: archivedAt,
+      productId: product.id,
+    });
+    return product;
+  });
+  if (!archived) return res.status(404).json({ error: "Produk tidak ditemukan" });
+  res.json(archived);
+});
+
+app.post("/api/products/:id/unarchive", requireAuth(["owner"]), async (req, res) => {
+  const restored = await updateDb((db) => {
+    const product = db.products.find((item) => item.id === req.params.id);
+    if (!product) return null;
+    const restoredAt = nowText();
+    product.isArchived = false;
+    product.archivedAt = "";
+    product.isActive = true;
+    db.activities = db.activities || [];
+    db.activities.unshift({
+      id: makeId("act"),
+      type: "stock",
+      title: `${product.name} dipulihkan`,
+      description: "Produk kembali aktif dan bisa tampil di katalog jika punya stok ready.",
+      createdAt: restoredAt,
+      productId: product.id,
+    });
+    return product;
+  });
+  if (!restored) return res.status(404).json({ error: "Produk tidak ditemukan" });
+  res.json(restored);
+});
+
+app.delete("/api/products/:id", requireAuth(["owner"]), async (req, res) => {
+  const deleted = await updateDb((db) => {
+    const index = db.products.findIndex((product) => product.id === req.params.id);
+    if (index === -1) return null;
+    const product = db.products[index];
+    const dependencies = productDependencySummary(db, product);
+    if (dependencies.total > 0) {
+      const error = new Error(`Produk masih punya ${productDependencyMessage(dependencies)}. Pakai Arsipkan supaya data lama tetap aman.`);
+      error.status = 409;
+      throw error;
+    }
+    db.products.splice(index, 1);
+    db.activities = db.activities || [];
+    db.activities.unshift({
+      id: makeId("act"),
+      type: "stock",
+      title: `${product.name} dihapus permanen`,
+      description: "Produk dihapus karena tidak memiliki stok, akun reseller, atau order terkait.",
+      createdAt: nowText(),
+      productId: product.id,
+    });
+    return true;
+  });
+  if (!deleted) return res.status(404).json({ error: "Produk tidak ditemukan" });
+  res.json({ ok: true });
+});
+
+app.get("/api/stock", requireAuth(["owner", "reseller"]), async (req, res) => {
+  const db = await readDb();
+  const search = String(req.query.search || "").toLowerCase();
+  const status = String(req.query.status || "all");
+  const productId = String(req.query.productId || "all");
+  if (req.auth.role === "reseller") {
+    if (!["all", "available"].includes(status)) {
+      res.json([]);
+      return;
+    }
+    const grouped = new Map();
+    const addSummary = (nextProductId, nextVariantId, amount, extraSearch = "") => {
+      if (!nextProductId || !nextVariantId || amount <= 0) return;
+      const product = getProduct(db, nextProductId);
+      const variant = getVariant(db, nextProductId, nextVariantId);
+      if (!product || !variant || isCanvaProduct(product)) return;
+      if (productId !== "all" && nextProductId !== productId) return;
+      const matchSearch = !search || [product.name, variant.name, variant.code, extraSearch].join(" ").toLowerCase().includes(search);
+      if (!matchSearch) return;
+      const key = `${nextProductId}::${nextVariantId}`;
+      const current = grouped.get(key) || {
+        id: `summary-${nextProductId}-${nextVariantId}`,
+        productId: nextProductId,
+        variantId: nextVariantId,
+        email: "",
+        password: "",
+        profile: "",
+        pin: "",
+        status: "available",
+        stockType: "summary",
+        availableCount: 0,
+      };
+      current.availableCount += amount;
+      current.email = `${current.availableCount} akun ready`;
+      grouped.set(key, current);
+    };
+
+    for (const item of db.stock || []) {
+      if (item.status !== "available") continue;
+      addSummary(item.productId, item.variantId, 1, item.email || "");
+    }
+    for (const pool of db.linkPools || []) {
+      const available = linkPoolAvailableCount(db, pool);
+      if (available <= 0) continue;
+      addSummary(pool.productId, pool.variantId, available, `${pool.poolKey || ""} ${pool.link || ""}`);
+    }
+
+    res.json(Array.from(grouped.values()).sort((left, right) => (
+      `${left.productId}-${left.variantId}`.localeCompare(`${right.productId}-${right.variantId}`)
+    )));
+    return;
+  }
+  const rows = db.stock.filter((item) => {
+    const product = getProduct(db, item.productId);
+    const variant = getVariant(db, item.productId, item.variantId);
+    if (isCanvaProduct(product)) return false;
+    const matchStatus = status === "all" || item.status === status;
+    const matchProduct = productId === "all" || item.productId === productId;
+    const matchSearch = [item.id, item.email, product?.name, variant?.name, variant?.code].join(" ").toLowerCase().includes(search);
+    return matchStatus && matchProduct && matchSearch;
+  });
+  const linkRows = (db.linkPools || [])
+    .filter((pool) => {
+      const product = getProduct(db, pool.productId);
+      const variant = getVariant(db, pool.productId, pool.variantId);
+      const available = linkPoolAvailableCount(db, pool);
+      if (!product || !variant || available <= 0) return false;
+      const matchStatus = status === "all" || status === "available";
+      const matchProduct = productId === "all" || pool.productId === productId;
+      const matchSearch = [pool.id, pool.link, pool.poolKey, product?.name, variant?.name, variant?.code].join(" ").toLowerCase().includes(search);
+      return matchStatus && matchProduct && matchSearch;
+    })
+    .map((pool) => {
+      const available = linkPoolAvailableCount(db, pool);
+      return {
+        id: pool.id,
+        productId: pool.productId,
+        variantId: pool.variantId,
+        email: `Kuota ${available}/${Number(pool.quota || 0)} tersedia`,
+        password: pool.link || "",
+        profile: "-",
+        pin: "-",
+        status: "available",
+        stockType: "link_pool",
+        linkPoolId: pool.id,
+        sheetSource: "google_sheets",
+        sheetPool: pool.poolKey || pool.key || "",
+        sheetPoolSchema: "link",
+        sheetRow: pool.sheetRow || 0,
+        sheetName: pool.sheetName || "",
+        notes: pool.notes || "",
+      };
+    });
+  const allRows = [...rows, ...linkRows];
+  res.json(allRows);
+});
+
+app.get("/api/google-sheets/status", requireAuth(["owner"]), async (_req, res) => {
+  const db = await readDb();
+  res.json({
+    configured: googleSheetsConfigured(db),
+    settings: googleSheetsPublicSettings(db),
+    lastSyncAt: db.settings?.googleSheetsLastSyncAt || "",
+    lastSyncSummary: db.settings?.googleSheetsLastSyncSummary || null,
+  });
+});
+
+app.get("/api/google-sheets/mapping-preview", requireAuth(["owner"]), async (req, res, next) => {
+  try {
+    const db = await readDb();
+    const preview = await previewAccountSheetMapping(db, {
+      accountId: req.query.accountId || req.query.account_id || "",
+      stockId: req.query.stockId || req.query.stock_id || "",
+      sheetStockKey: req.query.sheetStockKey || req.query.sheet_stock_key || "",
+      email: req.query.email || "",
+    });
+    if (!preview.ok) {
+      res.status(404).json(preview);
+      return;
+    }
+    res.json(preview);
+  } catch (error) {
+    next(error);
+  }
+});
+
+function cloneForPreview(value) {
+  return JSON.parse(JSON.stringify(value || {}));
+}
+
+function statusOfAccount(account = {}) {
+  return String(account.status || accountStatusFromDate(account.expiresAt, account.durationDays)).toLowerCase();
+}
+
+function collectSyncWarnings(result = {}) {
+  const warnings = [];
+  const visit = (value, pathLabel = "") => {
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value.warnings)) {
+      for (const warning of value.warnings) {
+        const text = String(warning || "").trim();
+        if (text) warnings.push(pathLabel ? `${pathLabel}: ${text}` : text);
+      }
+    }
+    const errorText = String(value.error || value.reason || "").trim();
+    if (value.ok === false && errorText) warnings.push(pathLabel ? `${pathLabel}: ${errorText}` : errorText);
+    for (const [key, child] of Object.entries(value)) {
+      if (!child || typeof child !== "object") continue;
+      if (key === "warnings") continue;
+      visit(child, pathLabel ? `${pathLabel}.${key}` : key);
+    }
+  };
+  visit(result);
+  return [...new Set(warnings)].slice(0, 80);
+}
+
+function buildSheetsSyncPreview(beforeDb, afterDb, syncResult = {}) {
+  const beforeStock = new Map((beforeDb.stock || []).map((item) => [item.id, item]));
+  const afterStock = new Map((afterDb.stock || []).map((item) => [item.id, item]));
+  const beforeAccounts = new Map((beforeDb.managedAccounts || []).map((item) => [item.id, item]));
+  const afterAccounts = new Map((afterDb.managedAccounts || []).map((item) => [item.id, item]));
+  let addStock = 0;
+  let soldStock = 0;
+  let availableStock = 0;
+  let removedStock = 0;
+  let expiredAccounts = 0;
+  const changes = [];
+
+  const describeStock = (item = {}) => ({
+    stockId: item.id || "",
+    sheetName: item.sheetName || "",
+    sheetRow: Number(item.sheetRow || 0),
+    identity: item.loginPhone || item.email || item.profile || item.id || "-",
+    profile: item.profile || "",
+  });
+  const addChange = (item, type, fields = []) => {
+    changes.push({ ...describeStock(item), type, fields });
+  };
+
+  for (const [id, next] of afterStock.entries()) {
+    const previous = beforeStock.get(id);
+    if (!previous) {
+      addStock += 1;
+      addChange(next, "added", ["baris baru"]);
+      continue;
+    }
+    const changedFields = [
+      ["status", previous.status, next.status],
+      ["seller", previous.sheetSellerInput || previous.reseller, next.sheetSellerInput || next.reseller],
+      ["tanggal", previous.soldAt, next.soldAt],
+      ["durasi", previous.soldDuration, next.soldDuration],
+      ["expiry", previous.soldExpiresAt || previous.expiresAt, next.soldExpiresAt || next.expiresAt],
+      ["password/link", previous.password, next.password],
+      ["profil", previous.profile, next.profile],
+    ].filter(([, before, after]) => String(before || "") !== String(after || ""))
+      .map(([field, before, after]) => `${field}: ${before || "-"} -> ${after || "-"}`);
+    if (changedFields.length) addChange(next, "updated", changedFields);
+    if (previous.status !== "sold" && next.status === "sold") soldStock += 1;
+    if (previous.status !== "available" && next.status === "available") availableStock += 1;
+    if (previous.status !== "removed" && next.status === "removed") removedStock += 1;
+  }
+
+  for (const [id, previous] of beforeStock.entries()) {
+    if (!afterStock.has(id) && isGoogleSheetsBackedStock(previous)) addChange(previous, "removed", ["baris tidak ditemukan setelah sync"]);
+  }
+
+  for (const [id, next] of afterAccounts.entries()) {
+    const previous = beforeAccounts.get(id);
+    const previousStatus = previous ? statusOfAccount(previous) : "";
+    const nextStatus = statusOfAccount(next);
+    if ((!previous || !["expired", "replaced", "disabled"].includes(previousStatus)) && (nextStatus === "expired" || next.hidden)) {
+      expiredAccounts += 1;
+    }
+  }
+
+  return {
+    addStock,
+    soldStock,
+    availableStock,
+    removedStock,
+    expiredAccounts,
+    warnings: collectSyncWarnings(syncResult),
+    changes: changes.slice(0, 150),
+    rowAudit: buildSheetsRowAudit(afterDb),
+    summary: syncResult,
+  };
+}
+
+app.post("/api/google-sheets/netflix/template", requireAuth(["owner"]), async (_req, res, next) => {
+  try {
+    const result = await ensureNetflixSheetsTemplate(await readDb());
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/google-sheets/template", requireAuth(["owner"]), async (_req, res, next) => {
+  try {
+    const result = await ensureGoogleSheetsTemplate(await readDb());
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/google-sheets/sync", requireAuth(["owner"]), async (_req, res, next) => {
+  try {
+    const result = await updateDb((db) => syncGoogleSheetsStockSafely(db, { reason: "manual_sync", force: true }));
+    res.json(result);
+  } catch (error) {
+    await updateDb((db) => {
+      const friendly = friendlyGoogleSheetsError(error);
+      if (friendly.code !== "google_sheets_rate_limited") {
+        enableMaintenanceMode(db, `Google Sheets gagal sync manual: ${friendly.message || "unknown_error"}`, "google_sheets");
+      }
+      return null;
+    }).catch(() => undefined);
+    next(friendlyGoogleSheetsError(error));
+  }
+});
+
+app.post("/api/google-sheets/preview", requireAuth(["owner"]), async (_req, res, next) => {
+  try {
+    const db = await readDb();
+    if (!googleSheetsConfigured(db)) {
+      res.status(400).json({ error: "Google Sheets belum dikonfigurasi" });
+      return;
+    }
+    const previewDb = cloneForPreview(db);
+    const result = await syncGoogleSheetsStockSafely(previewDb, { silent: true, reason: "preview_sync", force: true });
+    res.json({ ok: true, preview: buildSheetsSyncPreview(db, previewDb, result) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/google-sheets/netflix/sync", requireAuth(["owner"]), async (_req, res, next) => {
+  try {
+    const result = await updateDb((db) => syncGoogleSheetsStockSafely(db, { reason: "manual_sync", force: true }));
+    res.json(result);
+  } catch (error) {
+    next(friendlyGoogleSheetsError(error));
+  }
+});
+
+app.post("/api/stock", requireAuth(["owner"]), async (req, res) => {
+  const created = await updateDb((db) => {
+    const product = getProduct(db, req.body.productId) || db.products[0];
+    const variant = product?.variants?.find((item) => item.id === req.body.variantId) || product?.variants?.[0];
+    if (!product || !variant) {
+      const error = new Error("Produk atau varian tidak valid");
+      error.status = 400;
+      throw error;
+    }
+    const stock = {
+      id: makeId("stk"),
+      productId: product.id,
+      variantId: variant.id,
+      email: req.body.email,
+      password: req.body.password,
+      profile: req.body.profile || "",
+      pin: req.body.pin || "",
+      signInCode: req.body.signInCode || "",
+      verificationCode: req.body.verificationCode || "",
+      resetLink: req.body.resetLink || "",
+      householdLink: req.body.householdLink || "",
+      status: req.body.status || "available",
+      createdAt: todayText(),
+      notes: req.body.notes || "",
+    };
+    db.stock.unshift(stock);
+    db.activities.unshift({
+      id: makeId("act"),
+      type: "stock",
+      title: `Stok ${product.name} ditambahkan`,
+      description: `${stock.email} masuk ke stok ${stock.status}.`,
+      createdAt: nowText(),
+    });
+    return stock;
+  });
+  res.status(201).json(created);
+});
+
+app.put("/api/stock/:id", requireAuth(["owner"]), async (req, res) => {
+  const updated = await updateDb(async (db) => {
+    const item = db.stock.find((stock) => stock.id === req.params.id);
+    if (!item) return null;
+    const sheetBacked = isGoogleSheetsBackedStock(item);
+    if (sheetBacked) {
+      const mutableKeys = new Set(["password", "signInCode", "verificationCode", "resetLink", "householdLink"]);
+      const blockedKeys = Object.keys(req.body || {}).filter((key) => !mutableKeys.has(key));
+      if (blockedKeys.length) {
+        const error = new Error(`Stok Google Sheets harus diubah dari Sheets. Field web yang diblokir: ${blockedKeys.join(", ")}`);
+        error.status = 409;
+        throw error;
+      }
+    }
+    const previousPassword = String(item.password || "");
+    Object.assign(item, req.body);
+    const nextPassword = String(item.password || "");
+    if (req.body.password !== undefined && previousPassword !== nextPassword) {
+      const passwordSync = syncPasswordByEmail(db, item.email, nextPassword, { sourceStockId: item.id });
+      item.googleSheetsCredentialSync = await syncCredentialsToSheetsSafely(db, {
+        email: item.email,
+        password: nextPassword,
+        stockIds: [item.id],
+        sheetStockKeys: [item.sheetStockKey].filter(Boolean),
+      });
+      const notificationDedupe = new Set();
+      for (const account of passwordSync.affectedAccounts || []) {
+        await notifyResellerAccountChanged(db, account, [{ key: "password", label: "Password/Link" }], { dedupeSet: notificationDedupe });
+      }
+    }
+    return item;
+  });
+  if (!updated) return res.status(404).json({ error: "Stok tidak ditemukan" });
+  res.json(updated);
+});
+
+app.post("/api/stock/:id/release-reservation", requireAuth(["owner"]), async (req, res) => {
+  const updated = await updateDb((db) => {
+    const stock = (db.stock || []).find((item) => item.id === req.params.id);
+    if (!stock) return null;
+    if (String(stock.status || "").toLowerCase() !== "reserved") {
+      const error = new Error("Stok ini tidak sedang reserved");
+      error.status = 400;
+      throw error;
+    }
+
+    const linkedAccount = (db.managedAccounts || []).find((account) => (
+      String(account.id || "").trim() === String(stock.reservedAccountId || "").trim()
+      && !account.hidden
+      && !account.returnedToStockAt
+    ));
+    if (linkedAccount) {
+      const error = new Error("Stok reserved ini masih dipakai akun harian aktif, jadi tidak boleh dilepas.");
+      error.status = 409;
+      throw error;
+    }
+
+    const order = (db.orders || []).find((item) => String(item.id || "").trim() === String(stock.reservedFor || "").trim()) || null;
+    const orderTerminal = !order
+      || ["cancelled"].includes(String(order.orderStatus || "").toLowerCase())
+      || ["expired"].includes(String(order.qrisStatus || "").toLowerCase())
+      || (createdAtMs(order.paymentExpiresAt || "") && createdAtMs(order.paymentExpiresAt || "") < Date.now());
+    if (!orderTerminal) {
+      const error = new Error("Order yang menahan stok ini masih aktif. Lepas lock hanya untuk reservasi stale/expired.");
+      error.status = 409;
+      throw error;
+    }
+
+    stock.status = "available";
+    delete stock.reservedFor;
+    delete stock.reservedAccountId;
+    delete stock.reservedUntil;
+    delete stock.reservedAt;
+
+    db.activities = db.activities || [];
+    db.activities.unshift({
+      id: makeId("act"),
+      type: "stock",
+      title: "Reserved stock dilepas manual",
+      description: `${stock.email || stock.id} lock reservasinya dilepas oleh owner${order ? ` dari order ${order.id}` : ""}.`,
+      createdAt: nowText(),
+      stockId: stock.id,
+      orderId: order?.id || "",
+    });
+    return stock;
+  });
+  if (!updated) return res.status(404).json({ error: "Stok tidak ditemukan" });
+  res.json({ ok: true, stock: updated });
+});
+
+app.post("/api/stock/:id/assign-daily", requireAuth(["owner"]), async (req, res) => {
+  const assigned = await updateDb(async (db) => {
+    const stock = db.stock.find((item) => item.id === req.params.id);
+    if (!stock) return null;
+    const account = buildDailyStockAssignment(db, stock, req.body);
+    stock.status = "reserved";
+    stock.reservedFor = account.reseller || account.whatsapp || account.resellerId || "";
+    stock.reservedAccountId = account.id;
+    stock.reservedUntil = account.expiresAt;
+    stock.soldVariant = account.variant || "";
+    stock.soldVariantId = account.variantId || "";
+    stock.soldDuration = account.duration || "";
+    stock.soldDurationDays = account.durationDays || 0;
+    db.managedAccounts = db.managedAccounts || [];
+    db.managedAccounts.unshift(account);
+    db.activities = db.activities || [];
+    db.activities.unshift({
+      id: makeId("act"),
+      type: "account",
+      title: `Akun ${account.email} di-assign harian`,
+      description: `${account.email} dipakai ${account.reseller || account.whatsapp || "reseller"} selama ${account.durationDays} hari.`,
+      createdAt: nowText(),
+      resellerId: account.resellerId || "",
+      whatsapp: normalizeWhatsappNumber(account.whatsapp || ""),
+      accountId: account.id,
+      accountEmail: account.email,
+      stockId: stock.id,
+    });
+    await pushAccountsToGoogleSheets(db, [account], { id: "MANUAL", device: req.body.device || req.body.buyer || "", note: req.body.buyer || "" });
+    return { account, stock };
+  });
+  if (!assigned) return res.status(404).json({ error: "Stok tidak ditemukan" });
+  res.status(201).json(assigned);
+});
+
+app.delete("/api/stock/:id", requireAuth(["owner"]), async (req, res) => {
+  const deleted = await updateDb((db) => {
+    const index = db.stock.findIndex((stock) => stock.id === req.params.id);
+    if (index === -1) return null;
+    const existing = db.stock[index];
+    if (isGoogleSheetsBackedStock(existing)) {
+      const error = new Error("Stok Google Sheets tidak boleh dihapus dari web. Hapus atau kosongkan row di Google Sheets.");
+      error.status = 409;
+      throw error;
+    }
+    const [item] = db.stock.splice(index, 1);
+    db.activities.unshift({
+      id: makeId("act"),
+      type: "stock",
+      title: "Stok dihapus",
+      description: `${item.email || item.id} dihapus dari daftar stok.`,
+      createdAt: nowText(),
+    });
+    return item;
+  });
+  if (!deleted) return res.status(404).json({ error: "Stok tidak ditemukan" });
+  res.json({ ok: true });
+});
+
+app.get("/api/orders", requireAuth(["owner", "reseller"]), async (req, res) => {
+  const db = await readDbWithExpiredOrders();
+  if (req.auth.role === "reseller") {
+    res.json((db.orders || [])
+      .filter((order) => orderBelongsToReseller(db, req.auth, order))
+      .map((order) => serializeOrderForApi(db, order, { viewerRole: "reseller", detail: false })));
+    return;
+  }
+  res.json((db.orders || []).map((order) => serializeOrderForApi(db, order, { viewerRole: "owner", detail: false })));
+});
+
+app.get("/api/orders/:id", requireAuth(["owner", "reseller"]), async (req, res) => {
+  const db = await readDbWithExpiredOrders();
+  const order = db.orders.find((item) => item.id.toLowerCase() === req.params.id.toLowerCase() || item.paymentRef?.toLowerCase() === req.params.id.toLowerCase());
+  if (!order) return res.status(404).json({ error: "Order tidak ditemukan" });
+  if (req.auth.role === "reseller" && !orderBelongsToReseller(db, req.auth, order)) {
+    return res.status(404).json({ error: "Order tidak ditemukan" });
+  }
+  res.json(serializeOrderForApi(db, order, { viewerRole: req.auth.role, detail: true }));
+});
+
+app.get("/api/public/orders/:id", async (req, res) => {
+  const db = await readDbWithExpiredOrders();
+  const order = (db.orders || []).find((item) => item.id.toLowerCase() === req.params.id.toLowerCase() || item.paymentRef?.toLowerCase() === req.params.id.toLowerCase());
+  if (!order) return res.status(404).json({ error: "Order tidak ditemukan" });
+  res.json(serializeOrderForApi(db, order, { viewerRole: "public", detail: false }));
+});
+
+app.post("/api/orders", requireAuth(["owner", "reseller"]), async (req, res) => {
+  const created = await updateDb(async (db) => {
+    assertOrderIntakeOpen(db);
+    const product = getProduct(db, req.body.productId) || db.products[0];
+    const variant = product?.variants?.find((item) => item.id === req.body.variantId) || product?.variants?.[0];
+    if (!product || product.isArchived || product.isActive === false || !variant || !isVariantOrderable(product, variant)) {
+      const error = new Error("Produk atau varian tidak aktif untuk order");
+      error.status = 400;
+      throw error;
+    }
+    const lockError = orderLockError(product, variant);
+    if (lockError) throw lockError;
+    const orderDuration = normalizeDurationLabel(req.body.duration || "1 Bulan", variant);
+    if (!durationAllowedForVariant(variant, orderDuration)) {
+      const error = new Error(`Durasi ${orderDuration} sedang tidak aktif untuk ${variant.name}.`);
+      error.status = 400;
+      throw error;
+    }
+    const price = priceForDuration(variant, orderDuration);
+    if (!Number.isFinite(price) || price <= 0) {
+      const error = new Error(`Harga ${orderDuration} untuk ${product.name} ${variant.name} belum dikonfigurasi.`);
+      error.status = 400;
+      throw error;
+    }
+    const qty = parseOrderQty(req.body.qty);
+    const reseller = req.auth.role === "reseller" ? authReseller(db, req.auth) : assertResellerCanOrder(db, req.body.whatsapp || "");
+    if (!reseller || reseller.isActive === false) {
+      const error = new Error(resellerRequiredMessage);
+      error.status = 403;
+      throw error;
+    }
+    const cleanWhatsapp = req.auth.role === "reseller"
+      ? primaryResellerWhatsapp(reseller)
+      : normalizeWhatsappNumber(req.body.whatsapp || "");
+    if (!cleanWhatsapp) {
+      const error = new Error("Nomor WhatsApp reseller belum terisi. Lengkapi data reseller dulu sebelum order.");
+      error.status = 400;
+      throw error;
+    }
+    const total = price * qty;
+    const paymentPlan = depositBreakdown(reseller, total);
+    const excludeFromSalesMetrics = isSmokeTestReseller(reseller);
+    const requirements = checkoutRequirementsForVariant(db, product, variant, { qty });
+    const customerField = requirements.customerField || "optional";
+    const rawCustomerData = String(req.body.customerData || req.body.customerInfo || req.body.email || req.body.device || "").trim();
+    const customerEmails = customerField === "email" ? splitCustomerEmails(req.body.email || rawCustomerData) : [];
+    const deviceText = customerField === "device" ? String(req.body.device || rawCustomerData).trim() : "";
+    const deviceItems = customerField === "device" ? splitDeviceNames(deviceText) : [];
+    if (customerField === "email" && customerEmails.length < Math.max(qty, Number(requirements.minItems || 1))) {
+      const error = new Error(`${product.name} wajib isi ${Math.max(qty, Number(requirements.minItems || 1))} email customer.`);
+      error.status = 400;
+      throw error;
+    }
+    if (customerField === "device" && requirements.required && !deviceText) {
+      const error = new Error(`${requirements.label || "Device customer"} wajib diisi.`);
+      error.status = 400;
+      throw error;
+    }
+    if (customerField === "device" && deviceItems.length < Number(requirements.minItems || 1)) {
+      const error = new Error(`${requirements.label || "Device customer"} wajib isi minimal ${Number(requirements.minItems || 1)} item. Pisahkan dengan koma atau baris baru.`);
+      error.status = 400;
+      throw error;
+    }
+    const createdAt = nowText();
+    const paymentExpiresAt = addMinutesText(paymentTtlMinutes);
+    const orderDurationDays = durationDays(orderDuration);
+    const expiresAt = addAccountDaysText(orderDurationDays, createdAt, { keepTime: true });
+    const order = {
+      id: makeId("ORD").toUpperCase(),
+      paymentRef: makeId("PAY").toUpperCase(),
+      customer: req.body.customer || req.body.whatsapp || "Customer",
+      whatsapp: cleanWhatsapp,
+      resellerId: reseller?.id || "",
+      reseller: reseller?.name || reseller?.username || cleanWhatsapp,
+      excludeFromSalesMetrics,
+      internalTestAccount: excludeFromSalesMetrics ? "kya" : "",
+      product: product.name,
+      productId: product.id,
+      variant: variant.name,
+      variantId: variant.id,
+      variantCode: variant.code,
+      customerVariant: variant.name,
+      customerVariantId: variant.id,
+      customerVariantCode: variant.code,
+      stockPoolKey: variantStockGroupKey(product, variant),
+      duration: orderDuration,
+      durationDays: orderDurationDays,
+      qty,
+      total,
+      depositBefore: paymentPlan.depositBefore,
+      depositUsed: paymentPlan.depositUsed,
+      depositAfter: paymentPlan.depositAfter,
+      paymentDue: paymentPlan.paymentDue,
+      email: customerField === "email" ? customerEmails.join(", ") : "",
+      customerEmails,
+      device: customerField === "device" ? deviceText : "",
+      customerData: customerField === "optional" ? rawCustomerData : "",
+      checkoutRequirements: requirements,
+      note: req.body.note || "",
+      qrisStatus: paymentPlan.paymentDue > 0 ? "pending" : "paid",
+      orderStatus: paymentPlan.paymentDue > 0 ? "pending" : "processing",
+      deliveryStatus: paymentPlan.paymentDue > 0 ? "waiting_payment" : "paid_by_deposit",
+      channel: "Reseller",
+      source: "web",
+      stockPolicy: "pay_first",
+      paymentMethod:
+        paymentPlan.paymentDue > 0 && paymentPlan.depositUsed > 0
+          ? "Deposit + QRIS auto"
+          : paymentPlan.depositUsed > 0
+            ? "Deposit reseller"
+            : "QRIS auto",
+      createdAt,
+      expiresAt,
+      paymentExpiresAt,
+      deliveredStockIds: [],
+    };
+    const reservedStocks = await ensureWebOrderStock(db, order, product, variant, qty);
+    if (paymentPlan.depositUsed > 0) {
+      reseller.deposit = paymentPlan.depositAfter;
+    }
+    const payment = {
+      ref: order.paymentRef,
+      orderId: order.id,
+      status: paymentPlan.paymentDue > 0 ? "pending" : "paid",
+      amount: paymentPlan.paymentDue,
+      provider: paymentPlan.paymentDue > 0 ? "pakasir" : "deposit",
+      depositBefore: paymentPlan.depositBefore,
+      depositUsed: paymentPlan.depositUsed,
+      depositAfter: paymentPlan.depositAfter,
+      totalPayment: paymentPlan.paymentDue > 0 ? paymentPlan.paymentDue : total,
+      paymentMethod: order.paymentMethod,
+      createdAt,
+      expiresAt: paymentExpiresAt,
+    };
+    if (paymentPlan.paymentDue > 0) {
+      const pakasir = await createPakasirQris(db, order);
+      if (pakasir.providerStatus !== "created") {
+        if (paymentPlan.depositUsed > 0) reseller.deposit = paymentPlan.depositBefore;
+        for (const stock of reservedStocks) clearReservedStockState(stock);
+        enableMaintenanceMode(db, `Pakasir QRIS gagal: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`, "pakasir");
+        const error = new Error(`Pakasir QRIS gagal. Order tidak dibuat dan deposit tidak dipotong: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`);
+        error.status = 503;
+        error.maintenance = { reason: `Pakasir QRIS gagal: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`, source: "pakasir" };
+        throw error;
+      }
+      Object.assign(payment, pakasir);
+      order.qrisUrl = pakasir.paymentUrl || `${db.settings.botPublicUrl || "http://127.0.0.1:4174"}/api/payments/${order.paymentRef}`;
+      if (pakasir.providerError) order.paymentError = pakasir.providerError;
+    } else {
+      order.qrisUrl = "";
+    }
+    db.payments.unshift(payment);
+    db.orders.unshift(order);
+    db.activities = db.activities || [];
+    db.activities.unshift({
+      id: makeId("act"),
+      type: "order",
+      title: `Order ${order.id} dibuat dari Web`,
+      description:
+        paymentPlan.paymentDue > 0
+          ? `${product.name} ${variant.name} x${qty}. Deposit dipakai ${formatRupiah(paymentPlan.depositUsed)}, sisa QRIS ${formatRupiah(paymentPlan.paymentDue)}.`
+          : `${product.name} ${variant.name} x${qty} lunas memakai deposit reseller.`,
+      createdAt: nowText(),
+      orderId: order.id,
+      resellerId: reseller?.id || "",
+      whatsapp: cleanWhatsapp,
+    });
+    if (paymentPlan.paymentDue <= 0) {
+      const result = await fulfillPaidOrderAndNotify(db, order.id);
+      return result.order || order;
+    }
+    return order;
+  });
+  res.status(201).json(created);
+});
+
+app.post("/api/orders/smoke-test", requireAuth(["owner"]), async (req, res) => {
+  const created = await updateDb(async (db) => {
+    assertOrderIntakeOpen(db);
+    const product = getProduct(db, req.body.productId) || db.products[0];
+    const variant = product?.variants?.find((item) => item.id === req.body.variantId) || product?.variants?.[0];
+    if (!product || product.isArchived || product.isActive === false || !variant || !isVariantOrderable(product, variant)) {
+      const error = new Error("Produk atau varian tidak aktif untuk smoke test");
+      error.status = 400;
+      throw error;
+    }
+    const lockError = orderLockError(product, variant);
+    if (lockError) throw lockError;
+    const orderDuration = normalizeDurationLabel(req.body.duration || "1 Bulan", variant);
+    if (!durationAllowedForVariant(variant, orderDuration)) {
+      const error = new Error(`Durasi ${orderDuration} sedang tidak aktif untuk ${variant.name}.`);
+      error.status = 400;
+      throw error;
+    }
+    const qty = parseOrderQty(req.body.qty);
+    const requirements = checkoutRequirementsForVariant(db, product, variant, { qty });
+    const customerField = requirements.customerField || "optional";
+    const rawCustomerData = String(req.body.customerData || req.body.customerInfo || req.body.email || req.body.device || "").trim();
+    const customerEmails = customerField === "email" ? splitCustomerEmails(req.body.email || rawCustomerData) : [];
+    const deviceText = customerField === "device" ? String(req.body.device || rawCustomerData).trim() : "";
+    const deviceItems = customerField === "device" ? splitDeviceNames(deviceText) : [];
+    if (customerField === "email" && customerEmails.length < Math.max(qty, Number(requirements.minItems || 1))) {
+      const error = new Error(`${product.name} wajib isi ${Math.max(qty, Number(requirements.minItems || 1))} email customer.`);
+      error.status = 400;
+      throw error;
+    }
+    if (customerField === "device" && requirements.required && !deviceText) {
+      const error = new Error(`${requirements.label || "Device customer"} wajib diisi.`);
+      error.status = 400;
+      throw error;
+    }
+    if (customerField === "device" && deviceItems.length < Number(requirements.minItems || 1)) {
+      const error = new Error(`${requirements.label || "Device customer"} wajib isi minimal ${Number(requirements.minItems || 1)} item. Pisahkan dengan koma atau baris baru.`);
+      error.status = 400;
+      throw error;
+    }
+
+    const ownerProfile = db.settings?.profile || {};
+    const createdAt = nowText();
+    const orderDurationDays = durationDays(orderDuration);
+    const expiresAt = addAccountDaysText(orderDurationDays, createdAt, { keepTime: true });
+    const smokeLabel = String(req.body.smokeLabel || "kya").trim() || "kya";
+    const ownerWhatsapp = normalizeWhatsappNumber(req.body.whatsapp || ownerProfile.whatsapp || "");
+    const quotedTotal = priceForDuration(variant, orderDuration) * qty;
+    const order = {
+      id: makeId("ORD").toUpperCase(),
+      paymentRef: makeId("TEST").toUpperCase(),
+      customer: smokeLabel,
+      whatsapp: ownerWhatsapp,
+      resellerId: "",
+      reseller: "Owner Smoke Test",
+      product: product.name,
+      productId: product.id,
+      variant: variant.name,
+      variantId: variant.id,
+      variantCode: variant.code,
+      customerVariant: variant.name,
+      customerVariantId: variant.id,
+      customerVariantCode: variant.code,
+      stockPoolKey: variantStockGroupKey(product, variant),
+      duration: orderDuration,
+      durationDays: orderDurationDays,
+      qty,
+      total: 0,
+      quotedTotal,
+      smokeTestCatalogTotal: quotedTotal,
+      depositBefore: 0,
+      depositUsed: 0,
+      depositAfter: 0,
+      paymentDue: 0,
+      email: customerField === "email" ? customerEmails.join(", ") : "",
+      customerEmails,
+      device: customerField === "device" ? deviceText : "",
+      customerData: customerField === "optional" ? rawCustomerData : "",
+      checkoutRequirements: requirements,
+      note: String(req.body.note || "").trim(),
+      qrisStatus: "manual",
+      orderStatus: "processing",
+      deliveryStatus: "manual_approved",
+      channel: "Owner Smoke Test",
+      source: "owner_smoke_test",
+      isSmokeTest: true,
+      smokeTestLabel: smokeLabel,
+      stockPolicy: "pay_first",
+      paymentMethod: "Owner Smoke Test",
+      createdAt,
+      expiresAt,
+      paymentExpiresAt: "",
+      deliveredStockIds: [],
+      manualApproved: true,
+      manualApprovedAt: createdAt,
+      manualApprovedBy: req.auth?.name || req.auth?.username || req.auth?.email || "owner",
+      manualApprovalReason: "owner smoke test",
+    };
+    await ensureWebOrderStock(db, order, product, variant, qty);
+    const payment = {
+      ref: order.paymentRef,
+      orderId: order.id,
+      status: "manual",
+      amount: 0,
+      provider: "smoke_test",
+      depositBefore: 0,
+      depositUsed: 0,
+      depositAfter: 0,
+      totalPayment: 0,
+      paymentMethod: order.paymentMethod,
+      createdAt,
+      expiresAt: "",
+      manualApproved: true,
+      manualApprovedAt: createdAt,
+      manualApprovedBy: order.manualApprovedBy,
+      manualApprovalReason: order.manualApprovalReason,
+      providerStatus: "smoke_test",
+      providerWebhookStatus: "smoke_test",
+    };
+    db.payments.unshift(payment);
+    db.orders.unshift(order);
+    db.activities = db.activities || [];
+    db.activities.unshift({
+      id: makeId("act"),
+      type: "order",
+      title: `Smoke test ${order.id} dibuat`,
+      description: `${product.name} ${variant.name} x${qty} untuk akun internal ${smokeLabel}. Stok asli dipakai, metrik penjualan tidak dihitung.`,
+      createdAt: nowText(),
+      orderId: order.id,
+      whatsapp: ownerWhatsapp,
+    });
+    const result = await fulfillPaidOrderAndNotify(db, order.id);
+    return serializeOrderForApi(db, result?.order || order, { viewerRole: "owner", detail: true });
+  });
+  res.status(201).json(created);
+});
+
+app.post("/api/orders/:id/mark-paid", requireAuth(["owner"]), async (req, res) => {
+  const result = await updateDb(async (db) => {
+    expirePendingOrders(db);
+    const order = db.orders.find((item) => item.id === req.params.id || item.paymentRef === req.params.id);
+    if (!order) return null;
+    const payment = db.payments.find((item) => item.orderId === order.id || item.ref === order.paymentRef) || {};
+    const prepared = preparePaidOrderForFulfillment(db, order, payment);
+    if (prepared.reply && prepared.order.deliveryStatus === "late_paid_deposit") return prepared;
+    return fulfillPaidOrderAndNotify(db, order.id);
+  });
+  if (!result) return res.status(404).json({ error: "Order tidak ditemukan" });
+  res.json(result);
+});
+
+app.post("/api/orders/:id/approve-manual", requireAuth(["owner"]), async (req, res) => {
+  const reason = String(req.body?.reason || "").trim();
+  if (!reason) return res.status(400).json({ error: "Alasan approve manual wajib diisi" });
+  const result = await updateDb(async (db) => {
+    expirePendingOrders(db);
+    const order = db.orders.find((item) => item.id === req.params.id || item.paymentRef === req.params.id);
+    if (!order) return null;
+    if (String(order.orderStatus || "").toLowerCase() === "completed" || String(order.deliveryStatus || "").toLowerCase() === "sent") {
+      return { ok: true, order, reply: order.fulfillmentText || "Order sudah selesai." };
+    }
+    const payment = db.payments.find((item) => item.orderId === order.id || item.ref === order.paymentRef) || {};
+    prepareManualApprovedOrderForFulfillment(db, order, payment, {
+      reason,
+      actor: req.auth?.name || req.auth?.username || req.auth?.email || "owner",
+    });
+    return fulfillPaidOrderAndNotify(db, order.id);
+  });
+  if (!result) return res.status(404).json({ error: "Order tidak ditemukan" });
+  res.json(result);
+});
+
+app.post("/api/orders/:id/retry-delivery", requireAuth(["owner"]), async (req, res) => {
+  const result = await updateDb((db) => fulfillPaidOrderAndNotify(db, req.params.id));
+  res.json(result);
+});
+
+app.get("/api/resellers", requireAuth(["owner", "reseller"]), async (req, res) => {
+  const db = await readDb();
+  if (req.auth.role === "reseller") {
+    res.json((db.resellers || []).filter((item) => item.id === req.auth.sub).map(({ password, ...safe }) => safe));
+    return;
+  }
+  res.json((db.resellers || []).map((item) => ({ ...item, allowedAccessTools: resellerAccessTools(item) })));
+});
+
+app.post("/api/resellers", requireAuth(["owner"]), async (req, res) => {
+  const created = await updateDb((db) => {
+    const input = normalizeResellerInput(req.body, { password: Math.random().toString(36).slice(2, 10), joinedAt: todayText() });
+    const duplicate = findDuplicateReseller(db, input);
+    if (duplicate) throwDuplicateResellerError(duplicate);
+    const reseller = {
+      id: makeId("res"),
+      ...input,
+      allowedAccessTools: normalizeResellerAccessTools(input.allowedAccessTools, defaultResellerAccessTools),
+    };
+    db.resellers.unshift(reseller);
+    return reseller;
+  });
+  const dbForSend = await readDb();
+  const delivery = await sendResellerWelcomeWhatsApp(dbForSend, created);
+  const notificationStatus = delivery.sent ? "sent" : "failed";
+  const notificationAt = nowText();
+  await updateDb((db) => {
+    const reseller = (db.resellers || []).find((item) => item.id === created.id);
+    if (reseller) {
+      reseller.whatsappWelcomeStatus = notificationStatus;
+      reseller.whatsappWelcomeSentAt = delivery.sent ? notificationAt : "";
+      reseller.whatsappWelcomeError = delivery.sent ? "" : delivery.reason || "whatsapp_send_failed";
+      reseller.whatsappWelcomeMessageKey = delivery.messageKey || null;
+    }
+    db.activities = db.activities || [];
+    db.activities.unshift({
+      id: makeId("act"),
+      type: "reseller",
+      title: delivery.sent ? "Notif reseller terkirim" : "Notif reseller gagal",
+      description: delivery.sent
+        ? `Akun reseller ${created.name} dibuat dan detail login dikirim ke WhatsApp ${normalizeWhatsappNumber(created.whatsapp)}.`
+        : `Akun reseller ${created.name} dibuat, tapi notif WhatsApp gagal: ${delivery.reason || "whatsapp_send_failed"}.`,
+      resellerId: created.id,
+      whatsapp: normalizeWhatsappNumber(created.whatsapp),
+      createdAt: notificationAt,
+    });
+    return null;
+  });
+  res.status(201).json({
+    ...created,
+    whatsappWelcomeStatus: notificationStatus,
+    whatsappWelcomeSentAt: delivery.sent ? notificationAt : "",
+    whatsappWelcomeError: delivery.sent ? "" : delivery.reason || "whatsapp_send_failed",
+    whatsappWelcomeMessageKey: delivery.messageKey || null,
+  });
+});
+
+app.put("/api/resellers/:id", requireAuth(["owner", "reseller"]), async (req, res) => {
+  if (req.auth.role === "reseller" && req.auth.sub !== req.params.id) {
+    res.status(403).json({ error: "Tidak boleh mengubah reseller lain" });
+    return;
+  }
+  const updated = await updateDb(async (db) => {
+    const index = db.resellers.findIndex((item) => item.id === req.params.id);
+    if (index === -1) return null;
+    const current = db.resellers[index];
+    const before = { ...current };
+    const input = req.auth.role === "reseller" ? normalizeResellerSelfInput(req.body, current) : normalizeResellerInput(req.body, current);
+    const duplicate = findDuplicateReseller(db, input, current.id);
+    if (duplicate) throwDuplicateResellerError(duplicate);
+    const previousDeposit = Number(current.deposit || 0);
+    const reseller = {
+      ...current,
+      ...input,
+      id: current.id,
+      allowedAccessTools: normalizeResellerAccessTools(input.allowedAccessTools, current.allowedAccessTools),
+    };
+    db.resellers[index] = reseller;
+    const nextDeposit = Number(reseller.deposit || 0);
+    if (req.auth.role === "owner" && previousDeposit !== nextDeposit) {
+      const delta = nextDeposit - previousDeposit;
+      db.activities = db.activities || [];
+      db.activities.unshift({
+        id: makeId("act"),
+        type: "reseller",
+        title: delta >= 0 ? "Deposit reseller ditambah" : "Deposit reseller dikurangi",
+        description: `${formatRupiah(Math.abs(delta))} ${delta >= 0 ? "ditambahkan ke" : "dikurangi dari"} ${reseller.name || reseller.username || reseller.whatsapp}. Saldo: ${formatRupiah(previousDeposit)} -> ${formatRupiah(nextDeposit)}.`,
+        resellerId: reseller.id,
+        whatsapp: normalizeWhatsappNumber(reseller.whatsapp || ""),
+        createdAt: nowText(),
+      });
+    }
+    await notifyResellerProfileChanged(db, before, reseller, req.auth.role === "reseller" ? "self" : "owner");
+    return reseller;
+  });
+  if (!updated) return res.status(404).json({ error: "Reseller tidak ditemukan" });
+  res.json(req.auth.role === "reseller" ? safeResellerForSelf(updated) : updated);
+});
+
+app.delete("/api/resellers/:id", requireAuth(["owner"]), async (req, res) => {
+  await updateDb((db) => {
+    db.resellers = db.resellers.filter((item) => item.id !== req.params.id);
+  });
+  res.json({ ok: true });
+});
+
+app.post("/api/resellers/deposit-request", requireAuth(["reseller"]), async (req, res) => {
+  const amount = Math.max(0, Number(req.body?.amount || 0));
+  const method = String(req.body?.method || "").trim().toLowerCase();
+  const note = String(req.body?.note || "").trim();
+  if (!amount) {
+    res.status(400).json({ error: "Nominal deposit wajib diisi" });
+    return;
+  }
+  const allowedMethods = new Set(["qris_auto", "qris", "qris_owner", "dana", "livin", "bca", "gopay", "shopeepay"]);
+  if (!allowedMethods.has(method)) {
+    res.status(400).json({ error: "Metode deposit tidak valid" });
+    return;
+  }
+
+  const db = await readDb();
+  const reseller = authReseller(db, req.auth);
+  if (!reseller || reseller.isActive === false) {
+    res.status(404).json({ error: "Reseller tidak ditemukan atau nonaktif" });
+    return;
+  }
+
+  const settings = ownerIntegrationSettings(db);
+  const pakasirConnected = settings.status.pakasir === "connected";
+  if (method === "qris_auto" && !pakasirConnected) {
+    res.status(409).json({
+      error: "QRIS otomatis tidak tersedia karena Pakasir sedang disconnected. Silakan pilih QRIS owner manual atau metode bank seperti DANA, Livin, BCA, GoPay, atau ShopeePay.",
+    });
+    return;
+  }
+
+  if (method === "qris_auto") {
+    const result = await updateDb(async (draft) => {
+      draft.activities = draft.activities || [];
+      draft.depositRequests = draft.depositRequests || [];
+      draft.orders = draft.orders || [];
+      draft.payments = draft.payments || [];
+
+      const currentReseller = authReseller(draft, req.auth);
+      if (!currentReseller || currentReseller.isActive === false) {
+        const error = new Error("Reseller tidak ditemukan atau nonaktif");
+        error.status = 404;
+        throw error;
+      }
+
+      const { order, payment, ttlMinutes } = createDepositTopupOrder(draft, {
+        reseller: currentReseller,
+        amount,
+        source: "reseller_panel_deposit",
+        channel: "Reseller Panel",
+        whatsapp: normalizeWhatsappNumber(currentReseller.whatsapp || ""),
+      });
+      const requestId = order.id;
+      const createdAt = order.createdAt || nowText();
+
+      const pakasir = await createPakasirQris(draft, order);
+      if (pakasir.providerStatus !== "created") {
+        enableMaintenanceMode(draft, `Pakasir QRIS gagal: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`, "pakasir");
+        const error = new Error(`Pakasir QRIS gagal untuk deposit reseller: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`);
+        error.status = 503;
+        error.maintenance = { reason: `Pakasir QRIS gagal: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`, source: "pakasir" };
+        throw error;
+      }
+
+      Object.assign(payment, pakasir);
+      order.qrisUrl = payment.paymentUrl || order.qrisUrl || "";
+      order.paymentProviderStatus = pakasir.providerStatus || "";
+      order.paymentMethod = payment.paymentMethod || order.paymentMethod || "QRIS top up saldo";
+      order.paymentFee = Number(payment.fee || order.paymentFee || 0);
+      order.totalPaid = Number(payment.totalPayment || payment.amount || order.paymentDue || 0);
+      if (pakasir.providerError) order.paymentError = pakasir.providerError;
+
+      const ownerWhatsapp = ownerWhatsappTarget(draft);
+      const delivery = ownerWhatsapp
+        ? await sendWhatsAppMessage(draft, {
+            to: ownerWhatsapp,
+            text: depositRequestNotificationText({
+              reseller: currentReseller,
+              amount,
+              method,
+              note: note ? `${note}\nRef QRIS: ${payment.ref}` : `Ref QRIS: ${payment.ref}`,
+              requestId,
+              createdAt,
+            }),
+          })
+        : { sent: false, reason: "owner_whatsapp_missing" };
+
+      draft.depositRequests.unshift({
+        id: requestId,
+        resellerId: currentReseller.id,
+        resellerName: currentReseller.name || currentReseller.username || "",
+        whatsapp: normalizeWhatsappNumber(currentReseller.whatsapp || ""),
+        amount,
+        method,
+        note,
+        createdAt,
+        status: "pending_payment",
+        paymentStatus: "pending",
+        orderId: order.id,
+        paymentRef: payment.ref,
+        deliveryStatus: delivery.sent ? "sent" : delivery.reason || "failed",
+        deliveryMessageKey: delivery.messageKey || null,
+      });
+      draft.activities.unshift({
+        id: makeId("act"),
+        type: "reseller",
+        title: delivery.sent ? "QRIS deposit reseller dibuat" : "QRIS deposit reseller dibuat tanpa notif owner",
+        description: delivery.sent
+          ? `${currentReseller.name || currentReseller.username || "Reseller"} membuat QRIS deposit ${formatRupiah(amount)}. Ref ${payment.ref}.`
+          : `${currentReseller.name || currentReseller.username || "Reseller"} membuat QRIS deposit ${formatRupiah(amount)}. Notif owner gagal: ${delivery.reason || "unknown_error"}.`,
+        resellerId: currentReseller.id,
+        whatsapp: normalizeWhatsappNumber(currentReseller.whatsapp || ""),
+        amount,
+        orderId: order.id,
+        createdAt,
+      });
+
+      return {
+        requestId,
+        orderId: order.id,
+        paymentRef: payment.ref,
+        payment: safePublicPayment(payment, order),
+        ttlMinutes,
+        deliveryStatus: delivery.sent ? "sent" : delivery.reason || "failed",
+      };
+    });
+
+    res.status(201).json({
+      ok: true,
+      requestId: result.requestId,
+      orderId: result.orderId,
+      paymentRef: result.paymentRef,
+      payment: result.payment,
+      ttlMinutes: result.ttlMinutes,
+      deliveryStatus: result.deliveryStatus,
+      message: "QRIS deposit berhasil dibuat. Setelah pembayaran sukses, saldo reseller akan bertambah otomatis.",
+    });
+    return;
+  }
+
+  const requestId = makeId("DEP").toUpperCase();
+  const createdAt = nowText();
+  const ownerWhatsapp = ownerWhatsappTarget(db);
+  const delivery = ownerWhatsapp
+    ? await sendWhatsAppMessage(db, {
+        to: ownerWhatsapp,
+        text: depositRequestNotificationText({ reseller, amount, method, note, requestId, createdAt }),
+      })
+    : { sent: false, reason: "owner_whatsapp_missing" };
+
+  await updateDb((draft) => {
+    draft.depositRequests = draft.depositRequests || [];
+    draft.depositRequests.unshift({
+      id: requestId,
+      resellerId: reseller.id,
+      resellerName: reseller.name || reseller.username || "",
+      whatsapp: normalizeWhatsappNumber(reseller.whatsapp || ""),
+      amount,
+      method,
+      note,
+      createdAt,
+      status: "pending",
+      deliveryStatus: delivery.sent ? "sent" : delivery.reason || "failed",
+      deliveryMessageKey: delivery.messageKey || null,
+    });
+    draft.activities = draft.activities || [];
+    draft.activities.unshift({
+      id: makeId("act"),
+      type: "reseller",
+      title: delivery.sent ? "Permintaan deposit terkirim" : "Permintaan deposit tercatat",
+      description: delivery.sent
+        ? `${reseller.name || reseller.username || "Reseller"} meminta deposit ${formatRupiah(amount)} via ${depositRequestMethodLabel(method)}. Notif owner berhasil dikirim.`
+        : `${reseller.name || reseller.username || "Reseller"} meminta deposit ${formatRupiah(amount)} via ${depositRequestMethodLabel(method)}, tetapi notif owner gagal: ${delivery.reason || "unknown_error"}.`,
+      resellerId: reseller.id,
+      whatsapp: normalizeWhatsappNumber(reseller.whatsapp || ""),
+      amount,
+      createdAt,
+    });
+    return null;
+  });
+
+  res.status(201).json({
+    ok: true,
+    requestId,
+    deliveryStatus: delivery.sent ? "sent" : delivery.reason || "failed",
+    message: delivery.sent
+      ? "Permintaan deposit berhasil dikirim ke owner."
+      : "Permintaan deposit tersimpan, tetapi notif owner gagal dikirim.",
+  });
+});
+
+app.get("/api/resellers/deposit-requests", requireAuth(["owner"]), async (req, res) => {
+  const db = await readDb();
+  res.json(Array.isArray(db.depositRequests) ? db.depositRequests : []);
+});
+
+app.post("/api/resellers/deposit-requests/:id/approve", requireAuth(["owner"]), async (req, res) => {
+  const note = String(req.body?.note || "").trim();
+  const db = await readDb();
+  const profile = ownerProfile(db);
+  const reviewedAt = nowText();
+  const result = await updateDb((draft) => {
+    draft.depositRequests = draft.depositRequests || [];
+    const request = draft.depositRequests.find((item) => item.id === req.params.id);
+    if (!request) return null;
+    if (String(request.status || "pending").toLowerCase() === "approved") {
+      const reseller = (draft.resellers || []).find((item) => item.id === request.resellerId) || null;
+      return { request, reseller };
+    }
+    if (String(request.status || "pending").toLowerCase() === "rejected") {
+      const error = new Error("Permintaan deposit ini sudah ditolak.");
+      error.status = 409;
+      throw error;
+    }
+    if (String(request.status || "").toLowerCase() === "pending_payment") {
+      const error = new Error("Deposit ini memakai QRIS otomatis dan masih menunggu pembayaran. Approve manual tidak diperlukan.");
+      error.status = 409;
+      throw error;
+    }
+
+    const reseller = (draft.resellers || []).find((item) => item.id === request.resellerId);
+    if (!reseller) {
+      const error = new Error("Reseller untuk permintaan deposit ini tidak ditemukan.");
+      error.status = 404;
+      throw error;
+    }
+
+    const depositBefore = Math.max(0, Number(reseller.deposit || 0));
+    const depositAfter = depositBefore + Math.max(0, Number(request.amount || 0));
+    reseller.deposit = depositAfter;
+
+    request.status = "approved";
+    request.reviewedAt = reviewedAt;
+    request.reviewedBy = profile.name || profile.username || "owner";
+    request.reviewNote = note;
+
+    draft.activities = draft.activities || [];
+    draft.activities.unshift({
+      id: makeId("act"),
+      type: "reseller",
+      title: "Deposit reseller dikreditkan",
+      description: `${formatRupiah(Number(request.amount || 0))} dari request ${request.id} dimasukkan ke deposit ${reseller.name || reseller.username || reseller.whatsapp}. Saldo: ${formatRupiah(depositBefore)} -> ${formatRupiah(depositAfter)}.`,
+      resellerId: reseller.id,
+      whatsapp: normalizeWhatsappNumber(reseller.whatsapp || ""),
+      amount: Number(request.amount || 0),
+      createdAt: reviewedAt,
+    });
+
+    return { request, reseller };
+  });
+
+  if (!result) {
+    res.status(404).json({ error: "Permintaan deposit tidak ditemukan" });
+    return;
+  }
+
+  res.json({ ok: true, ...result });
+});
+
+app.post("/api/resellers/deposit-requests/:id/reject", requireAuth(["owner"]), async (req, res) => {
+  const note = String(req.body?.note || "").trim();
+  const db = await readDb();
+  const profile = ownerProfile(db);
+  const reviewedAt = nowText();
+  const request = await updateDb((draft) => {
+    draft.depositRequests = draft.depositRequests || [];
+    const current = draft.depositRequests.find((item) => item.id === req.params.id);
+    if (!current) return null;
+    if (String(current.status || "pending").toLowerCase() === "approved") {
+      const error = new Error("Permintaan deposit ini sudah diapprove.");
+      error.status = 409;
+      throw error;
+    }
+
+    current.status = "rejected";
+    current.reviewedAt = reviewedAt;
+    current.reviewedBy = profile.name || profile.username || "owner";
+    current.reviewNote = note;
+
+    draft.activities = draft.activities || [];
+    draft.activities.unshift({
+      id: makeId("act"),
+      type: "reseller",
+      title: "Permintaan deposit ditolak",
+      description: `${current.resellerName || current.whatsapp || "Reseller"} ditolak untuk request ${current.id} sebesar ${formatRupiah(Number(current.amount || 0))}${note ? `. Catatan: ${note}` : "."}`,
+      resellerId: current.resellerId,
+      whatsapp: normalizeWhatsappNumber(current.whatsapp || ""),
+      amount: Number(current.amount || 0),
+      createdAt: reviewedAt,
+    });
+
+    return current;
+  });
+
+  if (!request) {
+    res.status(404).json({ error: "Permintaan deposit tidak ditemukan" });
+    return;
+  }
+
+  res.json({ ok: true, request });
+});
+
+function buildAccountAuditTrail(db, account = {}) {
+  const orderId = String(account.orderId || account.sourceOrderId || "").trim();
+  const stockId = String(account.stockId || "").trim();
+  const order = (db.orders || []).find((item) => String(item.id || "").trim() === orderId) || null;
+  const stock = (db.stock || []).find((item) => String(item.id || "").trim() === stockId) || null;
+  const events = [];
+  const add = (type, title, detail, createdAt, source = "system") => {
+    if (!createdAt) return;
+    events.push({ id: `${type}-${events.length}-${createdAt}`, type, title, detail, createdAt, source });
+  };
+  add("sheet", "Assignment terbaca dari Sheets", `${account.sheetName || stock?.sheetName || "-"} row ${account.sheetRow || stock?.sheetRow || "-"}; seller ${account.sheetSellerInput || stock?.sheetSellerInput || account.reseller || "-"}.`, account.startedAt || stock?.soldAt, "google_sheets");
+  if (order) {
+    add("order", "Order dibuat", `${order.id} - ${order.product || account.product || "-"} ${order.variant || account.variant || ""}.`, order.createdAt, "order");
+    add("payment", "Pembayaran diterima", `${order.paymentMethod || "Pembayaran"}; status ${order.qrisStatus || "paid"}.`, order.paidAt, "payment");
+    add("delivery", "Akun dikirim", `Stock ${stockId || "-"} tertaut ke order ${order.id}.`, order.fulfillmentSentAt || (order.deliveryStatus === "sent" ? order.paidAt : ""), "fulfillment");
+  }
+  for (const activity of db.activities || []) {
+    const related = String(activity.accountId || "").trim() === String(account.id || "").trim()
+      || (orderId && String(activity.orderId || "").trim() === orderId)
+      || (stockId && String(activity.stockId || "").trim() === stockId);
+    if (!related) continue;
+    add("activity", activity.title || "Aktivitas", activity.description || "", activity.createdAt, activity.type || "activity");
+  }
+  add("current", "Snapshot saat ini", `${account.status || accountStatusFromDate(account.expiresAt, account.durationDays)}; ${account.duration || `${account.durationDays || 0} hari`}; expiry ${account.expiresAt || "-"}.`, account.updatedAt || account.googleSheetsSyncedAt || account.sheetLastSyncedAt || account.snapshotAt, "snapshot");
+  return events
+    .filter((event, index, list) => list.findIndex((candidate) => candidate.title === event.title && candidate.createdAt === event.createdAt && candidate.detail === event.detail) === index)
+    .sort((left, right) => createdAtMs(right.createdAt) - createdAtMs(left.createdAt))
+    .slice(0, 80);
+}
+
+app.get("/api/accounts/:id/audit", requireAuth(["owner"]), async (req, res) => {
+  const db = await readDbWithExpiredOrders();
+  const account = (db.managedAccounts || []).find((item) => item.id === req.params.id);
+  if (!account) {
+    res.status(404).json({ error: "Akun tidak ditemukan" });
+    return;
+  }
+  const stock = stockForManagedAccount(db, account);
+  const order = orderForManagedAccount(db, account);
+  res.json({
+    accountId: account.id,
+    stockId: account.stockId || "",
+    orderId: order?.id || account.orderId || account.sourceOrderId || "",
+    sheet: { name: account.sheetName || stock?.sheetName || "", row: account.sheetRow || stock?.sheetRow || 0 },
+    timeline: buildAccountAuditTrail(db, account),
+  });
+});
+
+app.get("/api/accounts", requireAuth(["owner", "reseller"]), async (req, res) => {
+  if (req.auth.role === "reseller") {
+    const viewMode = String(req.query.view || "").trim().toLowerCase();
+    if (viewMode === "overview" || viewMode === "light") {
+      const db = await readDbWithExpiredOrders();
+      res.json(visibleManagedAccountsForAuth(db, req.auth));
+      return;
+    }
+    const accounts = await updateDb(async (db) => {
+      await refreshResellerViewFromGoogleSheets(db, req.auth, "reseller_accounts_refresh", { forceRecent: true });
+      backfillManagedAccountsFromCompletedOrders(db);
+      syncManagedAccountCredentialsFromOrders(db);
+      syncNetflixManagedPasswordConsensus(db);
+      refreshManagedAccountStatuses(db);
+      syncManagedAccountWhatsappFromOrders(db);
+      syncSoldStockMetadata(db);
+      syncHistoricalStockConflicts(db);
+      return visibleManagedAccountsForAuth(db, req.auth);
+    });
+    res.json(accounts);
+    return;
+  }
+  const db = await readDbWithExpiredOrders();
+  res.json(visibleManagedAccountsForAuth(db, req.auth));
+});
+
+app.post("/api/accounts", requireAuth(["owner"]), async (req, res) => {
+  const created = await updateDb((db) => {
+    const account = buildManagedAccountInput(db, req.body);
+    db.managedAccounts = db.managedAccounts || [];
+    db.managedAccounts.unshift(account);
+    db.activities = db.activities || [];
+    db.activities.unshift({
+      id: makeId("act"),
+      type: "account",
+      title: `Akun manual ${account.email} ditambahkan`,
+      description: `${account.email} ditambahkan ke manajemen akun ${account.reseller || account.whatsapp || "reseller"}.`,
+      createdAt: nowText(),
+      resellerId: account.resellerId || "",
+      whatsapp: normalizeWhatsappNumber(account.whatsapp || ""),
+      accountId: account.id,
+      accountEmail: account.email,
+    });
+    return account;
+  });
+  res.status(201).json(created);
+});
+
+app.put("/api/accounts/:id", requireAuth(["owner"]), async (req, res) => {
+  const updated = await updateDb(async (db) => {
+    const account = (db.managedAccounts || []).find((item) => item.id === req.params.id);
+    if (!account) return null;
+    const previousResellerId = String(account.resellerId || "").trim();
+    const explicitResellerId = req.body.resellerId === undefined ? null : String(req.body.resellerId || "").trim();
+    const explicitReseller = explicitResellerId ? resellerById(db, explicitResellerId) : null;
+    const previousEmail = String(account.email || "").trim();
+    const nextEmail = req.body.email === undefined ? previousEmail : String(req.body.email || "").trim();
+    if (!nextEmail) {
+      const error = new Error("Email akun wajib diisi");
+      error.status = 400;
+      throw error;
+    }
+    const previousPassword = String(account.password || "").trim();
+    const nextPassword = req.body.password === undefined ? previousPassword : String(req.body.password || "");
+    const beforeNotify = {
+      email: previousEmail,
+      password: previousPassword,
+      profile: String(account.profile || ""),
+      pin: String(account.pin || ""),
+    };
+    Object.assign(account, {
+      product: req.body.product ?? account.product,
+      productId: req.body.productId ?? account.productId,
+      variant: req.body.variant ?? account.variant,
+      variantId: req.body.variantId ?? account.variantId,
+      variantCode: req.body.variantCode ?? account.variantCode,
+      duration: req.body.duration ?? account.duration,
+      durationDays: req.body.durationDays ?? account.durationDays,
+      email: nextEmail,
+      password: nextPassword,
+      resellerId: explicitResellerId ?? account.resellerId,
+      reseller: req.body.reseller ?? (explicitReseller ? canonicalResellerDisplayName(explicitReseller, account.reseller || "") : account.reseller),
+      whatsapp: req.body.whatsapp ?? (explicitReseller ? normalizeWhatsappNumber(primaryResellerWhatsapp(explicitReseller) || account.whatsapp || "") : account.whatsapp),
+      buyer: req.body.buyer ?? account.buyer,
+      profile: req.body.profile ?? account.profile,
+      pin: req.body.pin ?? account.pin,
+      signInCode: req.body.signInCode ?? account.signInCode,
+      verificationCode: req.body.verificationCode ?? account.verificationCode,
+      resetLink: req.body.resetLink ?? account.resetLink,
+      householdLink: req.body.householdLink ?? account.householdLink,
+      startedAt: req.body.startedAt ?? account.startedAt,
+      expiresAt: req.body.expiresAt ?? account.expiresAt,
+      status: req.body.status ?? account.status,
+      hidden: false,
+    });
+    const restoredStatus = String(account.status || "").toLowerCase();
+    if (!["expired", "replaced", "disabled"].includes(restoredStatus)) {
+      account.returnedToStockAt = "";
+      account.sheetClearedAt = "";
+      account.sheetMissingArchivedAt = "";
+      delete account.slotConflictArchived;
+      delete account.duplicateOfAccountId;
+      delete account.duplicateArchivedAt;
+    }
+    if (explicitReseller && (!req.body.buyer || !String(req.body.buyer || "").trim()) && !String(account.buyer || "").trim()) {
+      account.buyer = canonicalResellerDisplayName(explicitReseller, account.buyer || "");
+    }
+    const linkedOrder = orderForManagedAccount(db, account);
+    if (explicitReseller && linkedOrder) {
+      linkedOrder.resellerId = explicitReseller.id;
+      linkedOrder.reseller = canonicalResellerDisplayName(explicitReseller, linkedOrder.reseller || linkedOrder.customer || "");
+      linkedOrder.whatsapp = normalizeWhatsappNumber(primaryResellerWhatsapp(explicitReseller) || linkedOrder.whatsapp || "");
+    }
+    const stock = account.stockId ? (db.stock || []).find((item) => item.id === account.stockId) : null;
+    const nextStatus = accountStatusFromDate(account.expiresAt, account.durationDays);
+    const canSyncStock = stock && nextStatus !== "expired" && account.status !== "expired";
+    if (canSyncStock) {
+      stock.email = account.email;
+      stock.password = account.password;
+      stock.profile = account.profile || "";
+      stock.pin = account.pin || "";
+      stock.signInCode = account.signInCode || "";
+      stock.verificationCode = account.verificationCode || "";
+      stock.resetLink = account.resetLink || "";
+      stock.householdLink = account.householdLink || "";
+      stock.notes = req.body.notes ?? stock.notes;
+    }
+    let passwordSync = null;
+    if (req.body.password !== undefined && previousPassword !== nextPassword && nextStatus !== "expired" && account.status !== "expired") {
+      passwordSync = syncPasswordByEmail(db, nextEmail, nextPassword, { sourceAccountId: account.id, sourceStockId: stock?.id || "" });
+    }
+    if ((previousEmail !== nextEmail || (req.body.password !== undefined && previousPassword !== nextPassword)) && nextStatus !== "expired" && account.status !== "expired") {
+      account.googleSheetsCredentialSync = await syncCredentialsToSheetsSafely(db, {
+        email: nextEmail,
+        password: nextPassword,
+        stockIds: [stock?.id || account.stockId].filter(Boolean),
+        sheetStockKeys: [stock?.sheetStockKey || account.sheetStockKey].filter(Boolean),
+        accountIds: [account.id],
+      });
+    }
+    const notificationDedupe = new Set();
+    const directChanges = accountChangeFields(beforeNotify, {
+      email: account.email || "",
+      password: account.password || "",
+      profile: account.profile || "",
+      pin: account.pin || "",
+    });
+    if (directChanges.length && nextStatus !== "expired" && account.status !== "expired") {
+      await notifyResellerAccountChanged(db, account, directChanges, { dedupeSet: notificationDedupe });
+    }
+    for (const affectedAccount of passwordSync?.affectedAccounts || []) {
+      if (affectedAccount.id === account.id) continue;
+      await notifyResellerAccountChanged(db, affectedAccount, [{ key: "password", label: "Password/Link" }], { dedupeSet: notificationDedupe });
+    }
+    db.activities = db.activities || [];
+    if (previousEmail !== nextEmail) {
+      db.activities.unshift({
+        id: makeId("act"),
+        type: "account",
+        title: `Akun diganti ke email ${nextEmail}`,
+        description: `${previousEmail || account.id} diganti untuk ${account.reseller || account.buyer || "reseller"}.`,
+        createdAt: nowText(),
+        resellerId: account.resellerId || "",
+        whatsapp: normalizeWhatsappNumber(account.whatsapp || ""),
+        accountId: account.id,
+        accountEmail: nextEmail,
+      });
+    } else if (
+      previousPassword !== nextPassword
+      || req.body.profile !== undefined
+      || req.body.pin !== undefined
+      || req.body.status !== undefined
+      || previousResellerId !== String(account.resellerId || "").trim()
+      || req.body.buyer !== undefined
+    ) {
+      db.activities.unshift({
+        id: makeId("act"),
+        type: "account",
+        title: `Akun ${nextEmail} diperbarui`,
+        description: `${account.reseller || account.buyer || "reseller"} data akun diperbarui.`,
+        createdAt: nowText(),
+        resellerId: account.resellerId || "",
+        whatsapp: normalizeWhatsappNumber(account.whatsapp || ""),
+        accountId: account.id,
+        accountEmail: nextEmail,
+      });
+    }
+    return account;
+  });
+  if (!updated) return res.status(404).json({ error: "Akun tidak ditemukan" });
+  res.json(updated);
+});
+
+app.post("/api/accounts/:id/replace", requireAuth(["owner"]), async (req, res) => {
+  const result = await updateDb(async (db) => {
+    const account = (db.managedAccounts || []).find((item) => item.id === req.params.id);
+    if (!account) return null;
+    const wantsReleaseViaSheets = String(req.body?.oldAccountDisposition || "release_via_sheets").trim() !== "keep_sold";
+    if (wantsReleaseViaSheets && !isNetflixManagedAccount(account)) {
+      const error = new Error("Replace akun non-Netflix wajib pakai opsi tahan untuk cek manual.");
+      error.status = 400;
+      throw error;
+    }
+    const replacement = replaceManagedAccountFromStock(db, req.params.id, req.body);
+    if (!replacement) return null;
+    const sheets = {};
+    try {
+      sheets.pushNew = await pushAccountsToGoogleSheets(db, [replacement.newAccount], {
+        id: `RPL-${replacement.oldAccount.id}`,
+        device: replacement.newAccount.device || "",
+        customer: replacement.newAccount.reseller || replacement.newAccount.buyer || "",
+        reseller: replacement.newAccount.reseller || "",
+        whatsapp: replacement.newAccount.whatsapp || "",
+        note: replacement.oldAccount.replacementReason || "Replacement warranty",
+      });
+    } catch (error) {
+      sheets.error = error.message || "google_sheets_replace_sync_failed";
+      db.activities.unshift({
+        id: makeId("act"),
+        type: "stock",
+        title: "Google Sheets replace perlu dicek",
+        description: `Replace ${replacement.oldAccount.email} ke ${replacement.newAccount.email} tersimpan, tapi sync Sheets gagal: ${sheets.error}`,
+        createdAt: nowText(),
+        accountId: replacement.newAccount.id,
+        accountEmail: replacement.newAccount.email,
+      });
+    }
+    return { ...replacement, sheets };
+  });
+  if (!result) return res.status(404).json({ error: "Akun tidak ditemukan" });
+  res.json({ ok: true, ...result });
+});
+
+app.post("/api/account-access/lookup", requireAuth(["reseller"]), async (req, res, next) => {
+  try {
+    const type = String(req.body.type || "signin").trim();
+    const target = String(req.body.target || req.body.email || "").trim();
+    const email = String(req.body.email || req.body.target || "").trim().toLowerCase();
+    const silent = Boolean(req.body.silent);
+    if (!target) {
+      res.status(400).json({ error: type === "disney_otp" ? "Nomor login Disney wajib diisi" : "Email akun wajib diisi" });
+      return;
+    }
+    if (!["signin", "verification", "reset", "household", "disney_otp"].includes(type)) {
+      res.status(400).json({ error: "Tipe lookup tidak valid" });
+      return;
+    }
+
+    const lookupResponse = await updateDb(async (db) => {
+      await refreshResellerViewFromGoogleSheets(db, req.auth, "reseller_lookup_refresh", { forceRecent: true });
+      const reseller = authReseller(db, req.auth);
+      if (!reseller || reseller.isActive === false) {
+        return { statusCode: 404, body: { error: "Reseller tidak ditemukan atau nonaktif" } };
+      }
+      const allowedTools = resellerAccessTools(reseller);
+      const permitted = type === "disney_otp" ? allowedTools.includes("signin") : allowedTools.includes(type);
+      if (!permitted) {
+        return {
+          statusCode: 403,
+          body: { error: `${accessLookupLabel(type)} tidak diizinkan untuk reseller ini` },
+        };
+      }
+      const account = type === "disney_otp"
+        ? findDisneyAccountForLookup(db, req.auth, target)
+        : findAccountForLookup(db, req.auth, email);
+      if (!account) {
+        const historicalAccount = type === "disney_otp"
+          ? historicalDisneyAccountForLookup(db, req.auth, target)
+          : historicalAccountForLookup(db, req.auth, email);
+        if (historicalAccount) {
+          const result = inactiveLookupResult(historicalAccount, type);
+          if (!silent) {
+            appendAccessLookupActivity(db, req.auth, {
+              account: historicalAccount,
+              email: target,
+              type,
+              result,
+              status: result.reason,
+            });
+          }
+          return {
+            statusCode: 200,
+            body: {
+              ok: true,
+              type,
+              account: safeAccountForAccess({
+                ...historicalAccount,
+                status: ["replaced", "disabled"].includes(historicalAccount.status) ? historicalAccount.status : "expired",
+              }),
+              result,
+              refreshedAt: nowText(),
+              expiresInSeconds: null,
+              gmail: gmailConnectionInfo(db),
+            },
+          };
+        }
+        if (!silent) {
+          appendAccessLookupActivity(db, req.auth, {
+            email: target,
+            type,
+            result: { source: "fallback", reason: "account_not_found", value: "" },
+            status: "account_not_found",
+          });
+        }
+        return { statusCode: 404, body: { error: type === "disney_otp" ? "Nomor Disney tidak ditemukan di akun yang dibeli reseller ini" : "Email tidak ditemukan di akun yang dibeli reseller ini" } };
+      }
+      const currentStatus = accountStatusFromDate(account.expiresAt, account.durationDays);
+      if (currentStatus === "expired" || isTerminalManagedAccountStatus(account.status)) {
+        const result = {
+          source: "fallback",
+          kind: ["reset", "household"].includes(type) ? "link" : "code",
+          value: "",
+          reason: account.status === "replaced" ? "account_replaced" : account.status === "disabled" ? "account_disabled" : "account_expired",
+          error: account.status === "replaced" ? "Akun sudah replaced, lookup kode tidak aktif." : account.status === "disabled" ? "Akun sudah nonaktif, lookup kode tidak aktif." : "Akun sudah expired, lookup kode tidak aktif.",
+        };
+        if (!silent) {
+          appendAccessLookupActivity(db, req.auth, { account, email: target, type, result, status: result.reason });
+        }
+        return {
+          statusCode: 200,
+          body: {
+        ok: true,
+        type,
+        account: safeAccountForAccess({ ...account, status: ["replaced", "disabled"].includes(account.status) ? account.status : "expired" }),
+        result,
+        refreshedAt: nowText(),
+        expiresInSeconds: null,
+        gmail: gmailConnectionInfo(db),
+          },
+        };
+      }
+
+      const result = await lookupAccountAccessValue(db, account, type);
+      const gmailInfo = result?.reason === "gmail_error" && isGmailOAuthInvalidError(result?.error) ? { ...gmailConnectionInfo(db), connected: false, needsOAuth: true, error: result.error } : gmailConnectionInfo(db);
+      if (!silent) {
+        appendAccessLookupActivity(db, req.auth, { account, email: target, type, result, status: result?.value ? "success" : result?.reason || result?.error || "not_found" });
+      }
+      return {
+        statusCode: 200,
+        body: {
+      ok: true,
+      type,
+      account: safeAccountForAccess(account),
+      result,
+      refreshedAt: nowText(),
+      expiresInSeconds: ["reset", "household"].includes(type) ? null : 15 * 60,
+      gmail: gmailInfo,
+        },
+      };
+    });
+    res.status(lookupResponse.statusCode || 200).json(lookupResponse.body || lookupResponse);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/accounts/:id", requireAuth(["owner"]), async (req, res) => {
+  const deleted = await updateDb(async (db) => {
+    const index = (db.managedAccounts || []).findIndex((item) => item.id === req.params.id);
+    if (index === -1) return null;
+    const account = db.managedAccounts[index];
+    if (!isNetflixManagedAccount(account)) {
+      const status = String(account.status || accountStatusFromDate(account.expiresAt, account.durationDays)).toLowerCase();
+      if (!["expired", "replaced", "disabled"].includes(status)) {
+        const error = new Error("Akun non-Netflix yang masih aktif tidak bisa dihapus dari manajemen");
+        error.status = 400;
+        throw error;
+      }
+      const archivedAt = nowText();
+      account.status = status === "replaced" || status === "disabled" ? status : "expired";
+      account.hidden = true;
+      account.archivedAt = archivedAt;
+      db.activities = db.activities || [];
+      db.activities.unshift({
+        id: makeId("act"),
+        type: "account",
+        title: `${account.email || account.id} dihapus dari Manajemen Akun`,
+        description: `${account.product || "Akun"} ${account.variant || ""} diarsipkan. Stok sumber tidak diubah dari web.`,
+        createdAt: archivedAt,
+        resellerId: account.resellerId || "",
+        whatsapp: normalizeWhatsappNumber(account.whatsapp || ""),
+        accountId: account.id,
+        accountEmail: account.email || "",
+        stockId: account.stockId || "",
+      });
+      let sheetsClear = { ok: true, skipped: true };
+      try {
+        sheetsClear = await clearAccountsInGoogleSheets(db, [account]);
+      } catch (error) {
+        sheetsClear = { ok: false, error: error.message || "google_sheets_clear_failed" };
+        db.activities.unshift({
+          id: makeId("act"),
+          type: "error",
+          title: "Gagal mengosongkan row Sheets saat hapus akun",
+          description: `${account.email || account.id}: ${sheetsClear.error}`,
+          createdAt: archivedAt,
+          accountId: account.id,
+          accountEmail: account.email || "",
+          stockId: account.stockId || "",
+        });
+      }
+      return { account, archived: true, accounts: [account], stocks: [], sheetsClear };
+    }
+    const error = new Error("Akun Google Sheets tidak bisa di-release dari web. Kosongkan atau ubah row-nya di Sheets lalu sync.");
+    error.status = 400;
+    throw error;
+  });
+  if (!deleted) return res.status(404).json({ error: "Akun tidak ditemukan" });
+  res.json({
+    ok: true,
+    account: deleted.account,
+    stock: deleted.returnedStock,
+    accounts: deleted.accounts,
+    stocks: deleted.stocks,
+    returned: deleted.accounts?.length || 0,
+    sheets: deleted.sheetsClear,
+    credentialSync: deleted.credentialSync,
+  });
+});
+
+function archiveOldActivities(db, keepDays = 5) {
+  const activities = Array.isArray(db.activities) ? db.activities : [];
+  if (!activities.length) return false;
+  const cutoff = Date.now() - Math.max(1, Number(keepDays || 5)) * 86400000;
+  const active = [];
+  const archived = [];
+  for (const activity of activities) {
+    const date = toDateTime(activity.createdAt);
+    if (date && date.getTime() < cutoff) archived.push({ ...activity, archivedAt: nowText() });
+    else active.push(activity);
+  }
+  if (!archived.length) return false;
+  db.activities = active;
+  db.archivedActivities = [...archived, ...(db.archivedActivities || [])].slice(0, 5000);
+  return true;
+}
+
+app.get("/api/activities", requireAuth(["owner", "reseller"]), async (req, res) => {
+  let db = await readDbWithExpiredOrders();
+  if (archiveOldActivities(db, Number(process.env.ACTIVITY_LOG_ACTIVE_DAYS || 5))) {
+    db = await writeDb(db, { notify: true, reason: "activities:archive" });
+  }
+  if (req.auth.role === "reseller") {
+    res.json((db.activities || []).filter((activity) => activityBelongsToReseller(db, req.auth, activity)));
+    return;
+  }
+  res.json(db.activities);
+});
+
+app.get("/api/operations/center", requireAuth(["owner"]), async (_req, res, next) => {
+  try {
+    res.json(await buildOperationsCenter(await readDbWithExpiredOrders()));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/owner-search", requireAuth(["owner"]), async (req, res) => {
+  const db = await readDbWithExpiredOrders();
+  res.json(buildOwnerSearch(db, req.query.q || ""));
+});
+
+app.post("/api/operations/reseller/repair", requireAuth(["owner"]), async (req, res, next) => {
+  try {
+    const result = await updateDb(async (db) => {
+      const syncSheets = Boolean(req.body?.syncSheets);
+      const scope = {
+        accountId: String(req.body?.accountId || "").trim(),
+        orderId: String(req.body?.orderId || "").trim(),
+        resellerId: String(req.body?.resellerId || "").trim(),
+      };
+      let sheets = { ok: true, skipped: true, reason: "not_requested" };
+      if (syncSheets) {
+        sheets = await syncGoogleSheetsStockSafely(db, { silent: true, reason: "owner_reseller_repair", force: true });
+      }
+      const sheetOrderLinksUpdated = reconcileGoogleSheetsStockOrderLinks(db);
+      const statusUpdated = refreshManagedAccountStatuses(db);
+      const ownership = repairManagedAccountOwnership(db, scope);
+      const postSyncUpdated = syncManagedAccountWhatsappFromOrders(db);
+      const conflictUpdated = syncHistoricalStockConflicts(db);
+      const stockAuditUpdated = repairHistoricalStockReuse(db);
+      const stockMetaUpdated = syncSoldStockMetadata(db);
+      const changedTotal = Number(sheetOrderLinksUpdated || 0) + Number(statusUpdated ? 1 : 0) + Number(postSyncUpdated || 0) + Number(ownership.repaired || 0) + Number(ownership.rebuilt || 0) + Number(conflictUpdated || 0) + Number(stockAuditUpdated || 0) + Number(stockMetaUpdated || 0);
+
+      db.activities = db.activities || [];
+      db.activities.unshift({
+        id: makeId("act"),
+        type: "reseller",
+        title: "Repair reseller dijalankan",
+        description: `Repair owner menyentuh ${ownership.matched} akun, update field ${ownership.repaired}, rebuild akun ${ownership.rebuilt}, sync tambahan ${postSyncUpdated || 0}.`,
+        createdAt: nowText(),
+        resellerId: scope.resellerId || "",
+        orderId: scope.orderId || "",
+        accountId: scope.accountId || "",
+      });
+
+      return {
+        ok: true,
+        changedTotal,
+        statusUpdated: Boolean(statusUpdated),
+        ownershipUpdated: ownership.repaired,
+        rebuiltAccounts: ownership.rebuilt,
+        conflictUpdated,
+        stockAuditUpdated,
+        stockMetaUpdated,
+        rebuildResults: ownership.rebuildResults,
+        matchedAccounts: ownership.matched,
+        changedAccountIds: ownership.changedAccountIds,
+        changedOrderIds: ownership.changedOrderIds,
+        postSyncUpdated,
+        sheets,
+      };
+    });
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/system/status", requireAuth(["owner"]), async (_req, res, next) => {
+  try {
+    res.json(await buildSystemStatus(await readDb()));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/system/restart", requireAuth(["owner"]), async (_req, res, next) => {
+  try {
+    res.json({ ok: true, message: "Restart Kavya dijadwalkan." });
+    scheduleKavyaRestart();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/whatsapp/status", requireAuth(["owner"]), async (_req, res) => {
+  const db = await readDb();
+  res.json(await getWhatsAppBotStatus(db));
+});
+
+app.get("/api/whatsapp/rentals", requireAuth(["owner"]), async (_req, res) => {
+  const db = await readDb();
+  res.json(await mergedWhatsappRentals(db));
+});
+
+app.get("/api/whatsapp/rentals/:id/price-sync/preview", requireAuth(["owner"]), async (req, res, next) => {
+  try {
+    const db = await readDb();
+    const rentals = await mergedWhatsappRentals(db);
+    const rental = rentals.find((item) => item.id === req.params.id || item.groupJid === req.params.id);
+    const groupJid = String(req.query.groupJid || rental?.groupJid || req.params.id || "").trim();
+    const groupName = String(req.query.groupName || rental?.name || "").trim();
+    const linkGrub = String(req.query.linkGrub || rental?.linkGrub || "").trim();
+    const source = await findWaPriceSource(legacyRootDir, { groupJid, groupName, linkGrub });
+    if (!source) {
+      res.status(404).json({ error: `Pricelist harga tidak ditemukan di grup ini${groupName ? ` (${groupName})` : ""}` });
+      return;
+    }
+    const preview = previewWaPriceSync(db, source.text);
+    res.json({
+      ok: true,
+      source: {
+        keyword: source.keyword,
+        groupJid: source.groupJid,
+        groupName: groupName || rental?.name || source.groupJid,
+        filePath: source.filePath,
+        score: source.score,
+        entryCount: source.entryCount,
+      },
+      ...preview,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/whatsapp/rentals/:id/price-sync/apply", requireAuth(["owner"]), async (req, res, next) => {
+  try {
+    const currentDb = await readDb();
+    const rentals = await mergedWhatsappRentals(currentDb);
+    const rental = rentals.find((item) => item.id === req.params.id || item.groupJid === req.params.id);
+    const groupJid = String(req.body.groupJid || rental?.groupJid || req.params.id || "").trim();
+    const groupName = String(req.body.groupName || rental?.name || "").trim();
+    const linkGrub = String(req.body.linkGrub || rental?.linkGrub || "").trim();
+    const source = await findWaPriceSource(legacyRootDir, { groupJid, groupName, linkGrub });
+    if (!source) {
+      const error = new Error(`Pricelist harga tidak ditemukan di grup ini${groupName ? ` (${groupName})` : ""}`);
+      error.status = 404;
+      throw error;
+    }
+    const result = await updateDb((db) => {
+      const preview = previewWaPriceSync(db, source.text);
+      const updated = applyWaPriceSync(db, preview);
+      db.activities = db.activities || [];
+      db.activities.unshift({
+        id: makeId("act"),
+        type: "stock",
+        title: "Harga produk disinkronkan dari grup WhatsApp",
+        description: `${updated} harga produk diperbarui dari ${groupName || rental?.name || source.groupJid}.`,
+        createdAt: nowText(),
+      });
+      return {
+        ok: true,
+        updated,
+        source: {
+          keyword: source.keyword,
+          groupJid: source.groupJid,
+          groupName: groupName || rental?.name || source.groupJid,
+          filePath: source.filePath,
+          score: source.score,
+          entryCount: source.entryCount,
+        },
+        ...preview,
+      };
+    });
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/whatsapp/group-lists", requireAuth(["owner"]), async (_req, res, next) => {
+  try {
+    res.json(await readActiveLegacyGroupLists());
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/whatsapp/groups/sync", async (req, res, next) => {
+  try {
+    assertInboundToken(req, await readDb());
+    const result = await updateDb((db) => syncWhatsappGroups(db, req.body.groups, req.body.source || "bot"));
+    const joinedNotifications = await sendRentalJoinedNotifications(result.joinedRentals || []);
+    res.json({ success: true, result: { ...result, joinedNotifications } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/whatsapp/rentals", requireAuth(["owner"]), async (req, res) => {
+  const linkGrub = cleanInviteLink(req.body.linkGrub || req.body.link || "");
+  const daysLeft = Number(req.body.daysLeft || req.body.days || 30);
+  const inviteCode = extractInviteCode(linkGrub);
+  if (!inviteCode) return res.status(400).json({ error: "Link grup WhatsApp tidak valid" });
+  if (!Number.isFinite(daysLeft) || daysLeft <= 0) return res.status(400).json({ error: "Sisa hari tidak valid" });
+
+  const legacyRentals = await readLegacyRentals();
+  const matchedEntry = Object.entries(legacyRentals).find(([, rental]) => cleanInviteLink(rental?.linkGrub) === linkGrub);
+  const joinResult = matchedEntry ? { joinStatus: "joined", groupJid: matchedEntry[0], groupName: "" } : await joinGroupThroughBot(linkGrub);
+
+  const created = await updateDb((db) => {
+    const resolved = resolveRentalGroupJid(db, {
+      id: req.body.id,
+      groupJid: req.body.groupJid,
+      joinGroupJid: joinResult.groupJid,
+      matchedGroupJid: matchedEntry?.[0],
+      name: req.body.name,
+      groupName: joinResult.groupName,
+      fallbackName: matchedEntry?.[0],
+    });
+    const id = String(resolved.groupJid || req.body.id || req.body.groupJid || joinResult.groupJid || matchedEntry?.[0] || `pending-${inviteCode}`).trim();
+    const groupJid = resolved.groupJid || "";
+    const effectiveJoinStatus = groupJid ? "joined" : joinResult.joinStatus;
+    const effectiveJoinError = groupJid ? "" : joinResult.joinError || "";
+    const rental = {
+      id,
+      groupJid: groupJid || (id.endsWith("@g.us") ? id : ""),
+      ...normalizeRentalPatch(req.body, {
+        name: resolved.directory?.name || req.body.name || joinResult.groupName || id,
+        owner: "",
+        contact: req.body.contact || joinResult.ownerNumber || resolved.directory?.contact || "",
+        startedAt: todayText(),
+        endsAt: formatDateFromDays(daysLeft),
+        daysLeft,
+        monthlyPrice: 0,
+        status: "active",
+        linkGrub,
+      }),
+      name: req.body.name || resolved.directory?.name || joinResult.groupName || matchedEntry?.[0] || `Menunggu join ${inviteCode}`,
+      linkGrub,
+      joinStatus: effectiveJoinStatus,
+      joinError: effectiveJoinError,
+    };
+    const existingIndex = db.whatsappRentals.findIndex((item) => item.id === id);
+    if (existingIndex >= 0) db.whatsappRentals[existingIndex] = rental;
+    else db.whatsappRentals.unshift(rental);
+    return rental;
+  });
+  await upsertLegacyRental(created.groupJid || created.id, {
+    linkGrub,
+    start: created.startedAt || legacyTodayText(),
+    daysLeft: created.daysLeft,
+    expired: expirationFromDays(created.daysLeft),
+  });
+  if (created.joinStatus === "joined") {
+    const delivery = await notifyOwnerRentalJoined(await readDb(), {
+      rental: created,
+      addedDays: created.daysLeft,
+      previousDays: 0,
+      totalDays: created.daysLeft,
+      source: "Dashboard",
+    });
+    await markRentalJoinedNotice(created, delivery);
+  } else {
+    await notifyOwnerRentalChanged(await readDb(), {
+      rental: created,
+      action: "created",
+      addedDays: created.daysLeft,
+      previousDays: 0,
+      totalDays: created.daysLeft,
+      source: "Dashboard",
+    });
+  }
+  res.status(201).json(created);
+});
+
+app.put("/api/whatsapp/rentals/:id", requireAuth(["owner"]), async (req, res) => {
+  const legacyRows = await mergedWhatsappRentals(await readDb());
+  const fallback = legacyRows.find((rental) => rental.id === req.params.id) || { id: req.params.id, name: req.params.id };
+  let previousDays = Number(fallback.daysLeft || 0);
+  const updated = await updateDb((db) => {
+    const index = db.whatsappRentals.findIndex((rental) => rental.id === req.params.id);
+    const current = index >= 0 ? db.whatsappRentals[index] : fallback;
+    previousDays = Number(normalizeRentalRuntimeDays({ ...fallback, ...current }, fallback.daysLeft).daysLeft || 0);
+    const resolved = resolveRentalGroupJid(db, {
+      id: req.params.id,
+      groupJid: req.body.groupJid,
+      fallbackGroupJid: fallback.groupJid || current.groupJid,
+      name: req.body.name,
+      fallbackName: fallback.name || current.name,
+    });
+    const groupJid = resolved.groupJid || fallback.groupJid || current.groupJid || req.params.id;
+    const rental = normalizeRentalRuntimeDays({
+      ...fallback,
+      ...current,
+      ...normalizeRentalPatch(req.body, index >= 0 ? db.whatsappRentals[index] : fallback),
+      id: req.params.id,
+      groupJid,
+      name: String(req.body.name || current.name || fallback.name || resolved.directory?.name || groupJid).trim(),
+      contact: String(req.body.contact || current.contact || fallback.contact || resolved.directory?.contact || "").trim(),
+      joinStatus: groupJid.endsWith("@g.us") ? "joined" : current.joinStatus || fallback.joinStatus || "pending",
+      joinError: groupJid.endsWith("@g.us") ? "" : current.joinError || fallback.joinError || "",
+    }, previousDays);
+    if (index >= 0) db.whatsappRentals[index] = rental;
+    else db.whatsappRentals.unshift(rental);
+    return rental;
+  });
+  await upsertLegacyRental(updated.groupJid || updated.id, {
+    linkGrub: updated.linkGrub,
+    start: updated.startedAt,
+    daysLeft: updated.daysLeft,
+    expired: expirationFromDays(updated.status === "expired" ? 0 : updated.daysLeft),
+  });
+  const totalDays = Number(updated.daysLeft || 0);
+  if (totalDays !== previousDays) {
+    await notifyOwnerRentalChanged(await readDb(), {
+      rental: updated,
+      action: totalDays < previousDays ? "reduced" : "added",
+      addedDays: totalDays - previousDays,
+      previousDays,
+      totalDays,
+      source: "Dashboard",
+    });
+  }
+  res.json(updated);
+});
+
+app.post("/api/whatsapp/rentals/:id/adjust", requireAuth(["owner"]), async (req, res) => {
+  const days = Number(req.body.days || 0);
+  if (!Number.isFinite(days) || days === 0) return res.status(400).json({ error: "Jumlah hari tidak valid" });
+  const legacyRows = await mergedWhatsappRentals(await readDb());
+  const fallback = legacyRows.find((rental) => rental.id === req.params.id) || { id: req.params.id, name: req.params.id, daysLeft: 0 };
+  let previousDays = Number(fallback.daysLeft || 0);
+  const updated = await updateDb((db) => {
+    const index = db.whatsappRentals.findIndex((rental) => rental.id === req.params.id);
+    const current = index >= 0 ? db.whatsappRentals[index] : fallback;
+    previousDays = Number(normalizeRentalRuntimeDays({ ...fallback, ...current }, fallback.daysLeft).daysLeft || 0);
+    const nextDaysLeft = Math.max(0, previousDays + days);
+    const rental = {
+      ...fallback,
+      ...current,
+      daysLeft: nextDaysLeft,
+      endsAt: formatDateFromDays(nextDaysLeft),
+      status: nextDaysLeft > 0 ? "active" : "expired",
+      id: req.params.id,
+      groupJid: fallback.groupJid || req.params.id,
+    };
+    if (index >= 0) db.whatsappRentals[index] = rental;
+    else db.whatsappRentals.unshift(rental);
+    return rental;
+  });
+  await upsertLegacyRental(updated.groupJid || updated.id, {
+    linkGrub: updated.linkGrub,
+    start: updated.startedAt,
+    daysLeft: updated.daysLeft,
+    expired: expirationFromDays(updated.daysLeft),
+  });
+  await notifyOwnerRentalChanged(await readDb(), {
+    rental: updated,
+    action: days < 0 ? "reduced" : "added",
+    addedDays: days,
+    previousDays,
+    totalDays: updated.daysLeft,
+    source: "Dashboard",
+  });
+  res.json(updated);
+});
+
+app.post("/api/whatsapp/inbound", async (req, res, next) => {
+  try {
+    assertInboundToken(req, await readDb());
+    const result = await updateDb(async (db) => {
+      const inboundResult = await handleInboundMessage(db, req.body);
+      if (inboundResult?.order?.deliveryStatus === "sent" && inboundResult.order.deliveredStockIds?.length) {
+        await pushFulfilledOrderToGoogleSheets(db, { ok: true, order: inboundResult.order, reply: inboundResult.reply });
+      }
+      if (inboundResult?.order?.source === "whatsapp" && inboundResult.order.qrisStatus === "pending") {
+        const payment = (db.payments || []).find((item) => item.ref === inboundResult.order.paymentRef || item.orderId === inboundResult.order.id);
+        const dashboardPaymentUrl = inboundResult.order.qrisUrl;
+        const pakasir = await createPakasirQris(db, inboundResult.order);
+        if (pakasir.providerStatus !== "created") {
+          enableMaintenanceMode(db, `Pakasir QRIS gagal: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`, "pakasir");
+          const error = new Error(`Pakasir QRIS gagal untuk order WhatsApp: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`);
+          error.status = 503;
+          error.maintenance = { reason: `Pakasir QRIS gagal: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`, source: "pakasir" };
+          throw error;
+        }
+        if (payment) {
+          Object.assign(payment, pakasir);
+          payment.paymentUrl = payment.paymentUrl || dashboardPaymentUrl;
+        }
+        inboundResult.order.qrisUrl = dashboardPaymentUrl || pakasir.paymentUrl || "";
+        inboundResult.order.paymentProviderStatus = pakasir.providerStatus || "";
+        if (pakasir.providerError) inboundResult.order.paymentError = pakasir.providerError;
+        const replyOptions = {
+          order: inboundResult.order,
+          fee: pakasir.fee || payment?.fee || 0,
+          totalPayment: pakasir.totalPayment || payment?.totalPayment || inboundResult.order.paymentDue,
+          ttlMinutes: paymentTtlMinutes,
+        };
+        inboundResult.reply =
+          inboundResult.order.type === "deposit_topup" || inboundResult.order.orderType === "deposit_topup"
+            ? buildDepositCreatedReply(replyOptions)
+            : buildOrderCreatedReply({
+                ...replyOptions,
+                productName: inboundResult.order.product,
+                variantName: inboundResult.order.variant,
+                qty: inboundResult.order.qty,
+                price: Number(inboundResult.order.total || 0) / Math.max(1, Number(inboundResult.order.qty || 1)),
+              });
+        return {
+          ...inboundResult,
+          paymentUrl: inboundResult.order.qrisUrl,
+          qrisText: pakasir.qrisText || pakasir.qrString || pakasir.paymentNumber || pakasir.paymentUrl || inboundResult.order.qrisUrl,
+          qrText: pakasir.qrisText || pakasir.qrString || pakasir.paymentNumber || pakasir.paymentUrl || inboundResult.order.qrisUrl,
+          qrImageUrl: pakasir.qrImageUrl || "",
+          orderId: inboundResult.order.id,
+          paymentRef: inboundResult.order.paymentRef,
+          providerStatus: pakasir.providerStatus || "pending",
+          providerError: pakasir.providerError || "",
+        };
+      }
+      return inboundResult;
+    });
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/whatsapp/orders/:id/payment-message", async (req, res, next) => {
+  try {
+    assertInboundToken(req, await readDb());
+    const saved = await updateDb((db) => {
+      const order = (db.orders || []).find((item) => item.id === req.params.id || item.paymentRef === req.params.id);
+      if (!order) return null;
+      order.whatsappPaymentMessageKey = req.body.messageKey || req.body.message_key || null;
+      order.whatsappPaymentMessageChatJid = String(req.body.chatJid || req.body.chat_jid || "").trim();
+      order.whatsappPaymentMessageSavedAt = nowText();
+      return order;
+    });
+    if (!saved) return res.status(404).json({ error: "Order tidak ditemukan" });
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/pakasir/webhook", async (req, res, next) => {
+  try {
+    assertPakasirSecret(req, await readDb());
+    const ref = req.body.paymentRef || req.body.reference || req.body.ref || req.body.order_id;
+    const status = String(req.body.status || req.body.payment_status || "").toLowerCase();
+    const result = await updateDb(async (db) => {
+      expirePendingOrders(db);
+      const payment = db.payments.find((item) => item.ref === ref || item.orderId === ref);
+      const order = db.orders.find((item) => item.paymentRef === ref || item.id === ref);
+      if (!payment || !order) return null;
+      payment.providerWebhookStatus = status || "";
+      payment.providerWebhookAt = nowText();
+      payment.status = pakasirStatusIsPaid(status) ? "paid" : status || "pending";
+      if (payment.status === "paid") {
+        const prepared = preparePaidOrderForFulfillment(db, order, payment);
+        if (prepared.reply && prepared.order.deliveryStatus === "late_paid_deposit") return prepared;
+        return fulfillPaidOrderAndNotify(db, order.id);
+      }
+      return { ok: true, order };
+    });
+    if (!result) return res.status(404).json({ error: "Payment/order tidak ditemukan" });
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/payments/:ref", requireAuth(["owner", "reseller"]), async (req, res) => {
+  const result = await updateDb(async (db) => {
+    await reconcilePakasirPaymentInDb(db, req.params.ref, { throttleMs: 8_000, source: "payment_view" });
+    expirePendingOrders(db);
+    const payment = db.payments.find((item) => item.ref === req.params.ref);
+    if (!payment) return null;
+    const order = db.orders.find((item) => item.paymentRef === payment.ref || item.id === payment.orderId);
+    if (req.auth.role === "reseller" && order && !orderBelongsToReseller(db, req.auth, order)) {
+      return null;
+    }
+    return safePublicPayment(payment, order);
+  });
+  if (!result) return res.status(404).json({ error: "Payment tidak ditemukan" });
+  res.json(result);
+});
+
+app.get("/api/public/payments/:ref", async (req, res) => {
+  const result = await updateDb(async (db) => {
+    await reconcilePakasirPaymentInDb(db, req.params.ref, { throttleMs: 8_000, source: "payment_public_view" });
+    expirePendingOrders(db);
+    const payment = db.payments.find((item) => item.ref === req.params.ref);
+    if (!payment) return null;
+    const order = db.orders.find((item) => item.paymentRef === payment.ref || item.id === payment.orderId);
+    return safePublicPayment(payment, order);
+  });
+  if (!result) return res.status(404).json({ error: "Payment tidak ditemukan" });
+  res.json(result);
+});
+
+app.use("/whatsapp-bot", proxyWhatsAppBotRequest);
+
+app.use("/api", (_req, res) => {
+  res.status(404).json({ error: "Endpoint tidak ditemukan" });
+});
+
+app.use(express.static(distDir));
+app.use((req, res, next) => {
+  if (req.method !== "GET") return next();
+  res.sendFile(path.join(distDir, "index.html"), (error) => {
+    if (error) next();
+  });
+});
+
+app.use(async (error, _req, res, _next) => {
+  if (error?.maintenance?.reason) {
+    await updateDb((db) => {
+      if (error.maintenance.source !== "google_sheets" || !isGoogleSheetsQuotaError(error.maintenance.reason || "")) {
+        enableMaintenanceMode(db, error.maintenance.reason, error.maintenance.source || "system");
+      }
+      return null;
+    }).catch(() => undefined);
+  }
+  res.status(error.status || 500).json({ error: error.message || "Server error" });
+});
+
+await ensureDb();
+await ensureRuntimeSettings();
+app.listen(port, host, () => {
+  console.log(`Kavya API running at http://${host}:${port}`);
+  console.log(`Database: ${databasePath}`);
+});
+setTimeout(runRentalReminderJob, 10_000);
+setInterval(runRentalReminderJob, 60 * 60 * 1000);
+
+let googleSheetsStockSyncRunning = false;
+
+async function runGoogleSheetsStockSyncJob() {
+  if (googleSheetsStockSyncRunning) return;
+  googleSheetsStockSyncRunning = true;
+  try {
+    await updateDb(async (db) => {
+      if (!googleSheetsConfigured(db)) return { skipped: true };
+      return syncGoogleSheetsStockSafely(db, { silent: true, reason: "scheduled_sync" });
+    });
+  } catch (error) {
+    console.warn(`[GoogleSheets] sync skipped: ${error.message || error}`);
+  } finally {
+    googleSheetsStockSyncRunning = false;
+  }
+}
+
+setTimeout(runGoogleSheetsStockSyncJob, 20_000);
+setInterval(runGoogleSheetsStockSyncJob, 3 * 60 * 1000);
+
+async function runReadOnlySheetsAuditJob() {
+  try {
+    const db = await readDb();
+    automatedSheetsAuditSnapshot = buildSheetsRowAudit(db);
+  } catch (error) {
+    console.warn(`[SheetsAudit] read-only audit skipped: ${error.message || error}`);
+  }
+}
+
+setTimeout(runReadOnlySheetsAuditJob, 30_000);
+setInterval(runReadOnlySheetsAuditJob, 10 * 60 * 1000);
+
+let pakasirPaymentSyncRunning = false;
+
+async function runPakasirPaymentSyncJob() {
+  if (pakasirPaymentSyncRunning) return;
+  pakasirPaymentSyncRunning = true;
+  try {
+    await updateDb(async (db) => {
+      const refs = [];
+      const ordersByRef = new Map((db.orders || []).map((order) => [order.paymentRef, order]));
+      for (const payment of db.payments || []) {
+        if (payment.provider !== "pakasir") continue;
+        const order = ordersByRef.get(payment.ref);
+        if (!order || order.deliveryStatus === "sent") continue;
+        const status = String(payment.status || order.qrisStatus || "").toLowerCase();
+        if (!["pending", "expired", "created", "waiting_payment", ""].includes(status)) continue;
+        refs.push(payment.ref);
+        if (refs.length >= 8) break;
+      }
+      for (const ref of refs) {
+        await reconcilePakasirPaymentInDb(db, ref, { throttleMs: 25_000, source: "scheduled_pakasir_sync" });
+      }
+      expirePendingOrders(db);
+      return { checked: refs.length };
+    });
+  } catch (error) {
+    console.warn(`[Pakasir] payment sync skipped: ${error.message || error}`);
+  } finally {
+    pakasirPaymentSyncRunning = false;
+  }
+}
+
+setTimeout(runPakasirPaymentSyncJob, 15_000);
+setInterval(runPakasirPaymentSyncJob, 30_000);
+
+let fulfillmentRepairRunning = false;
+
+async function runFulfillmentRepairJob() {
+  if (fulfillmentRepairRunning) return;
+  fulfillmentRepairRunning = true;
+  try {
+    await updateDb(async (db) => {
+      const paidStatuses = new Set(["paid", "processing", "paid_after_expired", "paid_by_deposit"]);
+      const notificationRetryCooldownMs = 2 * 60 * 1000;
+      const candidates = (db.orders || [])
+        .filter((order) => {
+          if (!order || !order.id) return false;
+          const deliveryStatus = String(order.deliveryStatus || "").toLowerCase();
+          const orderStatus = String(order.orderStatus || "").toLowerCase();
+          if (deliveryStatus === "stock_unavailable_deposit" || deliveryStatus === "late_paid_deposit") return false;
+          if (String(order.orderType || order.type || "").toLowerCase() === "deposit_topup") return false;
+          const sentButNotifFailed = (
+            (deliveryStatus === "sent" || orderStatus === "completed")
+            && Boolean(order.fulfillmentText)
+            && String(order.whatsappNotificationStatus || "").toLowerCase() !== "sent"
+          );
+          if (sentButNotifFailed) {
+            const lastAttemptMs = Number(toDateTime(order.whatsappNotificationAttemptedAt || order.whatsappNotificationSentAt || "")?.getTime() || 0);
+            return !lastAttemptMs || (Date.now() - lastAttemptMs) >= notificationRetryCooldownMs;
+          }
+          if (deliveryStatus === "sent") return false;
+          if (paidStatuses.has(deliveryStatus)) return true;
+          if (String(order.qrisStatus || "").toLowerCase() === "paid") return true;
+          if (orderStatus === "paid") return true;
+          return false;
+        })
+        .sort((a, b) => Number(toDateTime(b.paidAt || b.updatedAt || b.createdAt || b.orderAt)?.getTime() || 0) - Number(toDateTime(a.paidAt || a.updatedAt || a.createdAt || a.orderAt)?.getTime() || 0))
+        .slice(0, 8);
+
+      for (const order of candidates) {
+        await fulfillPaidOrderAndNotify(db, order.id);
+      }
+      return { checked: candidates.length };
+    });
+  } catch (error) {
+    console.warn(`[Fulfillment] repair skipped: ${error.message || error}`);
+  } finally {
+    fulfillmentRepairRunning = false;
+  }
+}
+
+setTimeout(runFulfillmentRepairJob, 20_000);
+setInterval(runFulfillmentRepairJob, 45_000);

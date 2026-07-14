@@ -1,0 +1,37 @@
+node_modules/
+
+# App dependencies/build output
+apps/**/node_modules/
+apps/dashboard/dist/
+apps/dashboard/vite.config.js
+apps/dashboard/vite.config.d.ts
+
+# Local env files. Edit only the root .env locally.
+.env
+apps/bot/.env
+apps/bot/.auth/
+apps/bot/database/*.json
+runtime/
+apps/dashboard/runtime/
+release/
+tmp/
+outputs/
+_zip_inspect/
+kavya-pterodactyl-linux-latest.tar.gz
+*.tgz
+*.tar.gz
+*.log
+smoke-*.log
+
+# OS/editor noise
+.DS_Store
+*.tsbuildinfo
+
+# VS Code
+.vscode/
+
+# Windows
+Thumbs.db
+
+# Keep example env
+!.env.example

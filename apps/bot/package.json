@@ -1,0 +1,22 @@
+{
+  "name": "whatsapp-bot-service",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node ./index.js",
+    "whatsapp:start": "npm run start",
+    "check": "node --check ./index.js && node --check ./config.js && node --check ./handle/connection.js && node --check ./handle/messages.js && node --check ./handle/server.js && node --check ./lib/backup.js && node --check ./lib/jid.js && node --check ./lib/json-store.js && node --check ./lib/panel-log.js && node --check ./lib/plugin-loader.js && node --check ./lib/runtime.js && node --check ./plugins/kavya/group-basic.js && node --check ./plugins/legacy-handlers.js && node --check ./plugins/legacy-autoresbot.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.23",
+    "dotenv": "^16.6.1",
+    "pino": "^9.6.0",
+    "qrcode": "^1.5.4"
+  },
+  "overrides": {
+    "axios": "^1.15.2",
+    "follow-redirects": "^1.15.12",
+    "protobufjs": "^7.5.8",
+    "ws": "^8.20.1"
+  }
+}

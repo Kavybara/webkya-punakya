@@ -1,0 +1,44 @@
+{
+  "name": "kavya-digital-dashboard",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node server/dev.js",
+    "dev:web": "vite --host 127.0.0.1 --port 5174",
+    "api": "node server/index.js",
+    "start": "node server/index.js",
+    "sheets:backfill": "node server/scripts/backfill-google-sheets.js",
+    "sheets:audit": "node server/scripts/audit-sheet-order-rows.js",
+    "sheets:history:backfill": "node server/scripts/backfill-order-history.js",
+    "reseller-account:check": "node server/scripts/reseller-account-visibility-check.js",
+    "whatsapp:check": "node server/scripts/whatsapp-check.js",
+    "web-order:check": "node server/scripts/web-order-check.js",
+    "web:typecheck": "tsc -b",
+    "web:build": "vite build",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "framer-motion": "latest",
+    "lucide-react": "latest",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.0.0",
+    "recharts": "latest",
+    "tailwindcss": "^3.4.17"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
+    "autoprefixer": "latest",
+    "postcss": "latest",
+    "typescript": "latest",
+    "vite": "latest"
+  }
+}
