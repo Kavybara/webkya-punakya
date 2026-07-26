@@ -1,8 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import type { FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Button } from "../../components/base/Button";
-import { PageTransition } from "../../components/feature/PageTransition";
+import { AuthError, AuthInput, AuthShell, AuthSubmitButton, PasswordInput } from "../../components/auth/AuthShell";
 import { api } from "../../lib/api";
 import { writeSession } from "../../lib/session";
 
@@ -16,6 +14,14 @@ function normalizeWhatsapp(number = "") {
   return digits;
 }
 
+function safeLoginError(error: unknown) {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  if (message.includes("nonaktif")) return "Akun sedang tidak aktif. Hubungi Owner untuk bantuan.";
+  if (message.includes("terlalu") || message.includes("limit") || message.includes("coba lagi")) return "Terlalu banyak percobaan login. Tunggu beberapa saat lalu coba kembali.";
+  if (message.includes("fetch") || message.includes("network") || message.includes("server")) return "Kavya belum dapat dihubungi. Periksa koneksi lalu coba kembali.";
+  return "Username/email atau password tidak sesuai.";
+}
+
 export default function LoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -25,30 +31,33 @@ export default function LoginPage() {
   const [error, setError] = useState(sessionMessage);
   const [loading, setLoading] = useState(false);
   const [remember, setRemember] = useState(true);
-  const [showPassword, setShowPassword] = useState(false);
   const [ownerWhatsapp, setOwnerWhatsapp] = useState(fallbackOwnerWhatsapp);
+  const [identifierTouched, setIdentifierTouched] = useState(false);
+  const [passwordTouched, setPasswordTouched] = useState(false);
+  const [capsLock, setCapsLock] = useState(false);
+
+  const identifierError = identifierTouched && !email.trim() ? "Username atau email wajib diisi." : "";
+  const passwordError = passwordTouched && !password ? "Password wajib diisi." : "";
 
   useEffect(() => {
     let alive = true;
-    api.health()
-      .then((health) => {
-        const nextNumber = normalizeWhatsapp(health.ownerWhatsAppNumber || "");
-        if (alive && nextNumber) setOwnerWhatsapp(nextNumber);
-      })
-      .catch(() => undefined);
-    return () => {
-      alive = false;
-    };
+    api.health().then((health) => {
+      const nextNumber = normalizeWhatsapp(health.ownerWhatsAppNumber || "");
+      if (alive && nextNumber) setOwnerWhatsapp(nextNumber);
+    }).catch(() => undefined);
+    return () => { alive = false; };
   }, []);
 
   const ownerWhatsappUrl = useMemo(() => {
     const number = normalizeWhatsapp(ownerWhatsapp) || fallbackOwnerWhatsapp;
-    const text = encodeURIComponent("Halo Kak, saya mau daftar reseller Kavya.");
-    return `https://wa.me/${number}?text=${text}`;
+    return `https://wa.me/${number}?text=${encodeURIComponent("Halo Kak, saya mau daftar reseller Kavya.")}`;
   }, [ownerWhatsapp]);
 
   async function submitLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setIdentifierTouched(true);
+    setPasswordTouched(true);
+    if (!email.trim() || !password) return;
     setError("");
     setLoading(true);
     try {
@@ -56,97 +65,34 @@ export default function LoginPage() {
       writeSession(session, remember);
       const next = searchParams.get("next") || "";
       if (session.role === "owner") {
-        navigate(next.startsWith("/dashboard") ? next : "/dashboard");
+        const destination = next.startsWith("/owner-v2") ? next : "/owner-v2";
+        navigate(destination);
         return;
       }
-      navigate(next.startsWith("/reseller") ? next : "/reseller");
+      navigate(next.startsWith("/reseller-v2") ? next : "/reseller-v2/ringkasan");
     } catch (loginError) {
-      setError(loginError instanceof Error ? loginError.message : "Login gagal");
+      setError(safeLoginError(loginError));
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <PageTransition>
-      <main className="flex min-h-screen items-center justify-center bg-[#f5efe6] px-4 py-10">
-        <div className="w-full max-w-[390px]">
-          <div className="mb-7 text-center">
-            <Link to="/" className="font-serif text-2xl font-semibold text-slate-950">
-              Kavya
-            </Link>
-            <p className="mt-2 text-sm text-slate-500">Netflix Digital Account Management</p>
-          </div>
-
-          <section className="rounded-xl border border-gray-100 bg-white px-6 py-7">
-            <h1 className="text-center text-base font-semibold text-slate-950">Masuk ke Dashboard</h1>
-            <p className="mt-2 text-center text-xs leading-5 text-slate-500">Masukkan username/email owner atau reseller. Sistem akan membuka panel yang sesuai.</p>
-
-            <form
-              className="mt-5 space-y-4"
-              onSubmit={submitLogin}
-            >
-              <label className="block">
-                <span className="text-sm font-medium text-slate-800">Username / Email</span>
-                <input
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  className="mt-2 h-9 w-full rounded-md border border-gray-200 px-3 text-sm text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:border-red-200"
-                  placeholder="owner atau owner@kavya.id"
-                />
-              </label>
-              <label className="block">
-                <span className="text-sm font-medium text-slate-800">Password</span>
-                <span className="relative mt-2 block">
-                  <input
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    type={showPassword ? "text" : "password"}
-                    className="h-9 w-full rounded-md border border-gray-200 px-3 pr-10 text-sm text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:border-red-200"
-                    placeholder="********"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((current) => !current)}
-                    className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-700"
-                    aria-label={showPassword ? "Sembunyikan password" : "Lihat password"}
-                    title={showPassword ? "Sembunyikan password" : "Lihat password"}
-                  >
-                    <i className={showPassword ? "ri-eye-off-line" : "ri-eye-line"} />
-                  </button>
-                </span>
-              </label>
-              {error ? (
-                <div className="rounded-md border border-red-100 bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
-                  {error}
-                </div>
-              ) : null}
-              <div className="flex items-center justify-between text-xs">
-                <label className="flex items-center gap-2 text-slate-500">
-                  <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className="h-4 w-4 rounded border-gray-300 text-red-600" />
-                  Ingat saya
-                </label>
-                <Link to="/forgot-password" className="font-medium text-red-600">
-                  Lupa password?
-                </Link>
-              </div>
-              <Button className="w-full bg-red-400 hover:bg-red-600" disabled={loading}>
-                <span className="flex h-4 w-4 items-center justify-center">
-                  <i className="ri-login-box-line" />
-                </span>
-                {loading ? "Memeriksa..." : "Masuk"}
-              </Button>
-            </form>
-
-            <p className="mt-4 text-center text-xs text-slate-500">
-              Belum punya akun reseller?{" "}
-              <a href={ownerWhatsappUrl} target="_blank" rel="noreferrer" className="font-medium text-red-600">
-                Hubungi Owner
-              </a>
-            </p>
-          </section>
+    <AuthShell title="Selamat datang kembali" description="Masuk untuk melanjutkan ke Kavya.">
+      {error ? <div className="auth-general-error"><AuthError>{error}</AuthError></div> : null}
+      <form className="auth-form" onSubmit={submitLogin} noValidate>
+        <AuthInput id="login-identifier" label="Username atau email" value={email} onChange={(event) => { setEmail(event.target.value); setError(""); }} onBlur={() => setIdentifierTouched(true)} error={identifierError} placeholder="Masukkan username atau email" autoComplete="username" />
+        <PasswordInput id="login-password" label="Password" value={password} onChange={(event) => { setPassword(event.target.value); setError(""); }} onBlur={() => setPasswordTouched(true)} error={passwordError} placeholder="Masukkan password" autoComplete="current-password" onCapsLockChange={setCapsLock} />
+        {capsLock ? <p className="auth-caps" role="status">Caps Lock sedang aktif.</p> : null}
+        <div className="auth-inline-row">
+          <label className="auth-checkbox"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />Ingat saya</label>
+          <Link to="/forgot-password">Lupa password?</Link>
         </div>
-      </main>
-    </PageTransition>
+        <AuthSubmitButton loading={loading} loadingLabel="Memeriksa...">Masuk ke Kavya</AuthSubmitButton>
+      </form>
+      <p className="auth-form-note">Kamu akan diarahkan ke panel sesuai akses akunmu.</p>
+      <p className="auth-footer-copy">Belum punya akun reseller? <Link to="/register">Daftar sekarang</Link></p>
+      <p className="auth-footer-copy">Butuh bantuan? <a href={ownerWhatsappUrl} target="_blank" rel="noreferrer">Hubungi Owner</a></p>
+    </AuthShell>
   );
 }

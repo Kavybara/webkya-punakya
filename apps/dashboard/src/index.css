@@ -10,6 +10,39 @@
     sans-serif;
 }
 
+.kavya-public-dark {
+  --kavya-bg-deep: #050506;
+  --kavya-bg: #080809;
+  --kavya-bg-elevated: #0d0d0f;
+  --kavya-bg-ambient: #0c0c10;
+  --kavya-surface: #131316;
+  --kavya-surface-hover: #19191d;
+  --kavya-graphite: #23242a;
+  --kavya-graphite-edge: rgba(255, 255, 255, 0.3);
+  --kavya-microcopy: rgba(245, 245, 246, 0.72);
+  --kavya-text-primary: #f5f5f6;
+  --kavya-text-secondary: #a1a1aa;
+  --kavya-text-muted: #6f6f78;
+  --kavya-border: rgba(255, 255, 255, 0.09);
+  --kavya-border-hover: rgba(255, 255, 255, 0.18);
+  --kavya-violet: #8b5cf6;
+  --kavya-magenta: #ec4899;
+  --kavya-cyan: #38bdf8;
+  --kavya-bg-translucent: rgba(8, 8, 9, 0.78);
+  --kavya-bg-elevated-translucent: rgba(13, 13, 15, 0.72);
+  --kavya-grid-dot: rgba(255, 255, 255, 0.8);
+  --kavya-shimmer: rgba(255, 255, 255, 0.045);
+  --kavya-glow-white: rgba(255, 255, 255, 0.1);
+  background: var(--kavya-bg);
+  color: var(--kavya-text-primary);
+  color-scheme: dark;
+}
+
+.kavya-public-dark ::selection {
+  background: color-mix(in srgb, var(--kavya-violet) 50%, transparent);
+  color: var(--kavya-text-primary);
+}
+
 html {
   scroll-behavior: smooth;
 }
@@ -236,5 +269,14 @@ textarea {
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
   }
 }

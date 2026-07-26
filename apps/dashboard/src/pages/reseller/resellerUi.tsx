@@ -1,6 +1,12 @@
 import type { ReactNode } from "react";
 import type { ManagedAccount, Order } from "../../mocks/data";
 import { formatRupiah } from "../../mocks/data";
+import {
+  normalizeResellerAccountStatus,
+  resellerAccountDate,
+  resellerAccountStatusLabel,
+  resellerAccountUsable,
+} from "../../lib/resellerAccounts";
 
 export function daysLeft(date: string) {
   if (!date) return 0;
@@ -17,31 +23,20 @@ export function daysUsed(account: ManagedAccount) {
 }
 
 export function accountWarrantyStatus(account: ManagedAccount) {
-  if (account.status === "replaced" || account.status === "disabled") return account.status;
-  const remaining = daysLeft(account.expiresAt);
-  const durationDays = Number(account.durationDays || 0);
-  if (account.status === "expired" || remaining <= 0) return "expired";
-  if (durationDays >= 30 && (account.status === "expiring" || remaining <= 5)) return "expiring";
-  return "active";
+  return normalizeResellerAccountStatus(account);
 }
 
 export function accountActive(account: ManagedAccount) {
-  return ["active", "expiring"].includes(accountWarrantyStatus(account));
+  return resellerAccountUsable(account);
 }
 
 export function accountStatus(account: ManagedAccount) {
-  const status = accountWarrantyStatus(account);
-  if (status === "replaced") return "Replaced";
-  if (status === "disabled") return "Disabled";
-  if (status === "expired") return "Expired";
-  if (status === "expiring") return "Expiring";
-  return "Aktif";
+  return resellerAccountStatusLabel(accountWarrantyStatus(account));
 }
 
 export function accountStatusClass(account: ManagedAccount) {
   const status = accountWarrantyStatus(account);
-  if (status === "replaced") return "bg-slate-100 text-slate-600";
-  if (status === "disabled") return "bg-red-50 text-red-600";
+  if (status === "inactive") return "bg-slate-100 text-slate-600";
   if (status === "expired") return "bg-red-50 text-red-600";
   if (status === "expiring") return "bg-amber-50 text-amber-700";
   return "bg-emerald-50 text-emerald-700";
@@ -76,62 +71,8 @@ export function remainingShort(account: ManagedAccount) {
   return `${durationDays > 0 ? Math.min(remainingDays, durationDays) : remainingDays} hari`;
 }
 
-function hasTimePart(value = "") {
-  return /\d{1,2}:\d{2}/.test(String(value));
-}
-
-function monthNumber(value = "") {
-  const key = String(value || "").trim().toLowerCase().replace(/\./g, "");
-  const months: Record<string, number> = {
-    jan: 0,
-    januari: 0,
-    feb: 1,
-    februari: 1,
-    mar: 2,
-    maret: 2,
-    apr: 3,
-    april: 3,
-    mei: 4,
-    may: 4,
-    jun: 5,
-    juni: 5,
-    jul: 6,
-    juli: 6,
-    agu: 7,
-    agustus: 7,
-    aug: 7,
-    sep: 8,
-    september: 8,
-    okt: 9,
-    oktober: 9,
-    oct: 9,
-    nov: 10,
-    november: 10,
-    des: 11,
-    desember: 11,
-    dec: 11,
-  };
-  return months[key];
-}
-
 function accountDate(value = "", options: { endOfDay?: boolean } = {}) {
-  const raw = String(value || "").trim();
-  if (!raw) return new Date(Number.NaN);
-  const monthMatch = raw.match(/^(\d{1,2})[\s/-]*([a-zA-Z]+)(?:[\s/-]+(\d{4}))?(?:[\s,]+(\d{1,2})[:.](\d{2}))?$/);
-  if (monthMatch) {
-    const month = monthNumber(monthMatch[2]);
-    if (month !== undefined) {
-      const date = new Date(Number(monthMatch[3] || new Date().getFullYear()), month, Number(monthMatch[1]), Number(monthMatch[4] || 0), Number(monthMatch[5] || 0));
-      if (options.endOfDay && !monthMatch[4]) date.setHours(23, 59, 59, 999);
-      return date;
-    }
-  }
-  const normalized = raw.replace(" ", "T");
-  const date = new Date(hasTimePart(raw) ? normalized : `${raw}T00:00:00`);
-  if (!Number.isNaN(date.getTime()) && options.endOfDay && !hasTimePart(raw)) {
-    date.setHours(23, 59, 59, 999);
-  }
-  return date;
+  return resellerAccountDate(value, options);
 }
 
 export function orderPaid(order: Order) {
@@ -143,6 +84,15 @@ export function orderStatusClass(order: Order) {
   if (order.orderStatus === "cancelled" || order.qrisStatus === "expired") return "bg-red-50 text-red-600";
   if (orderPaid(order)) return "bg-emerald-50 text-emerald-700";
   return "bg-amber-50 text-amber-700";
+}
+
+export function orderStatusLabel(order: Order) {
+  if (order.orderStatus === "cancelled") return "Dibatalkan";
+  if (order.qrisStatus === "expired") return "Kedaluwarsa";
+  if (order.qrisStatus === "pending") return "Menunggu Pembayaran";
+  if (orderPaid(order)) return "Sukses";
+  if (order.orderStatus === "processing") return "Diproses";
+  return "Menunggu";
 }
 
 export function compactDate(value: string) {
@@ -276,4 +226,3 @@ export function MiniBadge({ children, className }: { children: ReactNode; classN
 export function money(value: number) {
   return formatRupiah(value);
 }
-

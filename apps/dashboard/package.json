@@ -15,30 +15,43 @@
     "whatsapp:check": "node server/scripts/whatsapp-check.js",
     "web-order:check": "node server/scripts/web-order-check.js",
     "web:typecheck": "tsc -b",
+    "lint": "eslint src",
     "web:build": "vite build",
     "build": "tsc -b && vite build",
-    "preview": "vite preview --host 127.0.0.1"
+    "preview": "vite preview --host 127.0.0.1",
+    "test:security": "node --test server/tests/security.test.mjs",
+    "test:routes": "node --test server/tests/route-modules.test.mjs",
+    "test:sheets-template": "node --test server/tests/google-sheets-template.test.mjs",
+    "test:order-stock": "node --test server/tests/order-stock-service.test.mjs"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
+    "@vitejs/plugin-react": "6.0.2",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
-    "express": "^5.2.1",
-    "framer-motion": "latest",
-    "lucide-react": "latest",
+    "express": "5.2.1",
+    "framer-motion": "12.40.0",
+    "lucide-react": "1.16.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^7.0.0",
-    "recharts": "latest",
+    "react-router-dom": "7.18.1",
+    "recharts": "3.8.1",
     "tailwindcss": "^3.4.17"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
-    "autoprefixer": "latest",
-    "postcss": "latest",
-    "typescript": "latest",
-    "vite": "latest"
+    "autoprefixer": "10.5.0",
+    "eslint": "10.7.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.7.0",
+    "postcss": "8.5.23",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.64.0",
+    "vite": "8.1.4"
+  },
+  "overrides": {
+    "body-parser": "2.3.0",
+    "brace-expansion": "5.0.8"
   }
 }

@@ -1,13 +1,16 @@
 import fsSync from "node:fs";
+import fs from "node:fs/promises";
+import crypto from "node:crypto";
 import path from "node:path";
 import { createRuntimeBackupPayload, writeRuntimeBackupFile } from "../../packages/shared/runtime-backup.mjs";
 
 const rootDir = process.cwd();
 const sendWhatsApp = process.argv.includes("--send-whatsapp");
+const encryptOnly = process.argv.includes("--encrypt-only");
 const jsonOutput = process.argv.includes("--json");
 const reasonArg = process.argv.find((arg) => arg.startsWith("--reason="));
 const reason = reasonArg ? reasonArg.slice("--reason=".length) : "manual";
-const BACKUP_DISPLAY_FILE_NAME = "File Backup.tar.gz";
+const BACKUP_DISPLAY_FILE_NAME = "File Backup.tar.gz.enc";
 
 function loadRootEnv() {
   const envPath = path.join(rootDir, ".env");
@@ -115,6 +118,23 @@ async function sendBackupToOwner({ backup, dashboardDb }) {
   return { sent: response.ok && data.success !== false, reason: data.error || "" };
 }
 
+async function encryptBackupForTransport(backup) {
+  const passphrase = usableSecret(process.env.BACKUP_ENCRYPTION_KEY);
+  if (passphrase.length < 16) {
+    throw new Error("BACKUP_ENCRYPTION_KEY wajib diisi minimal 16 karakter sebelum backup dikirim ke WhatsApp");
+  }
+  const salt = crypto.randomBytes(16);
+  const iv = crypto.randomBytes(12);
+  const key = crypto.scryptSync(passphrase, salt, 32, { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const plaintext = await fs.readFile(backup.filePath);
+  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  const header = Buffer.from(`${JSON.stringify({ version: 1, algorithm: "aes-256-gcm", salt: salt.toString("base64url"), iv: iv.toString("base64url"), tag: cipher.getAuthTag().toString("base64url") })}\n`);
+  const encryptedPath = `${backup.filePath}.enc`;
+  await fs.writeFile(encryptedPath, Buffer.concat([Buffer.from("KAVYA-BACKUP-V1\n"), header, ciphertext]), { mode: 0o600 });
+  return { ...backup, filePath: encryptedPath, fileName: `${backup.fileName}.enc` };
+}
+
 async function main() {
   const payload = await createRuntimeBackupPayload({
     rootDir,
@@ -125,15 +145,17 @@ async function main() {
     baileysAuthDir,
   });
   const backup = await writeRuntimeBackupFile({ payload, outputDir });
+  let transportBackup = null;
   let whatsapp = { sent: false, reason: "send-disabled" };
+  if (sendWhatsApp || encryptOnly) {
+    transportBackup = await encryptBackupForTransport(backup);
+  }
   if (sendWhatsApp) {
-    whatsapp = await sendBackupToOwner({ backup, dashboardDb: payload.dashboard }).catch((error) => ({
-      sent: false,
-      reason: error.message || "send_failed",
-    }));
+    whatsapp = await sendBackupToOwner({ backup: transportBackup, dashboardDb: payload.dashboard })
+      .catch((error) => ({ sent: false, reason: error.message || "send_failed" }));
   }
 
-  const result = { success: true, ...backup, whatsapp };
+  const result = { success: true, ...backup, encryptedFilePath: transportBackup?.filePath || "", whatsapp };
   if (jsonOutput) {
     console.log(JSON.stringify(result, null, 2));
     return;

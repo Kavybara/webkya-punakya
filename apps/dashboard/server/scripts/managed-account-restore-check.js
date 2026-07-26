@@ -112,6 +112,7 @@ await fs.writeFile(databasePath, JSON.stringify(db, null, 2));
 let failure = null;
 try {
   process.env.DATABASE_PATH = databasePath;
+  process.env.AUTH_SECRET = "kavya-regression-test-auth-secret-32-characters";
   process.env.PORT = String(port);
   process.env.PUBLIC_APP_URL = `http://127.0.0.1:${port}`;
   process.env.APP_PUBLIC_URL = `http://127.0.0.1:${port}`;
@@ -150,7 +151,9 @@ try {
   if (!restored) throw new Error("Managed account restore tidak ditemukan");
   if (restored.hidden) throw new Error("Managed account masih hidden setelah refresh");
   if (restored.returnedToStockAt) throw new Error(`returnedToStockAt belum dibersihkan: ${restored.returnedToStockAt}`);
-  if (restored.status !== "active") throw new Error(`status account belum aktif: ${restored.status}`);
+  if (!["active", "expiring"].includes(restored.status)) {
+    throw new Error(`status account hasil restore tidak usable: ${restored.status}`);
+  }
 
   console.log("managed-account-restore-check OK");
   console.log("archived google sheets netflix account restored");

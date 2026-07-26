@@ -1,15 +1,35 @@
 const SESSION_KEY = "kavya-session";
 
-export function readSession() {
+export type AppSession = {
+  ok?: boolean;
+  role?: "owner" | "reseller";
+  user?: Record<string, any>;
+  token?: string;
+};
+
+function publicSession(session: unknown): AppSession | null {
+  if (!session || typeof session !== "object") return null;
+  const { token: _legacyToken, ...safe } = session as Record<string, unknown>;
+  return safe as AppSession;
+}
+
+export function readSession(): AppSession | null {
   try {
-    return JSON.parse(localStorage.getItem(SESSION_KEY) || sessionStorage.getItem(SESSION_KEY) || "null");
+    const raw = localStorage.getItem(SESSION_KEY) || sessionStorage.getItem(SESSION_KEY) || "null";
+    const parsed = JSON.parse(raw);
+    const safe = publicSession(parsed);
+    if (parsed?.token) {
+      const storage = localStorage.getItem(SESSION_KEY) ? localStorage : sessionStorage;
+      storage.setItem(SESSION_KEY, JSON.stringify(safe));
+    }
+    return safe;
   } catch {
     return null;
   }
 }
 
 export function writeSession(session: unknown, remember = true) {
-  const value = JSON.stringify(session);
+  const value = JSON.stringify(publicSession(session));
   if (remember) {
     localStorage.setItem(SESSION_KEY, value);
     sessionStorage.removeItem(SESSION_KEY);

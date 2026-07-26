@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { DashboardLayout } from "../../../components/feature/DashboardLayout";
 import { api, subscribeRealtime, type AccountAccessLookupResult, type AccountAccessLookupType, type ApiReseller } from "../../../lib/api";
 import type { ManagedAccount } from "../../../mocks/data";
+import { normalizeResellerAccountStatus } from "../../../lib/resellerAccounts";
 import {
   MiniBadge,
   ResellerPageTitle,
@@ -32,7 +33,7 @@ const disneyTools: Array<{ id: AccessTool; label: string; icon: string; hint: st
 ];
 
 function toolLabel(type: AccessTool) {
-  return [...netflixTools, ...disneyTools].find((tool) => tool.id === type)?.label || "Account Access";
+  return [...netflixTools, ...disneyTools].find((tool) => tool.id === type)?.label || "Akses & Kode";
 }
 
 function valueLabel(type: AccessTool) {
@@ -77,58 +78,9 @@ function isDisneyAccount(account: ManagedAccount) {
     .includes("disney");
 }
 
-function monthNumber(value = "") {
-  const key = String(value || "").trim().toLowerCase().replace(/\./g, "");
-  const months: Record<string, number> = {
-    jan: 0,
-    januari: 0,
-    feb: 1,
-    februari: 1,
-    mar: 2,
-    maret: 2,
-    apr: 3,
-    april: 3,
-    mei: 4,
-    may: 4,
-    jun: 5,
-    juni: 5,
-    jul: 6,
-    juli: 6,
-    agu: 7,
-    agustus: 7,
-    aug: 7,
-    sep: 8,
-    september: 8,
-    okt: 9,
-    oktober: 9,
-    oct: 9,
-    nov: 10,
-    november: 10,
-    des: 11,
-    desember: 11,
-    dec: 11,
-  };
-  return months[key];
-}
-
-function parseAccountDate(value = "") {
-  const raw = String(value || "").trim();
-  const monthMatch = raw.match(/^(\d{1,2})[\s/-]*([a-zA-Z]+)(?:[\s/-]+(\d{4}))?(?:[\s,]+(\d{1,2})[:.](\d{2}))?$/);
-  if (monthMatch) {
-    const month = monthNumber(monthMatch[2]);
-    if (month !== undefined) return new Date(Number(monthMatch[3] || new Date().getFullYear()), month, Number(monthMatch[1]), Number(monthMatch[4] || 0), Number(monthMatch[5] || 0));
-  }
-  const hasTime = /\d{1,2}:\d{2}/.test(raw);
-  const target = new Date(hasTime ? raw.replace(" ", "T") : `${raw}T00:00:00`);
-  if (!Number.isNaN(target.getTime()) && !hasTime) target.setHours(23, 59, 59, 999);
-  return target;
-}
-
 function isExpiredAccount(account?: ManagedAccount | AccountAccessLookupResult["account"] | null) {
   if (!account) return false;
-  if (["expired", "replaced", "disabled"].includes(account.status)) return true;
-  const target = parseAccountDate(account.expiresAt || "");
-  return Boolean(account.expiresAt && !Number.isNaN(target.getTime()) && target.getTime() <= Date.now());
+  return ["expired", "inactive"].includes(normalizeResellerAccountStatus(account));
 }
 
 function inactiveLookupMessage(account?: ManagedAccount | AccountAccessLookupResult["account"] | null) {
@@ -334,24 +286,37 @@ export default function ResellerAccountsPage() {
   const [activeTool, setActiveTool] = useState<AccessTool>("signin");
   const [lookupResult, setLookupResult] = useState<AccountAccessLookupResult | null>(null);
   const [lookupError, setLookupError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [accountsState, setAccountsState] = useState<"loading" | "success" | "error">("loading");
+  const [accountsError, setAccountsError] = useState("");
   const [copied, setCopied] = useState("");
   const [lastRefresh, setLastRefresh] = useState("");
+  const lookupRequestRef = useRef(0);
 
-  const loadAccounts = useCallback(async () => {
-    const [accountRows, resellerRows] = await Promise.all([api.accounts(), api.resellers()]);
-    setAccounts(accountRows);
-    setReseller(resellerRows[0] || null);
-    setLastRefresh(new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+  const loadAccounts = useCallback(async (options: { silent?: boolean } = {}) => {
+    if (!options.silent) setAccountsState("loading");
+    try {
+      const [accountRows, resellerRows] = await Promise.all([
+        api.accounts({ view: "light" }),
+        api.resellers(),
+      ]);
+      setAccounts(accountRows);
+      setReseller(resellerRows[0] || null);
+      setAccountsError("");
+      setAccountsState("success");
+      setLastRefresh(new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+    } catch {
+      if (!options.silent) {
+        setAccountsError("Daftar akun belum dapat dimuat. Periksa koneksi lalu coba lagi.");
+        setAccountsState("error");
+      }
+    }
   }, []);
 
   const netflixAccounts = useMemo(() => accounts.filter(isNetflixAccount), [accounts]);
   const disneyAccounts = useMemo(() => accounts.filter(isDisneyAccount), [accounts]);
   const netflixGroups = useMemo(() => groupAccounts(netflixAccounts, "netflix"), [netflixAccounts]);
   const disneyGroups = useMemo(() => groupAccounts(disneyAccounts, "disney"), [disneyAccounts]);
-
-  const hasNetflix = netflixGroups.length > 0;
-  const hasDisney = disneyGroups.length > 0;
 
   const netflixAllowedTools = useMemo(() => {
     const fallback: Array<"signin" | "verification" | "household"> = ["signin", "verification", "household"];
@@ -373,46 +338,34 @@ export default function ResellerAccountsPage() {
   const lookupToolLabel = currentTools.find((tool) => tool.id === activeTool)?.label || "Lookup";
 
   const runLookup = useCallback(async (payload: { target: string; type: AccessTool }, options: { silent?: boolean } = {}) => {
-    if (!options.silent) setLoading(true);
+    const requestId = lookupRequestRef.current + 1;
+    lookupRequestRef.current = requestId;
+    if (!options.silent) setLookupLoading(true);
     try {
       const result = await api.lookupAccountAccess({ target: payload.target, type: payload.type, silent: Boolean(options.silent) });
+      if (requestId !== lookupRequestRef.current) return;
       setLookupResult(result);
       setLookupError("");
     } catch (error) {
+      if (requestId !== lookupRequestRef.current) return;
       setLookupResult(null);
       if (!options.silent) {
         setLookupError(error instanceof Error ? error.message : "Lookup gagal");
       }
     } finally {
-      if (!options.silent) setLoading(false);
+      if (!options.silent && requestId === lookupRequestRef.current) setLookupLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadAccounts().catch(console.error);
+    loadAccounts().catch(() => undefined);
     const unsubscribe = subscribeRealtime(() => {
-      loadAccounts().catch(console.error);
+      loadAccounts({ silent: true }).catch(() => undefined);
     });
     return () => {
       unsubscribe();
     };
   }, [loadAccounts]);
-
-  useEffect(() => {
-    if (activeSource === "netflix" && !hasNetflix && hasDisney) {
-      setActiveSource("disney");
-      setLookup("");
-      setLookupResult(null);
-      setLookupError("");
-      return;
-    }
-    if (activeSource === "disney" && !hasDisney && hasNetflix) {
-      setActiveSource("netflix");
-      setLookup("");
-      setLookupResult(null);
-      setLookupError("");
-    }
-  }, [activeSource, hasDisney, hasNetflix]);
 
   useEffect(() => {
     if (!currentTools.length) {
@@ -448,8 +401,21 @@ export default function ResellerAccountsPage() {
   }
 
   function clearResult() {
+    lookupRequestRef.current += 1;
+    setLookupLoading(false);
     setLookupResult(null);
     setLookupError("");
+  }
+
+  function changeAccessSource(source: AccessSource) {
+    lookupRequestRef.current += 1;
+    setActiveSource(source);
+    setActiveTool(source === "disney" ? "disney_otp" : "signin");
+    setLookup("");
+    setLookupResult(null);
+    setLookupError("");
+    setLookupLoading(false);
+    setCopied("");
   }
 
   function accountForTarget(target: string) {
@@ -476,7 +442,7 @@ export default function ResellerAccountsPage() {
       setLookupError(inactiveLookupMessage(selectedAccount));
       return;
     }
-    runLookup({ target, type: activeTool }).catch(console.error);
+    runLookup({ target, type: activeTool }).catch(() => undefined);
   }
 
   function renderResult() {
@@ -549,9 +515,9 @@ export default function ResellerAccountsPage() {
     : `Tersedia ${currentGroups.length} email Netflix untuk akses bantuan.`;
 
   return (
-    <DashboardLayout role="reseller" title="Account Access">
+    <DashboardLayout role="reseller" title="Akses & Kode">
       <div className="space-y-5">
-        <ResellerPageTitle title="Account Access" subtitle="Lookup kode sign-in, verification code, reset password, household, dan Disney OTP dari label Gmail owner tanpa buka email owner." />
+        <ResellerPageTitle title="Akses & Kode" subtitle="Ambil kode masuk, kode verifikasi, reset password, household, dan OTP Disney dari label Gmail owner tanpa membuka email owner." />
 
         <div className="grid gap-4 md:grid-cols-3">
           <ResellerStatCard label={currentLookupLabel} value={activeCount} icon={activeSource === "disney" ? "ri-smartphone-line" : "ri-mail-check-line"} tone="emerald" hint="Masih bisa dipakai untuk lookup" />
@@ -563,22 +529,14 @@ export default function ResellerAccountsPage() {
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => {
-                setActiveSource("netflix");
-                setLookup("");
-                clearResult();
-              }}
+              onClick={() => changeAccessSource("netflix")}
               className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${activeSource === "netflix" ? "bg-slate-950 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
             >
               Netflix
             </button>
             <button
               type="button"
-              onClick={() => {
-                setActiveSource("disney");
-                setLookup("");
-                clearResult();
-              }}
+              onClick={() => changeAccessSource("disney")}
               className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${activeSource === "disney" ? "bg-slate-950 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
             >
               Disney
@@ -602,7 +560,7 @@ export default function ResellerAccountsPage() {
           </div>
         </div>
 
-        <div className="sticky top-16 z-30 isolate -mx-4 border-b border-white/60 bg-[#f2ece2] px-4 py-3 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.45)] md:-mx-6 md:px-6">
+        <div className="sticky top-16 z-30 isolate -mx-4 border-b border-white/10 bg-[#070708] px-4 py-3 md:-mx-6 md:px-6">
           <div className="space-y-3 rounded-xl border border-slate-100 bg-white p-4 shadow-sm shadow-slate-950/5">
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
               {currentTools.map((tool) => (
@@ -647,17 +605,30 @@ export default function ResellerAccountsPage() {
               </label>
               <button
                 type="submit"
-                disabled={loading || lookupDisabled}
+                disabled={lookupLoading || lookupDisabled}
                 className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-red-600 px-6 text-xs font-semibold text-white hover:bg-red-700 disabled:cursor-wait disabled:bg-red-300"
               >
-                <i className={loading ? "ri-loader-4-line animate-spin" : "ri-search-line"} />
-                {loading ? "Mencari..." : "Cari Akun"}
+                <i className={lookupLoading ? "ri-loader-4-line animate-spin" : "ri-search-line"} />
+                {lookupLoading ? "Mencari..." : "Cari Akun"}
               </button>
             </form>
           </div>
         </div>
 
-        {!!currentGroups.length ? (
+        {accountsState === "loading" ? (
+          <div className="rounded-xl border border-white/10 bg-[#111216] px-4 py-8 text-center text-sm text-slate-300">
+            <i className="ri-loader-4-line mr-2 animate-spin" /> Memuat akun {activeSource === "disney" ? "Disney" : "Netflix"}...
+          </div>
+        ) : null}
+
+        {accountsState === "error" ? (
+          <div className="flex flex-col gap-3 rounded-xl border border-red-400/25 bg-red-400/10 p-4 text-sm text-red-100 sm:flex-row sm:items-center sm:justify-between">
+            <span>{accountsError}</span>
+            <button type="button" onClick={() => loadAccounts()} className="h-10 rounded-lg border border-red-300/25 px-4 font-semibold">Coba Lagi</button>
+          </div>
+        ) : null}
+
+        {accountsState === "success" && currentGroups.length ? (
           <div className="rounded-xl border border-slate-100 bg-white px-4 py-3 text-xs text-slate-500 shadow-sm shadow-slate-950/5">
             {sourceRefreshText} Refresh terakhir <span className="font-semibold text-slate-900">{lastRefresh || "-"}</span>.
           </div>
@@ -701,7 +672,7 @@ export default function ResellerAccountsPage() {
                 <i className="ri-arrow-right-s-line text-slate-300" />
               </button>
             ))}
-            {!currentGroups.length ? (
+            {accountsState === "success" && !currentGroups.length ? (
               <div className="py-10 text-center text-sm text-slate-500">
                 Belum ada {activeSource === "disney" ? "nomor Disney" : "email Netflix"} yang bisa diakses.
               </div>

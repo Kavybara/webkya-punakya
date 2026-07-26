@@ -104,9 +104,6 @@ const DASHBOARD_MENU_CATEGORIES = {
   "auto order": ["buynow", "stock", "balance"],
 };
 const API_PLUGIN_PATTERN = /api-autoresbot/i;
-const GROUP_ADMIN_CACHE_TTL_MS = 5 * 60 * 1000;
-const groupAdminCache = new Map();
-
 function cleanText(value = "") {
   return String(value || "").trim();
 }
@@ -423,29 +420,26 @@ function ownerOnly(context) {
 }
 
 async function groupAdminOnly(context) {
-  if (context.isOwner || context.isGroupAdmin) return false;
-  if (context.isGroup && context.groupAdminChecked === false && typeof context.services?.getGroupParticipantInfo === "function") {
-    const participantKey = normalizeWhatsAppNumber(context.sender_jid || context.raw_sender_jid || context.sender);
-    const cacheKey = `${context.chat_jid}:${participantKey}`;
-    const cached = groupAdminCache.get(cacheKey);
-    const info =
-      cached && Date.now() - cached.loadedAt < GROUP_ADMIN_CACHE_TTL_MS
-        ? cached.info
-        : await context.services.getGroupParticipantInfo(context.chat_jid, context.sender_jid || context.raw_sender_jid || context.sender).catch(() => null);
-    if (!cached && info?.checked) {
-      groupAdminCache.set(cacheKey, { loadedAt: Date.now(), info });
-    }
-    context.groupAdminChecked = Boolean(info?.checked);
-    context.isGroupAdmin = Boolean(info?.is_admin || info?.is_super_admin);
-    if (context.isGroupAdmin) return false;
+  const getParticipantInfo = context.services?.getGroupParticipantInfo;
+  if (!context.isGroup || typeof getParticipantInfo !== "function") {
+    logWarning(`Admin grup belum bisa diverifikasi untuk ${context.command}; command list diblokir.`);
+    context.reply("Status admin grup belum bisa diverifikasi. Coba lagi setelah bot selesai sinkron grup.");
+    return true;
   }
-  if (context.isGroup && context.groupAdminChecked === false) {
+
+  const participantJid = context.sender_jid || context.raw_sender_jid || context.sender;
+  const info = await getParticipantInfo(context.chat_jid, participantJid).catch(() => null);
+  context.groupAdminChecked = Boolean(info?.checked);
+  context.isGroupAdmin = Boolean(info?.checked && (info?.is_admin || info?.is_super_admin));
+
+  if (context.isGroupAdmin) return false;
+  if (!context.groupAdminChecked) {
     logWarning(`Admin grup belum bisa diverifikasi untuk ${context.command}; command list diblokir.`);
     context.reply("Status admin grup belum bisa diverifikasi. Coba lagi setelah bot selesai sinkron grup.");
     return true;
   }
   logWarning(`Command admin grup ditolak: ${context.command || "unknown"} dari ${context.pushName || context.sender || "unknown"}`);
-  context.reply("⚠️ _Perintah ini Hanya Untuk Admin_");
+  context.reply("Perintah ini hanya dapat digunakan oleh admin atau owner grup.");
   return true;
 }
 

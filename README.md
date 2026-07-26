@@ -1,6 +1,6 @@
 # Kavya Auto Order
 
-Kavya berisi dashboard owner/reseller, auto order WhatsApp, QRIS Pakasir, sewa grup, stok akun, dan launcher Linux/Pterodactyl.
+Kavya berisi dashboard owner/reseller, auto order WhatsApp, QRIS Pakasir, sewa grup, stok akun, dan launcher VPS/Linux.
 
 ## Struktur
 
@@ -32,12 +32,12 @@ npm run whatsapp:install
 npm run dashboard:install
 npm run whatsapp:check
 npm run web:typecheck
-npm run ptero:build
-npm run ptero:start
+npm run app:build
+npm run app:start
 ```
 
 Panduan deploy ada di:
 
 ```text
-docs/PTERODACTYL.md
+docs/DEPLOYMENT.md
 ```

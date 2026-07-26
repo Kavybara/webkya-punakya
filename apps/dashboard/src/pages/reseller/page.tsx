@@ -194,18 +194,13 @@ export default function ResellerOverviewPage() {
   const toolsSectionRef = useRef<HTMLElement | null>(null);
 
   async function loadData() {
-    const [orderRows, accountRows, activityRows, resellerRows, depositInstructionRows] = await Promise.all([
-      api.orders(),
-      api.accounts({ view: "overview" }),
-      api.activities(),
-      api.resellers(),
-      api.resellerDepositInstructions(),
+    await Promise.all([
+      api.orders().then(setOrders),
+      api.accounts({ view: "overview" }).then(setAccounts),
+      api.activities().then(setActivities),
+      api.resellers().then((rows) => setReseller(rows[0] || null)),
+      api.resellerDepositInstructions().then(setDepositInstructions),
     ]);
-    setOrders(orderRows);
-    setAccounts(accountRows);
-    setActivities(activityRows);
-    setReseller(resellerRows[0] || null);
-    setDepositInstructions(depositInstructionRows);
   }
 
   async function submitDepositRequest() {
@@ -345,7 +340,7 @@ export default function ResellerOverviewPage() {
   const todayOrders = orders.filter((order) => String(order.createdAt || "").startsWith(today));
   const activeAccounts = accounts.filter(accountActive);
   const inactiveAccounts = accounts.filter((account) => !accountActive(account));
-  const expiringAccounts = accounts.filter((account) => accountStatus(account) === "Expiring");
+  const expiringAccounts = accounts.filter((account) => accountStatus(account) === "Hampir Berakhir");
   const pendingOrdersCount = orders.filter((order) => String(order.qrisStatus || "").toLowerCase() === "pending").length;
   const depositActivities = activities.filter(isDepositActivity).slice(0, 4);
   const accessActivities = activities.filter(isAccessActivity).slice(0, 6);
@@ -439,7 +434,7 @@ export default function ResellerOverviewPage() {
     });
 
     const accountActivities = accounts.slice(0, 3).map((account) => {
-      const warning = accountStatus(account) === "Expiring";
+      const warning = accountStatus(account) === "Hampir Berakhir";
       return {
         id: account.id,
         title: warning ? `Durasi akun ${account.product} tinggal ${daysLeft(account.expiresAt)} hari` : `Melihat detail akun ${productLabel(account)}`,

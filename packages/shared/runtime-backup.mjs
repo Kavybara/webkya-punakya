@@ -128,6 +128,7 @@ async function readProjectSourceBundle(rootDir) {
   ]);
   const excludeFileNames = new Set([
     "kavya-pterodactyl-linux-latest.tar.gz",
+    "kavya-vps-linux-latest.tar.gz",
   ]);
   const files = {};
   const skipped = [];
@@ -347,7 +348,7 @@ async function writeUploadableArchive({ payload, outputDir, fileName }) {
       [
         "File Backup Kavya",
         "",
-        "Upload/extract arsip ini ke root server Pterodactyl untuk restore data runtime.",
+        "Upload dan extract arsip ini ke root aplikasi pada VPS/Linux untuk memulihkan data runtime.",
         "Isi utama: full source project, file .env, database/list, sewa grup, setting grup, produk, stok, order, reseller, deposit, managed account, dan auth WhatsApp jika tersedia.",
         "Folder node_modules, tmp, backup lama, release/output besar, dan runtime test tidak ikut agar file tidak membengkak.",
         "Karena .env ikut disalin, file backup ini harus diperlakukan sebagai file rahasia.",
@@ -385,6 +386,7 @@ async function writeUploadableArchive({ payload, outputDir, fileName }) {
     if (result.status !== 0) {
       throw new Error(result.stderr?.toString()?.trim() || result.error?.message || "tar_failed");
     }
+    await fs.chmod(filePath, 0o600).catch(() => {});
   } finally {
     await fs.rm(stageDir, { recursive: true, force: true });
   }

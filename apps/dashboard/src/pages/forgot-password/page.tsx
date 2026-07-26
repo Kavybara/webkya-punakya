@@ -1,15 +1,44 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { Button } from "../../components/base/Button";
-import { Card, CardBody, CardHeader, CardTitle } from "../../components/base/Card";
-import { PageTransition } from "../../components/feature/PageTransition";
+import {
+  AuthError,
+  AuthInput,
+  AuthShell,
+  AuthStepIndicator,
+  AuthSubmitButton,
+  AuthSuccessState,
+  OtpInput,
+  PasswordInput,
+} from "../../components/auth/AuthShell";
 import { api } from "../../lib/api";
 
 type ResetStep = "request" | "verify" | "confirm" | "done";
+const RESEND_SECONDS = 60;
+const SAFE_REQUEST_MESSAGE = "Jika data cocok dengan akun Kavya, kode verifikasi akan dikirim melalui WhatsApp.";
+
+function maskResetDestination(identifier: string) {
+  const digits = identifier.replace(/\D/g, "");
+  if (digits.length < 8) return "Nomor WhatsApp terdaftar";
+  return `${digits.slice(0, 3)}${"*".repeat(Math.max(4, digits.length - 6))}${digits.slice(-3)}`;
+}
+
+function safeOtpError(error: unknown) {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  if (message.includes("terlalu") || message.includes("sering")) return "Terlalu banyak percobaan. Minta kode baru dan tunggu sebelum mencoba lagi.";
+  if (message.includes("kadaluarsa") || message.includes("kedaluwarsa")) return "Kode salah atau sudah kedaluwarsa. Periksa kode atau kirim ulang.";
+  return "Kode salah atau sudah kedaluwarsa. Periksa kode lalu coba lagi.";
+}
+
+function safeDeliveryError(error: unknown) {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  if (message.includes("terlalu") || message.includes("limit") || message.includes("tunggu")) return "Permintaan terlalu sering. Tunggu beberapa saat sebelum mencoba lagi.";
+  return "Kode belum dapat dikirim. Periksa koneksi WhatsApp lalu coba kembali.";
+}
 
 export default function ForgotPasswordPage() {
   const [step, setStep] = useState<ResetStep>("request");
   const [identifier, setIdentifier] = useState("");
+  const [identifierTouched, setIdentifierTouched] = useState(false);
   const [code, setCode] = useState("");
   const [resetToken, setResetToken] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -17,37 +46,69 @@ export default function ForgotPasswordPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [resendCountdown, setResendCountdown] = useState(0);
+  const [capsLock, setCapsLock] = useState(false);
 
-  async function submitRequest(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  const activeStep = step === "request" ? 0 : step === "verify" ? 1 : 2;
+  const identifierError = identifierTouched && !identifier.trim() ? "Email, username, atau nomor WhatsApp wajib diisi." : "";
+  const passwordsMatch = Boolean(confirmPassword) && newPassword === confirmPassword;
+
+  useEffect(() => {
+    if (resendCountdown <= 0) return;
+    const timer = window.setInterval(() => setResendCountdown((value) => Math.max(0, value - 1)), 1000);
+    return () => window.clearInterval(timer);
+  }, [resendCountdown]);
+
+  useEffect(() => {
+    const id = step === "request" ? "reset-identifier" : step === "verify" ? "reset-otp" : step === "confirm" ? "new-password" : "reset-login-link";
+    window.requestAnimationFrame(() => document.getElementById(id)?.focus());
+  }, [step]);
+
+  async function requestCode(isResend = false) {
     setError("");
-    setMessage("");
-    if (!identifier.trim()) {
-      setError("Email atau username wajib diisi.");
-      return;
-    }
     setLoading(true);
     try {
-      const result = await api.requestPasswordReset({ identifier: identifier.trim() });
-      setMessage(result.message || "Kalau akun terdaftar, OTP dikirim ke WhatsApp terdaftar.");
+      await api.requestPasswordReset({ identifier: identifier.trim() });
+      setMessage(SAFE_REQUEST_MESSAGE);
+      setResendCountdown(RESEND_SECONDS);
       setStep("verify");
+      if (isResend) setCode("");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Gagal mengirim OTP.");
+      const raw = requestError instanceof Error ? requestError.message.toLowerCase() : "";
+      if (raw.includes("tidak ditemukan") || raw.includes("akun")) {
+        setMessage(SAFE_REQUEST_MESSAGE);
+        setResendCountdown(RESEND_SECONDS);
+        setStep("verify");
+      } else {
+        setError(safeDeliveryError(requestError));
+      }
     } finally {
       setLoading(false);
     }
   }
 
+  async function submitRequest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIdentifierTouched(true);
+    if (!identifier.trim()) return;
+    await requestCode();
+  }
+
   async function submitVerify(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+    if (code.length !== 6) {
+      setError("Masukkan enam digit kode verifikasi.");
+      return;
+    }
     setLoading(true);
     try {
       const result = await api.verifyPasswordReset({ identifier: identifier.trim(), code });
       setResetToken(result.resetToken);
       setStep("confirm");
+      setError("");
     } catch (verifyError) {
-      setError(verifyError instanceof Error ? verifyError.message : "Kode OTP tidak valid.");
+      setError(safeOtpError(verifyError));
     } finally {
       setLoading(false);
     }
@@ -61,126 +122,91 @@ export default function ForgotPasswordPage() {
       return;
     }
     if (newPassword !== confirmPassword) {
-      setError("Konfirmasi password tidak sama.");
+      setError("Password belum cocok. Periksa kembali kedua kolom password.");
       return;
     }
     setLoading(true);
     try {
       await api.confirmPasswordReset({ resetToken, newPassword, confirmPassword });
       setStep("done");
-      setMessage("Password berhasil direset. Silakan login dengan password baru.");
-    } catch (confirmError) {
-      setError(confirmError instanceof Error ? confirmError.message : "Password gagal direset.");
+      setMessage("");
+    } catch {
+      setError("Password belum dapat diperbarui. Kode verifikasi mungkin sudah kedaluwarsa. Mulai ulang proses reset.");
     } finally {
       setLoading(false);
     }
   }
 
+  function changeAccount() {
+    setStep("request");
+    setCode("");
+    setResetToken("");
+    setError("");
+    setMessage("");
+    setResendCountdown(0);
+  }
+
   return (
-    <PageTransition>
-      <main className="flex min-h-screen items-center justify-center bg-[#f5efe6] px-4 py-8">
-        <Card className="w-full max-w-md border-gray-100 bg-white">
-          <CardHeader>
-            <CardTitle>Reset Password</CardTitle>
-            <p className="mt-1 text-sm leading-5 text-slate-500">
-              Kode OTP dikirim ke nomor WhatsApp yang terdaftar di akun owner atau reseller.
-            </p>
-          </CardHeader>
-          <CardBody>
-            <div className="mb-5 grid grid-cols-3 gap-2 text-center text-xs">
-              {["Akun", "OTP", "Password"].map((label, index) => {
-                const activeIndex = step === "request" ? 0 : step === "verify" ? 1 : 2;
-                return (
-                  <div key={label} className={`rounded-md px-2 py-2 font-medium ${index <= activeIndex ? "bg-red-50 text-red-600" : "bg-slate-50 text-slate-400"}`}>
-                    {label}
-                  </div>
-                );
-              })}
-            </div>
+    <AuthShell title="Atur ulang password" description="Verifikasi akunmu melalui WhatsApp untuk membuat password baru.">
+      {step !== "done" ? <AuthStepIndicator steps={["Akun", "Verifikasi", "Password Baru"]} activeStep={activeStep} /> : null}
 
-            {message ? <div className="mb-4 rounded-md border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-medium leading-5 text-emerald-700">{message}</div> : null}
-            {error ? <div className="mb-4 rounded-md border border-red-100 bg-red-50 px-3 py-2 text-xs font-medium leading-5 text-red-700">{error}</div> : null}
+      {step === "request" ? (
+        <form className="auth-form" onSubmit={submitRequest} noValidate>
+          <AuthInput
+            id="reset-identifier"
+            label="Email, username, atau nomor WhatsApp"
+            value={identifier}
+            onChange={(event) => setIdentifier(event.target.value)}
+            onBlur={() => setIdentifierTouched(true)}
+            error={identifierError}
+            placeholder="Masukkan data akun"
+            autoComplete="username"
+          />
+          {error ? <AuthError>{error}</AuthError> : null}
+          <p className="auth-notice">{SAFE_REQUEST_MESSAGE}</p>
+          <AuthSubmitButton loading={loading} loadingLabel="Mengirim kode...">Kirim Kode WhatsApp</AuthSubmitButton>
+        </form>
+      ) : null}
 
-            {step === "request" ? (
-              <form className="space-y-4" onSubmit={submitRequest}>
-                <label className="block">
-                <span className="text-sm font-medium text-slate-700">Email, Username, atau WhatsApp</span>
-                  <input
-                    value={identifier}
-                    onChange={(event) => setIdentifier(event.target.value)}
-                    className="mt-2 h-10 w-full rounded-md border border-gray-200 px-3 text-sm outline-none transition-colors focus:border-red-200"
-                    placeholder="owner@kavya.id / reseller.username / 628..."
-                  />
-                </label>
-                <Button className="w-full bg-red-500 hover:bg-red-600" disabled={loading}>
-                  {loading ? "Mengirim..." : "Kirim OTP WhatsApp"}
-                </Button>
-              </form>
-            ) : null}
+      {step === "verify" ? (
+        <form className="auth-form" onSubmit={submitVerify} noValidate>
+          <div className="auth-destination"><span>Kode dikirim ke</span><strong>{maskResetDestination(identifier)}</strong></div>
+          {message ? <p className="auth-notice is-success">{message}</p> : null}
+          <OtpInput id="reset-otp" label="Kode verifikasi 6 digit" value={code} onChange={(value) => { setCode(value); setError(""); }} error={error} disabled={loading} />
+          <div className="auth-resend">
+            <span>Kode berlaku sesuai waktu yang ditentukan sistem.</span>
+            <button type="button" disabled={loading || resendCountdown > 0} onClick={() => void requestCode(true)}>
+              {resendCountdown > 0 ? `Kirim ulang (${resendCountdown}s)` : "Kirim Ulang"}
+            </button>
+          </div>
+          <div className="auth-form-actions">
+            <button type="button" className="auth-button is-secondary" onClick={changeAccount}>Ubah Akun</button>
+            <AuthSubmitButton loading={loading} loadingLabel="Memverifikasi..." disabled={code.length !== 6}>Verifikasi Kode</AuthSubmitButton>
+          </div>
+        </form>
+      ) : null}
 
-            {step === "verify" ? (
-              <form className="space-y-4" onSubmit={submitVerify}>
-                <label className="block">
-                  <span className="text-sm font-medium text-slate-700">Kode OTP 6 Digit</span>
-                  <input
-                    value={code}
-                    onChange={(event) => setCode(event.target.value.replace(/[^\d]/g, "").slice(0, 6))}
-                    className="mt-2 h-11 w-full rounded-md border border-gray-200 px-3 text-center font-mono text-lg tracking-[0.3em] outline-none transition-colors focus:border-red-200"
-                    placeholder="000000"
-                    inputMode="numeric"
-                  />
-                </label>
-                <div className="flex gap-2">
-                  <Button type="button" variant="outline" className="flex-1" onClick={() => setStep("request")}>
-                    Ubah Akun
-                  </Button>
-                  <Button className="flex-1 bg-red-500 hover:bg-red-600" disabled={loading || code.length !== 6}>
-                    Verifikasi
-                  </Button>
-                </div>
-              </form>
-            ) : null}
+      {step === "confirm" ? (
+        <form className="auth-form" onSubmit={submitConfirm} noValidate>
+          <PasswordInput id="new-password" label="Password baru" value={newPassword} onChange={(event) => { setNewPassword(event.target.value); setError(""); }} autoComplete="new-password" placeholder="Minimal 8 karakter" onCapsLockChange={setCapsLock} />
+          <PasswordInput id="confirm-password" label="Ulangi password baru" value={confirmPassword} onChange={(event) => { setConfirmPassword(event.target.value); setError(""); }} autoComplete="new-password" placeholder="Ketik ulang password" onCapsLockChange={setCapsLock} />
+          <div className="auth-requirements"><span className={newPassword.length >= 8 ? "is-valid" : ""}>Minimal 8 karakter</span><span className={passwordsMatch ? "is-valid" : ""}>Kedua password sama</span></div>
+          {confirmPassword ? <p className={`auth-match ${passwordsMatch ? "is-match" : "is-mismatch"}`}>{passwordsMatch ? "Password cocok" : "Password belum cocok"}</p> : null}
+          {capsLock ? <p className="auth-caps" role="status">Caps Lock sedang aktif.</p> : null}
+          {error ? <AuthError>{error}</AuthError> : null}
+          <AuthSubmitButton loading={loading} loadingLabel="Menyimpan...">Simpan Password Baru</AuthSubmitButton>
+        </form>
+      ) : null}
 
-            {step === "confirm" ? (
-              <form className="space-y-4" onSubmit={submitConfirm}>
-                <label className="block">
-                  <span className="text-sm font-medium text-slate-700">Password Baru</span>
-                  <input
-                    value={newPassword}
-                    onChange={(event) => setNewPassword(event.target.value)}
-                    type="password"
-                    className="mt-2 h-10 w-full rounded-md border border-gray-200 px-3 text-sm outline-none transition-colors focus:border-red-200"
-                    placeholder="Minimal 8 karakter"
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-sm font-medium text-slate-700">Konfirmasi Password</span>
-                  <input
-                    value={confirmPassword}
-                    onChange={(event) => setConfirmPassword(event.target.value)}
-                    type="password"
-                    className="mt-2 h-10 w-full rounded-md border border-gray-200 px-3 text-sm outline-none transition-colors focus:border-red-200"
-                    placeholder="Ulangi password baru"
-                  />
-                </label>
-                <Button className="w-full bg-red-500 hover:bg-red-600" disabled={loading}>
-                  {loading ? "Menyimpan..." : "Simpan Password Baru"}
-                </Button>
-              </form>
-            ) : null}
+      {step === "done" ? (
+        <AuthSuccessState
+          title="Password berhasil diperbarui"
+          description="Kamu sekarang dapat masuk menggunakan password baru."
+          action={<Link id="reset-login-link" to="/login" className="auth-button">Kembali ke Login</Link>}
+        />
+      ) : null}
 
-            {step === "done" ? (
-              <div className="rounded-md border border-emerald-100 bg-emerald-50 p-4 text-sm font-medium text-emerald-700">
-                Password berhasil direset.
-              </div>
-            ) : null}
-
-            <Link to="/login" className="mt-5 block text-center text-sm font-medium text-red-600">
-              Kembali login
-            </Link>
-          </CardBody>
-        </Card>
-      </main>
-    </PageTransition>
+      {step !== "done" ? <p className="auth-footer-copy"><Link to="/login">Kembali ke Login</Link></p> : null}
+    </AuthShell>
   );
 }

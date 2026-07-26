@@ -10,6 +10,9 @@ const dbEvents = new EventEmitter();
 dbEvents.setMaxListeners(100);
 let dbVersion = 0;
 let mutationQueue = Promise.resolve();
+let cachedDb = null;
+let cachedMtimeMs = -1;
+let loadInFlight = null;
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -69,12 +72,17 @@ async function renameWithRetry(source, target) {
 
 async function writeJsonFileAtomic(filePath, value) {
   const directory = path.dirname(filePath);
-  await fs.mkdir(directory, { recursive: true });
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   const tempPath = path.join(directory, `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`);
   const payload = JSON.stringify(value, null, 2);
   try {
-    await fs.writeFile(tempPath, payload);
+    await fs.writeFile(tempPath, payload, { mode: 0o600 });
     await renameWithRetry(tempPath, filePath);
+    await fs.chmod(filePath, 0o600).catch(() => undefined);
+    if (filePath === databasePath) {
+      cachedDb = clone(value);
+      cachedMtimeMs = (await fs.stat(filePath)).mtimeMs;
+    }
   } catch (error) {
     await fs.rm(tempPath, { force: true }).catch(() => undefined);
     throw error;
@@ -83,13 +91,27 @@ async function writeJsonFileAtomic(filePath, value) {
 
 async function loadDbUnlocked(options = {}) {
   const persistMissing = Boolean(options.persistMissing);
-  await fs.mkdir(path.dirname(databasePath), { recursive: true });
+  if (persistMissing) {
+    await fs.mkdir(path.dirname(databasePath), { recursive: true });
+  }
   try {
-    const db = await readJsonFile(databasePath);
-    if (mergeMissing(db, defaultData) && persistMissing) {
-      await writeJsonFileAtomic(databasePath, db);
+    const stat = await fs.stat(databasePath);
+    if (cachedDb && cachedMtimeMs === stat.mtimeMs) return clone(cachedDb);
+    if (!loadInFlight) {
+      loadInFlight = (async () => {
+        const db = await readJsonFile(databasePath);
+        if (mergeMissing(db, defaultData) && persistMissing) {
+          await writeJsonFileAtomic(databasePath, db);
+        } else {
+          cachedDb = clone(db);
+          cachedMtimeMs = stat.mtimeMs;
+        }
+        return db;
+      })().finally(() => {
+        loadInFlight = null;
+      });
     }
-    return db;
+    return clone(await loadInFlight);
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
     const db = clone(defaultData);
@@ -101,10 +123,17 @@ async function loadDbUnlocked(options = {}) {
 export async function ensureDb() {
   await mutationQueue;
   await loadDbUnlocked({ persistMissing: true });
+  await fs.chmod(path.dirname(databasePath), 0o700).catch(() => undefined);
+  await fs.chmod(databasePath, 0o600).catch(() => undefined);
 }
 
 export async function readDb() {
   return loadDbUnlocked();
+}
+
+export async function readDbSnapshot() {
+  const db = await loadDbUnlocked();
+  return clone(db);
 }
 
 export function getDbVersion() {

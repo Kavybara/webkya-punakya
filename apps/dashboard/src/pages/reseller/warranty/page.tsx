@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { DashboardLayout } from "../../../components/feature/DashboardLayout";
 import { api, subscribeRealtime } from "../../../lib/api";
 import type { ManagedAccount } from "../../../mocks/data";
@@ -45,30 +52,21 @@ function accountSearchText(account: ManagedAccount) {
 }
 
 function isCanvaAccount(account: ManagedAccount) {
-  return accountSearchText(account).includes("canva") || Boolean(account.canvaLink);
+  return (
+    accountSearchText(account).includes("canva") || Boolean(account.canvaLink)
+  );
 }
 
 function isLinkPoolAccount(account: ManagedAccount) {
   const text = accountSearchText(account);
   return (
-    isCanvaAccount(account)
-    || account.accountType === "link_pool"
-    || account.sheetPoolSchema === "link"
-    || text.includes("ms365")
-    || text.includes("microsoft 365")
-    || text.includes("office 365")
-    || /^https?:\/\//i.test(String(account.password || ""))
+    isCanvaAccount(account) ||
+    account.accountType === "link_pool" ||
+    account.sheetPoolSchema === "link" ||
+    text.includes("ms365") ||
+    text.includes("microsoft 365") ||
+    text.includes("office 365")
   );
-}
-
-function accountUsesProfileFields(account: ManagedAccount) {
-  const text = accountSearchText(account);
-  return Boolean(account.profile || account.pin || account.sheetPoolSchema === "profile" || text.includes("netflix") || text.includes("hbo"));
-}
-
-function accountUsesDeviceField(account: ManagedAccount) {
-  const text = accountSearchText(account);
-  return Boolean(account.device || account.sheetPoolSchema === "profile" || text.includes("netflix") || text.includes("hbo"));
 }
 
 function accountIdentityLabel(account: ManagedAccount) {
@@ -80,21 +78,18 @@ function accountIdentityLabel(account: ManagedAccount) {
 }
 
 function accountIdentityValue(account: ManagedAccount) {
-  return accountIdentityLabel(account) === "Nomor Login" ? (account.loginPhone || account.email || "-") : (account.email || "-");
-}
-
-function accountSecretLabel(account: ManagedAccount) {
-  if (isCanvaAccount(account)) return "Link Canva";
-  if (isLinkPoolAccount(account)) return "Link";
-  return /^https?:\/\//i.test(String(account.password || "")) ? "Password / Link" : "Password";
-}
-
-function accountSecretValue(account: ManagedAccount) {
-  return account.canvaLink || account.password || "-";
+  return accountIdentityLabel(account) === "Nomor Login"
+    ? account.loginPhone || account.email || "-"
+    : account.email || "-";
 }
 
 function isClaimableAccount(account: ManagedAccount) {
-  if (["replaced", "disabled"].includes(String(account.status || "").toLowerCase())) return false;
+  if (
+    ["replaced", "disabled"].includes(
+      String(account.status || "").toLowerCase(),
+    )
+  )
+    return false;
   return accountWarrantyStatus(account) !== "expired";
 }
 
@@ -115,47 +110,16 @@ function displayDate(value = "") {
 function warrantyStatusLabel(account?: ManagedAccount) {
   if (!account) return "-";
   const remaining = daysLeft(account.expiresAt);
-  if (account.status === "expired" || remaining <= 0) return "EXPIRED";
-  if (remaining <= 5) return `EXPIRING - sisa ${remainingShort(account)}`;
+  if (account.status === "expired" || remaining <= 0) return "KEDALUWARSA";
+  if (remaining <= 5)
+    return `HAMPIR BERAKHIR - sisa ${remainingShort(account)}`;
   return `AKTIF - sisa ${remainingShort(account)}`;
 }
 
-function buildWarrantyWhatsAppTextLegacy(account: ManagedAccount, description: string) {
-  const profilePin = [account.profile || "", account.pin ? `PIN ${account.pin}` : ""].filter(Boolean).join(" / ") || "-";
-  return [
-    "IKY ✦ FORM KLAIM GARANSI ──",
-    "",
-    "Apabila terdapat kendala pada akun, sertakan screenshot masalah.",
-    "",
-    "──────────",
-    `⊳ aplikasi : ${productLabel(account) || "-"}`,
-    `⊳ ${accountIdentityLabel(account).toLowerCase()} : ${accountIdentityValue(account)}`,
-    `⊳ password : ${account.password || "-"}`,
-    `⊳ profil + pin : ${profilePin}`,
-    `⊳ reseller : ${account.reseller || account.buyer || "-"}`,
-    `⊳ nomor WA : ${account.whatsapp || "-"}`,
-    `⊳ tanggal pembelian : ${displayDate(account.startedAt)}`,
-    `⊳ durasi pembelian : ${durationLabel(account)}`,
-    `⊳ durasi sisa : ${remainingShort(account)}`,
-    `⊳ status durasi : ${warrantyStatusLabel(account)}`,
-    "──────────",
-    "",
-    "⊳ permasalahan :",
-    description.trim(),
-    "",
-    "──────────",
-    "NOTE !",
-    "• Kirim screenshot/foto kendala bersama form ini.",
-    "• Klaim tanpa data akun yang jelas bisa lebih lama diproses.",
-    "• Estimasi pengecekan garansi 0-3 hari, jika ramai 3-7 hari.",
-    "",
-    "──────────",
-    "IKY ✦ Warranty Service",
-    "Secure • Reliable • Trusted",
-  ].join("\n");
-}
-
-function buildWarrantyWhatsAppText(account: ManagedAccount, description: string) {
+function buildWarrantyWhatsAppText(
+  account: ManagedAccount,
+  description: string,
+) {
   const lines = [
     "IKY - FORM KLAIM GARANSI",
     "",
@@ -163,28 +127,17 @@ function buildWarrantyWhatsAppText(account: ManagedAccount, description: string)
     "",
     "----------",
     `> aplikasi : ${productLabel(account) || "-"}`,
-    `> ${accountIdentityLabel(account).toLowerCase()} : ${accountIdentityValue(account)}`,
-    `> ${accountSecretLabel(account).toLowerCase()} : ${accountSecretValue(account)}`,
+    `> nomor pesanan : ${account.orderId || account.sourceOrderId || "-"}`,
+    `> profil : ${account.profile || "-"}`,
+    `> tanggal pembelian : ${displayDate(account.startedAt)}`,
+    `> masa garansi : ${durationLabel(account)} / sisa ${remainingShort(account)}`,
+    `> status : ${warrantyStatusLabel(account)}`,
   ];
 
-  if (accountUsesProfileFields(account)) {
-    const profilePin = [account.profile || "", account.pin ? `PIN ${account.pin}` : ""].filter(Boolean).join(" / ") || "-";
-    lines.push(`> profil + pin : ${profilePin}`);
-  }
-  if (accountUsesDeviceField(account)) {
-    lines.push(`> device : ${account.device || "-"}`);
-  }
-
   lines.push(
-    `> reseller : ${account.reseller || account.buyer || "-"}`,
-    `> nomor WA : ${account.whatsapp || "-"}`,
-    `> tanggal pembelian : ${displayDate(account.startedAt)}`,
-    `> durasi pembelian : ${durationLabel(account)}`,
-    `> durasi sisa : ${remainingShort(account)}`,
-    `> status durasi : ${warrantyStatusLabel(account)}`,
     "----------",
     "",
-    "> permasalahan :",
+    "> kendala :",
     description.trim(),
     "",
     "----------",
@@ -211,6 +164,7 @@ export default function ResellerWarrantyPage() {
   const [description, setDescription] = useState("");
   const [warrantyNumber, setWarrantyNumber] = useState(fallbackWarrantyNumber);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [error, setError] = useState("");
   const [sent, setSent] = useState(false);
   const loadSeq = useRef(0);
@@ -221,43 +175,50 @@ export default function ResellerWarrantyPage() {
     loadSeq.current = seq;
     if (!options.silent) {
       setLoading(true);
-      setError("");
+      setLoadError("");
     }
 
-    let lastError: unknown;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         const [accountRows, health] = await Promise.all([
-          api.accounts(),
+          api.accounts({ view: "light" }),
           api.health().catch(() => null),
         ]);
         if (!mounted.current || seq !== loadSeq.current) return;
         const claimable = accountRows.filter(isClaimableAccount);
         setAccounts(claimable);
-        setWarrantyNumber(cleanWhatsapp(health?.warrantyWhatsAppNumber || fallbackWarrantyNumber));
-        setSelectedId((current) => (current && claimable.some((account) => account.id === current) ? current : claimable[0]?.id || ""));
+        setWarrantyNumber(
+          cleanWhatsapp(
+            health?.warrantyWhatsAppNumber || fallbackWarrantyNumber,
+          ),
+        );
+        setSelectedId((current) =>
+          current && claimable.some((account) => account.id === current)
+            ? current
+            : claimable[0]?.id || "",
+        );
         setError("");
+        setLoadError("");
         setLoading(false);
         return;
-      } catch (loadError) {
-        lastError = loadError;
+      } catch {
         if (attempt < 2) await wait(350 * (attempt + 1));
       }
     }
 
     if (!mounted.current || seq !== loadSeq.current) return;
-    setError(lastError instanceof Error ? lastError.message : "Gagal memuat akun garansi.");
+    setLoadError("Akun garansi belum dapat dimuat. Periksa koneksi lalu coba lagi.");
     setLoading(false);
   }, []);
 
   useEffect(() => {
     mounted.current = true;
-    loadData().catch(console.error);
+    loadData().catch(() => undefined);
     const unsubscribe = subscribeRealtime(() => {
-      loadData({ silent: true }).catch(console.error);
+      loadData({ silent: true }).catch(() => undefined);
     });
     const refresh = () => {
-      loadData({ silent: true }).catch(console.error);
+      loadData({ silent: true }).catch(() => undefined);
     };
     window.addEventListener("focus", refresh);
     window.addEventListener("pageshow", refresh);
@@ -276,31 +237,49 @@ export default function ResellerWarrantyPage() {
     [accounts, selectedId],
   );
   const selectedStatus = selectedAccount ? accountStatus(selectedAccount) : "-";
-  const selectedStatusClass = selectedAccount ? accountStatusClass(selectedAccount) : "bg-slate-100 text-slate-600";
-  const selectedWarrantyStatus = selectedAccount ? accountWarrantyStatus(selectedAccount) : "";
+  const selectedStatusClass = selectedAccount
+    ? accountStatusClass(selectedAccount)
+    : "bg-slate-100 text-slate-600";
+  const selectedWarrantyStatus = selectedAccount
+    ? accountWarrantyStatus(selectedAccount)
+    : "";
   const selectedExpired = selectedWarrantyStatus === "expired";
-  const isExpiring = selectedAccount ? daysLeft(selectedAccount.expiresAt) > 0 && daysLeft(selectedAccount.expiresAt) <= 5 : false;
-  const activeWarrantyCount = useMemo(() => accounts.filter((account) => accountWarrantyStatus(account) === "active").length, [accounts]);
-  const expiringWarrantyCount = useMemo(() => accounts.filter((account) => accountWarrantyStatus(account) === "expiring").length, [accounts]);
+  const isExpiring = selectedAccount
+    ? daysLeft(selectedAccount.expiresAt) > 0 &&
+      daysLeft(selectedAccount.expiresAt) <= 5
+    : false;
+  const activeWarrantyCount = useMemo(
+    () =>
+      accounts.filter((account) => accountWarrantyStatus(account) === "active")
+        .length,
+    [accounts],
+  );
+  const expiringWarrantyCount = useMemo(
+    () =>
+      accounts.filter(
+        (account) => accountWarrantyStatus(account) === "expiring",
+      ).length,
+    [accounts],
+  );
   const selectedDetailFields = useMemo(() => {
     if (!selectedAccount) return [];
     const fields = [
-      { label: accountIdentityLabel(selectedAccount), value: accountIdentityValue(selectedAccount) },
-      { label: accountSecretLabel(selectedAccount), value: accountSecretValue(selectedAccount) },
+      { label: "Produk", value: productLabel(selectedAccount) || "-" },
+      {
+        label: "Nomor Pesanan",
+        value: selectedAccount.orderId || selectedAccount.sourceOrderId || "-",
+      },
+      { label: "Profil", value: selectedAccount.profile || "-" },
+      {
+        label: "Tanggal Pembelian",
+        value: displayDate(selectedAccount.startedAt),
+      },
+      {
+        label: "Masa Garansi",
+        value: `${durationLabel(selectedAccount)} / ${remainingShort(selectedAccount)}`,
+      },
+      { label: "Status", value: warrantyStatusLabel(selectedAccount) },
     ];
-    if (accountUsesProfileFields(selectedAccount)) {
-      fields.push({ label: "Profil", value: selectedAccount.profile || "-" });
-      fields.push({ label: "PIN", value: selectedAccount.pin || "-" });
-    }
-    if (accountUsesDeviceField(selectedAccount)) {
-      fields.push({ label: "Device", value: selectedAccount.device || "-" });
-    }
-    fields.push(
-      { label: "Reseller", value: selectedAccount.reseller || selectedAccount.buyer || "-" },
-      { label: "Nomor WA", value: selectedAccount.whatsapp || "-" },
-      { label: "Tanggal Beli", value: displayDate(selectedAccount.startedAt) },
-      { label: "Durasi / Sisa", value: `${durationLabel(selectedAccount)} / ${remainingShort(selectedAccount)}` },
-    );
     return fields;
   }, [selectedAccount]);
 
@@ -313,16 +292,22 @@ export default function ResellerWarrantyPage() {
       return;
     }
     if (accountWarrantyStatus(selectedAccount) === "expired") {
-      setError("Akun ini sudah expired, klaim garansi tidak bisa dikirim. Hubungi admin kalau tetap perlu pengecekan manual.");
+      setError(
+        "Akun ini sudah kedaluwarsa, klaim garansi tidak bisa dikirim. Hubungi admin bila tetap memerlukan pengecekan manual.",
+      );
       return;
     }
     if (!description.trim()) {
-      setError("Permasalahan wajib diisi.");
+      setError("Kendala wajib diisi.");
       return;
     }
 
     const message = buildWarrantyWhatsAppText(selectedAccount, description);
-    window.open(`https://wa.me/${warrantyNumber}?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
+    window.open(
+      `https://wa.me/${warrantyNumber}?text=${encodeURIComponent(message)}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
     setError("");
     setSent(true);
   }
@@ -330,21 +315,62 @@ export default function ResellerWarrantyPage() {
   return (
     <DashboardLayout role="reseller" title="Garansi">
       <div className="space-y-5">
-        <ResellerPageTitle title="Garansi" subtitle="Pilih akun, isi kendala, lalu kirim form klaim ke WhatsApp admin." />
+        <ResellerPageTitle
+          title="Garansi"
+          subtitle="Pilih akun, isi kendala, lalu kirim form klaim ke WhatsApp admin."
+        />
 
         <div className="grid gap-4 md:grid-cols-3">
-          <ResellerStatCard label="Akun Bisa Klaim" value={accounts.length} icon="ri-shield-check-line" tone="blue" hint="Akun aktif yang masih masuk alur garansi" />
-          <ResellerStatCard label="Perlu Dicek Dulu" value={expiringWarrantyCount} icon="ri-time-line" tone="amber" hint="Akun yang masa aktifnya hampir habis" />
-          <ResellerStatCard label="Masih Aman" value={activeWarrantyCount} icon="ri-checkbox-circle-line" tone="emerald" hint="Akun dengan masa aktif yang masih panjang" />
+          <ResellerStatCard
+            label="Akun Bisa Klaim"
+            value={loading ? "-" : accounts.length}
+            icon="ri-shield-check-line"
+            tone="blue"
+            hint="Akun aktif yang masih masuk alur garansi"
+          />
+          <ResellerStatCard
+            label="Perlu Dicek Dulu"
+            value={loading ? "-" : expiringWarrantyCount}
+            icon="ri-time-line"
+            tone="amber"
+            hint="Akun yang masa aktifnya hampir habis"
+          />
+          <ResellerStatCard
+            label="Masih Aman"
+            value={loading ? "-" : activeWarrantyCount}
+            icon="ri-checkbox-circle-line"
+            tone="emerald"
+            hint="Akun dengan masa aktif yang masih panjang"
+          />
         </div>
 
-        {selectedAccount ? (
-          <div className="rounded-xl border border-slate-100 bg-white px-4 py-3 text-xs text-slate-500 shadow-sm shadow-slate-950/5">
-            Klaim aktif akan dikirim untuk <span className="font-semibold text-slate-900">{productLabel(selectedAccount) || selectedAccount.email || "-"}</span> dengan status <span className="font-semibold text-slate-900">{warrantyStatusLabel(selectedAccount)}</span>.
+        {loading ? (
+          <div className="rounded-xl border border-white/10 bg-[#111216] px-4 py-8 text-center text-sm text-slate-300">
+            <i className="ri-loader-4-line mr-2 animate-spin" /> Memuat akun garansi...
+          </div>
+        ) : null}
+        {loadError ? (
+          <div className="flex flex-col gap-3 rounded-xl border border-red-400/25 bg-red-400/10 p-4 text-sm text-red-100 sm:flex-row sm:items-center sm:justify-between">
+            <span>{loadError}</span>
+            <button type="button" onClick={() => loadData()} className="h-10 rounded-lg border border-red-300/25 px-4 font-semibold">Coba Lagi</button>
           </div>
         ) : null}
 
-        <section className="rounded-xl border border-slate-100 bg-white">
+        {selectedAccount ? (
+          <div className="rounded-xl border border-slate-100 bg-white px-4 py-3 text-xs text-slate-500 shadow-sm shadow-slate-950/5">
+            Klaim aktif akan dikirim untuk{" "}
+            <span className="font-semibold text-slate-900">
+              {productLabel(selectedAccount) || selectedAccount.email || "-"}
+            </span>{" "}
+            dengan status{" "}
+            <span className="font-semibold text-slate-900">
+              {warrantyStatusLabel(selectedAccount)}
+            </span>
+            .
+          </div>
+        ) : null}
+
+        {!loadError ? <section className="rounded-xl border border-slate-100 bg-white">
           <form onSubmit={submitClaim}>
             <div className="flex flex-col gap-4 border-b border-slate-100 p-5 lg:flex-row lg:items-start lg:justify-between">
               <div className="flex gap-3">
@@ -352,12 +378,19 @@ export default function ResellerWarrantyPage() {
                   <i className="ri-shield-check-line text-lg" />
                 </span>
                 <div>
-                  <h2 className="text-base font-bold text-slate-950">Form Klaim Garansi Otomatis</h2>
-                  <p className="mt-1 text-xs text-slate-500">Data akun diambil otomatis dari akun reseller yang dipilih.</p>
+                  <h2 className="text-base font-bold text-slate-950">
+                    Form Klaim Garansi Otomatis
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Data akun diambil otomatis dari akun reseller yang dipilih.
+                  </p>
                 </div>
               </div>
               <div className="text-xs text-slate-500">
-                Admin garansi: <span className="font-semibold text-slate-900">+{warrantyNumber}</span>
+                Admin garansi:{" "}
+                <span className="font-semibold text-slate-900">
+                  +{warrantyNumber}
+                </span>
               </div>
             </div>
 
@@ -368,9 +401,13 @@ export default function ResellerWarrantyPage() {
                     <i className="ri-alert-line" />
                   </span>
                   <div>
-                    <p className="text-sm font-semibold text-amber-900">Screenshot bukti tetap dikirim di WhatsApp</p>
+                    <p className="text-sm font-semibold text-amber-900">
+                      Screenshot bukti tetap dikirim di WhatsApp
+                    </p>
                     <p className="mt-1 text-xs leading-5 text-amber-700">
-                      Sistem mengisi data akun otomatis. Reseller hanya perlu menjelaskan kendala dan mengirim screenshot/foto bukti bersama pesan WhatsApp.
+                      Sistem mengisi data akun otomatis. Reseller hanya perlu
+                      menjelaskan kendala dan mengirim screenshot/foto bukti
+                      bersama pesan WhatsApp.
                     </p>
                   </div>
                 </div>
@@ -378,17 +415,21 @@ export default function ResellerWarrantyPage() {
 
               {isExpiring ? (
                 <div className="rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm font-semibold text-orange-700">
-                  Akun ini masuk status EXPIRING. Sisa durasi otomatis ikut tercantum di pesan klaim.
+                  Akun ini hampir berakhir. Sisa durasi otomatis ikut tercantum
+                  di pesan klaim.
                 </div>
               ) : null}
               {selectedExpired ? (
                 <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
-                  Akun ini sudah EXPIRED, jadi tombol kirim klaim dimatikan. Klaim garansi hanya untuk akun yang masih aktif atau expiring.
+                  Akun ini sudah kedaluwarsa, jadi tombol kirim klaim dimatikan.
+                  Klaim garansi hanya untuk akun aktif atau hampir berakhir.
                 </div>
               ) : null}
 
               <label className="block">
-                <span className="text-sm font-medium text-slate-700">Pilih Akun</span>
+                <span className="text-sm font-medium text-slate-700">
+                  Pilih Akun
+                </span>
                 <select
                   value={selectedId}
                   onChange={(event) => {
@@ -401,12 +442,15 @@ export default function ResellerWarrantyPage() {
                 >
                   {accounts.map((account) => (
                     <option key={account.id} value={account.id}>
-                      {accountIdentityValue(account)} - {productLabel(account)} - {warrantyStatusLabel(account)}
+                      {accountIdentityValue(account)} - {productLabel(account)}{" "}
+                      - {warrantyStatusLabel(account)}
                     </option>
                   ))}
                 </select>
-                {!loading && !accounts.length ? (
-                  <p className="mt-2 text-xs font-medium text-red-600">Tidak ada akun yang bisa diklaim.</p>
+                {!loading && !loadError && !accounts.length ? (
+                  <p className="mt-2 text-xs font-medium text-red-600">
+                    Tidak ada akun yang bisa diklaim.
+                  </p>
                 ) : null}
               </label>
 
@@ -414,17 +458,29 @@ export default function ResellerWarrantyPage() {
                 <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
                   <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-slate-400">Akun dipilih</p>
-                      <p className="mt-1 text-sm font-bold text-slate-950">{productLabel(selectedAccount)}</p>
+                      <p className="text-xs uppercase tracking-wide text-slate-400">
+                        Akun dipilih
+                      </p>
+                      <p className="mt-1 text-sm font-bold text-slate-950">
+                        {productLabel(selectedAccount)}
+                      </p>
                     </div>
-                    <MiniBadge className={selectedStatusClass}>{selectedStatus}</MiniBadge>
+                    <MiniBadge className={selectedStatusClass}>
+                      {selectedStatus}
+                    </MiniBadge>
                   </div>
 
                   <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                     {selectedDetailFields.map((field) => (
                       <label key={field.label} className="block">
-                        <span className="text-sm font-medium text-slate-700">{field.label}</span>
-                        <input readOnly value={field.value} className={readonlyInputClass} />
+                        <span className="text-sm font-medium text-slate-700">
+                          {field.label}
+                        </span>
+                        <input
+                          readOnly
+                          value={field.value}
+                          className={readonlyInputClass}
+                        />
                       </label>
                     ))}
                   </div>
@@ -432,7 +488,9 @@ export default function ResellerWarrantyPage() {
               ) : null}
 
               <label className="block">
-                <span className="text-sm font-medium text-slate-700">Permasalahan</span>
+                <span className="text-sm font-medium text-slate-700">
+                  Kendala
+                </span>
                 <textarea
                   value={description}
                   onChange={(event) => {
@@ -444,11 +502,22 @@ export default function ResellerWarrantyPage() {
                   className="mt-2 h-28 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:border-emerald-300"
                   placeholder="Contoh: Tidak bisa login, muncul household, kode tidak masuk, atau akun error..."
                 />
-                <span className="mt-1 block text-right text-xs text-slate-400">{description.length}/500</span>
+                <span className="mt-1 block text-right text-xs text-slate-400">
+                  {description.length}/500
+                </span>
               </label>
 
-              {error ? <div className="rounded-xl border border-red-100 bg-red-50 p-3 text-sm font-medium text-red-700">{error}</div> : null}
-              {sent ? <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-sm font-medium text-emerald-700">WhatsApp sudah dibuka. Kirim pesan bersama screenshot/foto bukti.</div> : null}
+              {error ? (
+                <div className="rounded-xl border border-red-100 bg-red-50 p-3 text-sm font-medium text-red-700">
+                  {error}
+                </div>
+              ) : null}
+              {sent ? (
+                <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-sm font-medium text-emerald-700">
+                  WhatsApp sudah dibuka. Kirim pesan bersama screenshot/foto
+                  bukti.
+                </div>
+              ) : null}
 
               <button
                 type="submit"
@@ -460,7 +529,7 @@ export default function ResellerWarrantyPage() {
               </button>
             </div>
           </form>
-        </section>
+        </section> : null}
       </div>
     </DashboardLayout>
   );

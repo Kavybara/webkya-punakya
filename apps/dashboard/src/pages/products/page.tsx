@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { Button } from "../../components/base/Button";
 import { PageTransition } from "../../components/feature/PageTransition";
 import { api, subscribeRealtime, type ApiOrder, type ApiPayment, type CatalogProduct, type CatalogVariant } from "../../lib/api";
 import { durationAllowedByModes, firstAllowedPriceEntry, sortedAllowedPriceEntries } from "../../lib/durations";
 import { productBrandAsset, productLogoUrl } from "../../lib/productBrandAssets";
-import { readSession } from "../../lib/session";
-import { formatRupiah } from "../../mocks/data";
+import { customerPaymentBreakdown } from "../../lib/payment";
+import { readSession, updateSession } from "../../lib/session";
+import { formatRupiah, type CheckoutField } from "../../mocks/data";
 
 type CheckoutStep = "catalog" | "details" | "payment" | "process" | "done";
 
@@ -27,10 +27,15 @@ type ResellerCheckState = {
   message: string;
 };
 
+type CheckoutTouchedState = {
+  customer: boolean;
+  customerData: boolean;
+  whatsapp: boolean;
+};
+
 const steps: Array<{ id: CheckoutStep; label: string }> = [
-  { id: "details", label: "Isi Data" },
-  { id: "payment", label: "Bayar" },
-  { id: "process", label: "Proses" },
+  { id: "details", label: "Pesanan" },
+  { id: "payment", label: "Pembayaran" },
   { id: "done", label: "Selesai" },
 ];
 
@@ -80,19 +85,6 @@ function normalizeWhatsapp(value: string) {
   return digits;
 }
 
-function splitFulfillmentText(text = "") {
-  const lines = text.split("\n");
-  const snkIndex = lines.findIndex((line) => /^S&K:/i.test(line.trim()));
-  const accountLines = snkIndex === -1 ? lines : lines.slice(0, snkIndex);
-  const detailIndex = accountLines.findIndex((line) =>
-    /^(?:〔\s*ACCOUNT DETAIL\s*〕|ACCOUNT DETAIL|DETAIL (?:AKUN|CANVA|LINK))$/i.test(line.trim()),
-  );
-  return {
-    account: accountLines.slice(detailIndex >= 0 ? detailIndex : 0).join("\n").trim(),
-    snk: snkIndex === -1 ? "" : lines.slice(snkIndex).join("\n").trim(),
-  };
-}
-
 function splitFulfillmentDisplayText(text = "") {
   const lines = text.split("\n");
   const snkIndex = lines.findIndex((line) => /^S&K:/i.test(line.trim()));
@@ -121,7 +113,69 @@ function checkoutErrorMessage(error: unknown) {
   if (/quota exceeded|read requests per minute|sheets\.googleapis/i.test(message)) {
     return "Google Sheets sedang limit sebentar. Coba lagi 1-2 menit, stok tidak akan diproses dua kali.";
   }
+  if (/internal server|econn|fetch failed|unexpected token|stack trace|sql/i.test(message)) {
+    return "Pesanan belum dapat diproses. Coba lagi tanpa membuat pesanan baru.";
+  }
   return message || "Order gagal dibuat.";
+}
+
+function paymentCountdown(expiresAt = "", now = Date.now()) {
+  if (!expiresAt) return { label: "-", expired: false };
+  const normalized = expiresAt.includes("T") ? expiresAt : expiresAt.replace(" ", "T");
+  const expires = new Date(normalized).getTime();
+  if (!Number.isFinite(expires)) return { label: expiresAt, expired: false };
+  const remaining = Math.max(0, expires - now);
+  if (remaining <= 0) return { label: "00:00", expired: true };
+  const totalSeconds = Math.floor(remaining / 1_000);
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  return {
+    label: [hours, minutes, seconds].map((part) => String(part).padStart(2, "0")).join(":"),
+    expired: false,
+  };
+}
+
+function paymentStatusLabel(status = "") {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized === "paid") return "Berhasil";
+  if (normalized === "expired") return "Kedaluwarsa";
+  if (normalized === "cancelled") return "Dibatalkan";
+  if (normalized === "failed") return "Gagal";
+  if (normalized === "checking") return "Sedang Memeriksa";
+  return "Menunggu Pembayaran";
+}
+
+function paymentStatusTone(status = "") {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized === "paid") return "border-emerald-400/20 bg-emerald-400/10 text-emerald-300";
+  if (["expired", "cancelled", "failed"].includes(normalized)) return "border-rose-400/20 bg-rose-400/10 text-rose-300";
+  if (normalized === "checking") return "border-cyan-300/20 bg-cyan-300/10 text-cyan-200";
+  return "border-amber-300/20 bg-amber-300/10 text-amber-200";
+}
+
+function isTerminalCheckoutState(order: ApiOrder | null, payment: ApiPayment | null, now = Date.now()) {
+  const paymentStatus = String(payment?.status || order?.qrisStatus || "").toLowerCase();
+  const orderStatus = String(order?.orderStatus || "").toLowerCase();
+  const deliveryStatus = String(order?.deliveryStatus || "").toLowerCase();
+  const countdown = paymentCountdown(order?.paymentExpiresAt || payment?.expiresAt || "", now);
+  return (
+    ["expired", "cancelled", "failed"].includes(paymentStatus)
+    || ["completed", "cancelled", "expired"].includes(orderStatus)
+    || ["sent", "stock_unavailable_deposit"].includes(deliveryStatus)
+    || countdown.expired
+  );
+}
+
+function formatCheckoutDate(value = "") {
+  if (!value) return "-";
+  const normalized = value.includes("T") ? value : value.replace(" ", "T");
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("id-ID", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
 }
 
 function ownerContactHref(ownerWhatsApp: string, orderId = "") {
@@ -285,35 +339,56 @@ export default function ProductsPage() {
   const [quantity, setQuantity] = useState(1);
   const [customer, setCustomer] = useState("");
   const [email, setEmail] = useState("");
+  const [checkoutData, setCheckoutData] = useState<Record<string, string>>({});
   const [whatsapp, setWhatsapp] = useState("");
   const [note, setNote] = useState("");
   const [createdOrder, setCreatedOrder] = useState<ApiOrder | null>(null);
   const [payment, setPayment] = useState<ApiPayment | null>(null);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [checkingPayment, setCheckingPayment] = useState(false);
+  const [countdownNow, setCountdownNow] = useState(() => Date.now());
   const [prechecking, setPrechecking] = useState(false);
   const [resellerCheck, setResellerCheck] = useState<ResellerCheckState>({ status: "idle", message: "" });
   const [ownerWhatsApp, setOwnerWhatsApp] = useState("");
   const [autoCheckoutKey, setAutoCheckoutKey] = useState("");
+  const [touched, setTouched] = useState<CheckoutTouchedState>({
+    customer: false,
+    customerData: false,
+    whatsapp: false,
+  });
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [credentialsVisible, setCredentialsVisible] = useState(false);
+  const [copiedValue, setCopiedValue] = useState("");
+  const [qrExpanded, setQrExpanded] = useState(false);
   const submitLockRef = useRef(false);
+  const paymentRefreshLockRef = useRef(false);
+  const verifiedCheckoutSessionRef = useRef("");
+  const resumedOrderRef = useRef("");
+  const credentialTimerRef = useRef<number | null>(null);
 
   const isResellerCheckout = location.pathname.startsWith("/reseller/checkout");
+  const checkoutSession = readSession();
+  const resellerUser = checkoutSession?.role === "reseller" ? checkoutSession.user || {} : {};
+  const isAuthenticatedResellerCheckout = isResellerCheckout && checkoutSession?.role === "reseller";
+  const resellerNameLocked = Boolean(isAuthenticatedResellerCheckout && (resellerUser.name || resellerUser.username));
+  const resellerWhatsappLocked = Boolean(isAuthenticatedResellerCheckout && resellerUser.whatsapp);
 
   function backToCatalog() {
     if (isResellerCheckout) {
-      navigate("/reseller/catalog");
+      navigate("/reseller-v2/catalog");
       return;
     }
     setStep("catalog");
   }
 
-  async function loadCatalog() {
+  const loadCatalog = useCallback(async () => {
     try {
       setProducts(isResellerCheckout ? await api.catalogAll() : await api.catalog());
     } finally {
       setCatalogLoaded(true);
     }
-  }
+  }, [isResellerCheckout]);
 
   useEffect(() => {
     loadCatalog().catch(console.error);
@@ -323,7 +398,7 @@ export default function ProductsPage() {
     return subscribeRealtime(() => {
       loadCatalog().catch(console.error);
     });
-  }, []);
+  }, [loadCatalog]);
 
   useEffect(() => {
     const productId = searchParams.get("productId") || searchParams.get("product") || "";
@@ -350,7 +425,7 @@ export default function ProductsPage() {
       return;
     }
     if (!productId || !variantId) {
-      if (isResellerCheckout) navigate("/reseller/catalog", { replace: true });
+      if (isResellerCheckout) navigate("/reseller-v2/catalog", { replace: true });
       return;
     }
     if (!products.length) {
@@ -398,6 +473,40 @@ export default function ProductsPage() {
   }, [autoCheckoutKey, catalogLoaded, isResellerCheckout, navigate, products, searchParams, stateQuantity, stateSelection]);
 
   useEffect(() => {
+    const orderId = searchParams.get("order") || "";
+    if (!orderId || resumedOrderRef.current === orderId || !selection) return;
+    resumedOrderRef.current = orderId;
+    let cancelled = false;
+    const resume = async () => {
+      try {
+        const latest = await api.order(orderId);
+        if (cancelled) return;
+        setCreatedOrder(latest);
+        if (latest.paymentRef && Number(latest.paymentDue ?? latest.total ?? 0) > 0) {
+          const latestPayment = await api.payment(latest.paymentRef);
+          if (!cancelled) setPayment(latestPayment);
+        }
+        if (latest.orderStatus === "completed" || latest.deliveryStatus === "sent" || latest.deliveryStatus === "stock_unavailable_deposit") {
+          setStep("done");
+        } else if (latest.qrisStatus === "paid") {
+          setStep("process");
+        } else {
+          setStep("payment");
+        }
+      } catch (resumeError) {
+        if (!cancelled) {
+          resumedOrderRef.current = "";
+          setError(checkoutErrorMessage(resumeError));
+        }
+      }
+    };
+    resume().catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams, selection]);
+
+  useEffect(() => {
     function updateColumnCount() {
       if (window.innerWidth >= 1280) setColumnCount(3);
       else if (window.innerWidth >= 768) setColumnCount(2);
@@ -408,26 +517,101 @@ export default function ProductsPage() {
     return () => window.removeEventListener("resize", updateColumnCount);
   }, []);
 
-  useEffect(() => {
-    if (!createdOrder?.id) return;
-    const refresh = async () => {
+  async function refreshCurrentOrder(options: { manual?: boolean } = {}) {
+    if (!createdOrder?.id || paymentRefreshLockRef.current) return;
+    paymentRefreshLockRef.current = true;
+    if (options.manual) {
+      setCheckingPayment(true);
+      setError("");
+    }
+    try {
       const latest = await api.order(createdOrder.id);
       setCreatedOrder((current) => ({
         ...latest,
         fulfillmentText: latest.fulfillmentText || current?.fulfillmentText || "",
         snkText: latest.snkText || current?.snkText || "",
       }));
-      if (latest.paymentRef) {
-        api.payment(latest.paymentRef).then(setPayment).catch(console.error);
+      if (latest.paymentRef && String(latest.qrisStatus || "").toLowerCase() !== "paid") {
+        const nextPayment = await api.payment(latest.paymentRef);
+        setPayment(nextPayment);
       }
       if (latest.orderStatus === "completed" || latest.deliveryStatus === "stock_unavailable_deposit") setStep("done");
       else if (latest.qrisStatus === "paid") setStep("process");
-    };
+    } catch (refreshError) {
+      if (options.manual) setError(checkoutErrorMessage(refreshError));
+    } finally {
+      paymentRefreshLockRef.current = false;
+      if (options.manual) setCheckingPayment(false);
+    }
+  }
+
+  const checkoutPollingTerminal = isTerminalCheckoutState(createdOrder, payment, countdownNow);
+
+  useEffect(() => {
+    if (
+      !createdOrder?.id
+      || (step !== "payment" && step !== "process")
+      || checkoutPollingTerminal
+    ) return;
     const timer = window.setInterval(() => {
-      refresh().catch(console.error);
+      refreshCurrentOrder().catch(() => undefined);
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [createdOrder?.id]);
+    // The order id owns this polling lifecycle. The lock prevents overlapping requests.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkoutPollingTerminal, createdOrder?.id, step]);
+
+  useEffect(() => {
+    if (step !== "payment") return;
+    setCountdownNow(Date.now());
+    const timer = window.setInterval(() => setCountdownNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [step]);
+
+  useEffect(() => {
+    if (!isResellerCheckout || step !== "done" || !createdOrder?.id) return;
+    if (verifiedCheckoutSessionRef.current === createdOrder.id) return;
+    verifiedCheckoutSessionRef.current = createdOrder.id;
+    api.authSession()
+      .then((session) => updateSession(session))
+      .catch(() => undefined);
+  }, [createdOrder?.id, isResellerCheckout, step]);
+
+  useEffect(() => {
+    if (!credentialsVisible) return;
+    if (credentialTimerRef.current) window.clearTimeout(credentialTimerRef.current);
+    credentialTimerRef.current = window.setTimeout(() => {
+      setCredentialsVisible(false);
+      credentialTimerRef.current = null;
+    }, 60_000);
+    return () => {
+      if (credentialTimerRef.current) window.clearTimeout(credentialTimerRef.current);
+      credentialTimerRef.current = null;
+    };
+  }, [credentialsVisible]);
+
+  useEffect(() => {
+    if (step === "done") return;
+    setCredentialsVisible(false);
+    setCopiedValue("");
+    setQrExpanded(false);
+  }, [step]);
+
+  useEffect(() => {
+    if (!qrExpanded) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setQrExpanded(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [qrExpanded]);
+
+  useEffect(() => {
+    setTouched({ customer: false, customerData: false, whatsapp: false });
+    setCheckoutData({});
+    setEmail("");
+    setSubmitAttempted(false);
+  }, [selection?.product.id, selection?.variant.id]);
 
   useEffect(() => {
     const cleanWhatsapp = normalizeWhatsapp(whatsapp);
@@ -551,27 +735,78 @@ export default function ProductsPage() {
     setQuantity(clampOrderQuantity(nextQuantity, selection?.variant.stockCount || 1));
   }
 
+  const activeCheckoutRules = useMemo(
+    () => checkoutRules(selection, clampOrderQuantity(quantity, selection?.variant.stockCount || 1)),
+    [quantity, selection],
+  );
+  const hasStructuredCheckoutMetadata = Array.isArray(selection?.variant.checkoutFields)
+    || Array.isArray(selection?.product.checkoutFields);
+  const activeCheckoutFields = useMemo<CheckoutField[]>(() => {
+    const configured = Array.isArray(selection?.variant.checkoutFields)
+      ? selection.variant.checkoutFields
+      : Array.isArray(selection?.product.checkoutFields)
+        ? selection.product.checkoutFields
+        : null;
+    if (configured) {
+      return configured.map((field) => field.key === "customerEmail"
+        ? { ...field, minItems: Math.max(clampOrderQuantity(quantity, selection?.variant.stockCount || 1), Number(field.minItems || 1)) }
+        : field);
+    }
+    if (activeCheckoutRules.customerField === "optional") return [];
+    return [{
+      key: activeCheckoutRules.customerField === "email" ? "customerEmail" : "customerDevice",
+      label: activeCheckoutRules.label,
+      type: activeCheckoutRules.customerField === "email" ? "email" : "text",
+      required: activeCheckoutRules.required,
+      minItems: activeCheckoutRules.minItems,
+      placeholder: activeCheckoutRules.placeholder,
+      helperText: activeCheckoutRules.helper,
+    }];
+  }, [activeCheckoutRules, quantity, selection]);
+
+  const checkoutFieldErrors = useMemo(() => {
+    const errors: Record<string, string> = {};
+    for (const field of activeCheckoutFields) {
+      const value = String(checkoutData[field.key] || "").trim();
+      if (field.key === "customerEmail") {
+        const emails = splitCustomerEmails(value);
+        if (field.required && emails.length < Number(field.minItems || 1)) {
+          errors[field.key] = `${field.label} wajib berisi minimal ${field.minItems || 1} email valid.`;
+        } else if (value && emails.length !== value.split(/[\s,;]+/).filter(Boolean).length) {
+          errors[field.key] = `${field.label} harus berisi email yang valid.`;
+        }
+      } else if (field.required && !value) {
+        errors[field.key] = `${field.label} wajib diisi.`;
+      } else if (field.key === "customerDevice" && field.required && splitDeviceNames(value).length < Number(field.minItems || 1)) {
+        errors[field.key] = `${field.label} wajib berisi minimal ${field.minItems || 1} item.`;
+      }
+    }
+    return errors;
+  }, [activeCheckoutFields, checkoutData]);
+
+  const fieldErrors = useMemo(() => {
+    const next: Partial<Record<keyof CheckoutTouchedState, string>> = {};
+    const cleanWhatsapp = normalizeWhatsapp(whatsapp);
+    if (!customer.trim()) next.customer = "Nama reseller wajib diisi.";
+    if (!cleanWhatsapp) next.whatsapp = "Nomor WhatsApp wajib diisi.";
+    else if (cleanWhatsapp.length < 8) next.whatsapp = "Nomor WhatsApp belum lengkap.";
+
+    if (Object.keys(checkoutFieldErrors).length) next.customerData = Object.values(checkoutFieldErrors)[0];
+    return next;
+  }, [checkoutFieldErrors, customer, whatsapp]);
+
   async function submitOrder() {
     if (!selection || submitLockRef.current) return;
     submitLockRef.current = true;
+    setSubmitAttempted(true);
+    setTouched({ customer: true, customerData: true, whatsapp: true });
     const cleanWhatsapp = normalizeWhatsapp(whatsapp);
     const orderQty = clampOrderQuantity(quantity, selection.variant.stockCount);
-    if (!customer.trim() || !cleanWhatsapp) {
-      setError("Nama lengkap dan nomor WhatsApp wajib diisi.");
+    if (Object.keys(fieldErrors).length > 0) {
       submitLockRef.current = false;
       return;
     }
-    const rules = checkoutRules(selection, orderQty);
-    if (rules.required && rules.customerField === "device" && splitDeviceNames(email).length < rules.minItems) {
-      setError(rules.minItems > 1 ? `${rules.label} wajib isi minimal ${rules.minItems} device. Pisahkan dengan koma atau baris baru.` : `${rules.label} wajib diisi.`);
-      submitLockRef.current = false;
-      return;
-    }
-    if (rules.required && rules.customerField === "email" && splitCustomerEmails(email).length < rules.minItems) {
-      setError(`${rules.label} wajib isi minimal ${rules.minItems} email. Pisahkan dengan koma, spasi, atau baris baru.`);
-      submitLockRef.current = false;
-      return;
-    }
+    const rules = activeCheckoutRules;
     setSubmitting(true);
     setError("");
     try {
@@ -587,8 +822,11 @@ export default function ProductsPage() {
       const orderSession = readSession();
       const order = await api.createOrder({
         customer: customer.trim(),
-        email: rules.customerField === "email" ? splitCustomerEmails(email).join(", ") : "",
-        device: rules.customerField === "device" ? email.trim() : "",
+        checkoutData,
+        email: checkoutData.customerEmail || (rules.customerField === "email" ? email : ""),
+        device: checkoutData.customerDevice || (rules.customerField === "device" ? email.trim() : ""),
+        customerWhatsapp: checkoutData.customerWhatsapp || "",
+        customerPlan: checkoutData.customerPlan || "",
         customerData: rules.customerField === "optional" ? email.trim() : "",
         whatsapp: cleanWhatsapp,
         note: note.trim(),
@@ -599,6 +837,13 @@ export default function ProductsPage() {
         channel: orderSession?.role === "reseller" ? "Reseller Panel" : "Public Store",
       });
       setCreatedOrder(order);
+      resumedOrderRef.current = order.id;
+      const resumeParams = new URLSearchParams(searchParams);
+      resumeParams.set("order", order.id);
+      navigate(`${location.pathname}?${resumeParams.toString()}`, {
+        replace: true,
+        state: checkoutState || undefined,
+      });
       if (order.orderStatus === "completed" || order.deliveryStatus === "sent" || order.deliveryStatus === "stock_unavailable_deposit") {
         setPayment(null);
         setStep("done");
@@ -619,9 +864,8 @@ export default function ProductsPage() {
     }
   }
 
-  const activeStep = Math.max(0, steps.findIndex((item) => item.id === step));
+  const activeStep = step === "details" ? 0 : step === "done" ? 2 : 1;
   const qrSrc = qrImageSource(payment);
-  const whatsappReady = resellerCheck.status === "valid";
   const fulfillment = splitFulfillmentDisplayText(createdOrder?.fulfillmentText || "");
   const stockRaceDeposit = createdOrder?.deliveryStatus === "stock_unavailable_deposit";
   const depositUsed = Number(createdOrder?.depositUsed || payment?.depositUsed || 0);
@@ -629,41 +873,96 @@ export default function ProductsPage() {
   const qrisNominal = Number(payment?.amount ?? createdOrder?.paymentDue ?? paymentDue ?? 0);
   const qrisFee = Number(payment?.fee ?? createdOrder?.paymentFee ?? 0);
   const qrisProviderTotal = Number(payment?.totalPayment || 0);
-  const qrisComputedTotal = qrisNominal > 0 ? qrisNominal + qrisFee : 0;
-  const qrisTotal = Math.max(qrisProviderTotal, qrisComputedTotal);
-  const snkText = createdOrder?.snkText || fulfillment.snk || "S&K belum diatur untuk produk ini.";
-  const activeCheckoutRules = checkoutRules(selection, clampOrderQuantity(quantity, selection?.variant.stockCount || 1));
+  const qrisBreakdown = customerPaymentBreakdown(qrisNominal, qrisFee, qrisProviderTotal);
+  const qrisCustomerFee = qrisBreakdown.customerFee;
+  const qrisTotal = qrisBreakdown.total;
+  const countdown = paymentCountdown(createdOrder?.paymentExpiresAt || payment?.expiresAt || "", countdownNow);
+  const currentPaymentStatus = checkingPayment
+    ? "checking"
+    : countdown.expired
+      ? "expired"
+      : String(payment?.status || createdOrder?.qrisStatus || "pending").toLowerCase();
+  const trackingHref = createdOrder?.trackingToken
+    ? `/order-tracking?token=${encodeURIComponent(createdOrder.trackingToken)}`
+    : `/order-tracking?order=${encodeURIComponent(createdOrder?.id || "")}`;
+  const deliveredCredentialText = (createdOrder?.deliveredAccounts || [])
+    .map((account, index) => [
+      `Akun ${index + 1}`,
+      account.email ? `Email/Identitas: ${account.email}` : "",
+      account.password ? `Password/Link: ${account.password}` : "",
+      account.profile ? `Profil: ${account.profile}` : "",
+      account.pin ? `PIN: ${account.pin}` : "",
+    ].filter(Boolean).join("\n"))
+    .join("\n\n");
+  const credentialText = deliveredCredentialText || fulfillment.account;
+  const deliverySnapshot = createdOrder?.deliveryTemplateSnapshot;
+  const deliveryTemplateText = deliverySnapshot?.status === "ready" ? deliverySnapshot.renderedText || "" : "";
+  const deliveredAccountId = createdOrder?.deliveredAccounts?.[0]?.id || "";
+  const deliveredAccount = createdOrder?.deliveredAccounts?.[0];
+  const templateFields = new Set(deliverySnapshot?.usedFields || []);
+  const deliveryCredentialFields = [
+    {
+      key: "identity",
+      label: deliveredAccount?.loginPhone ? "Nomor Login" : "Email / Username",
+      value: deliveredAccount?.loginPhone || deliveredAccount?.email || "",
+      used: templateFields.has("login_identifier") || templateFields.has("email") || templateFields.has("username"),
+    },
+    {
+      key: "password",
+      label: deliveredAccount?.canvaLink ? "Link" : "Password",
+      value: deliveredAccount?.canvaLink || deliveredAccount?.password || "",
+      used: templateFields.has("password") || templateFields.has("link"),
+    },
+    { key: "profile", label: "Profil", value: deliveredAccount?.profile || "", used: templateFields.has("profile") },
+    { key: "pin", label: "PIN", value: deliveredAccount?.pin || "", used: templateFields.has("pin") },
+  ].filter((field) => field.value && (deliverySnapshot ? field.used : true));
+  const canShowCredentials = Boolean(
+    isAuthenticatedResellerCheckout
+    && step === "done"
+    && credentialText,
+  );
   const resellerCheckoutWaiting = isResellerCheckout && step !== "catalog" && !selection;
+
+  async function copyCheckoutValue(key: string, value: string) {
+    if (!value || !navigator.clipboard) return;
+    await navigator.clipboard.writeText(value);
+    if (key === "template" && deliveredAccountId) {
+      api.recordDeliveryTemplateCopied(deliveredAccountId).catch(() => undefined);
+    }
+    setCopiedValue(key);
+    window.setTimeout(() => setCopiedValue((current) => (current === key ? "" : current)), 1800);
+  }
 
   if (resellerCheckoutWaiting) {
     return (
       <PageTransition>
-        <main className="min-h-screen bg-[#f4eee4] px-4 py-8 text-slate-950">
+        <main className="kavya-public-dark min-h-screen bg-[var(--kavya-bg)] px-4 py-8 text-[var(--kavya-text-primary)]">
           <header className="mx-auto flex max-w-6xl items-center justify-between">
-            <button type="button" onClick={backToCatalog} className="font-serif text-lg font-semibold">
-              Kavya
+            <button type="button" onClick={backToCatalog} className="inline-flex min-h-11 items-center gap-3 rounded-lg font-semibold">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--kavya-border)] bg-[var(--kavya-surface)] font-serif">K</span>
+              <span>Kavya</span>
             </button>
-            <Link to="/reseller/catalog" className="rounded-full bg-white px-5 py-3 text-sm font-medium text-slate-700 shadow-sm">
+            <Link to="/reseller-v2/catalog" className="inline-flex min-h-11 items-center rounded-full border border-[var(--kavya-border)] px-5 text-sm font-medium text-[var(--kavya-text-secondary)]">
               Katalog
             </Link>
           </header>
-          <section className="mx-auto mt-16 max-w-xl rounded-md border border-gray-100 bg-white p-6 text-center shadow-sm">
+          <section className="mx-auto mt-16 max-w-xl rounded-xl border border-[var(--kavya-border)] bg-[var(--kavya-surface)] p-6 text-center">
             {error ? (
               <>
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-50 text-red-600">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-rose-400/20 bg-rose-400/10 text-rose-300">
                   <i className="ri-error-warning-line text-xl" />
                 </div>
-                <h1 className="mt-4 text-lg font-semibold text-slate-950">Checkout tidak tersedia</h1>
-                <p className="mt-2 text-sm leading-6 text-slate-500">{error}</p>
-                <Button onClick={backToCatalog} className="mt-5 bg-red-500 hover:bg-red-600">
+                <h1 className="mt-4 text-lg font-semibold">Checkout tidak tersedia</h1>
+                <p className="mt-2 text-sm leading-6 text-[var(--kavya-text-secondary)]">{error}</p>
+                <button type="button" onClick={backToCatalog} className="mt-5 inline-flex min-h-11 items-center justify-center rounded-lg bg-white px-4 text-sm font-semibold text-black transition-colors hover:bg-zinc-200">
                   Pilih Produk Lain
-                </Button>
+                </button>
               </>
             ) : (
               <>
-                <div className="mx-auto h-12 w-12 animate-spin rounded-full border-2 border-red-100 border-t-red-500" />
-                <h1 className="mt-4 text-lg font-semibold text-slate-950">Menyiapkan checkout</h1>
-                <p className="mt-2 text-sm leading-6 text-slate-500">Menyiapkan paket order dari katalog reseller.</p>
+                <div className="mx-auto h-12 w-12 animate-spin rounded-full border-2 border-white/10 border-t-[var(--kavya-cyan)]" />
+                <h1 className="mt-4 text-lg font-semibold">Menyiapkan checkout</h1>
+                <p className="mt-2 text-sm leading-6 text-[var(--kavya-text-secondary)]">Menyiapkan paket order dari katalog reseller.</p>
               </>
             )}
           </section>
@@ -675,251 +974,412 @@ export default function ProductsPage() {
   if (step !== "catalog") {
     return (
       <PageTransition>
-        <main className="min-h-screen bg-[#f4eee4] px-4 py-8 text-slate-950">
+        <main className="kavya-public-dark min-h-screen bg-[var(--kavya-bg)] px-4 py-6 text-[var(--kavya-text-primary)] sm:px-6 sm:py-8">
           <header className="mx-auto flex max-w-6xl items-center justify-between">
-            <button type="button" onClick={backToCatalog} className="font-serif text-lg font-semibold">
-              Kavya
+            <button type="button" onClick={backToCatalog} className="inline-flex min-h-11 items-center gap-3 rounded-lg font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-violet-400">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] font-serif">K</span>
+              <span>Kavya</span>
             </button>
-            <Link to={isResellerCheckout ? "/reseller/catalog" : "/"} className="rounded-full bg-white px-5 py-3 text-sm font-medium text-slate-700 shadow-sm">
-              {isResellerCheckout ? "Katalog" : "Home"}
+            <Link to={isResellerCheckout ? "/reseller-v2/catalog" : "/"} className="inline-flex min-h-11 items-center rounded-lg border border-white/10 px-4 text-sm font-medium text-zinc-300 transition-colors hover:border-white/20 hover:bg-white/[0.04] hover:text-white">
+              {isResellerCheckout ? "Katalog" : "Beranda"}
             </Link>
           </header>
 
-          <div className="mx-auto mt-8 flex max-w-xl items-center justify-center gap-1 overflow-x-auto px-1 text-[11px] sm:mt-12 sm:gap-3 sm:text-xs">
+          <div aria-label="Tahap checkout" className="mx-auto mt-8 grid max-w-xl grid-cols-3 gap-2 px-1 text-xs sm:mt-10 sm:flex sm:items-center sm:justify-center sm:gap-4">
             {steps.map((item, index) => (
-              <div key={item.id} className="flex items-center gap-2 sm:gap-3">
-                <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold sm:h-8 sm:w-8 ${index <= activeStep ? "bg-red-50 text-red-600" : "bg-slate-100 text-slate-400"}`}>
+              <div key={item.id} className="flex min-w-0 flex-col items-center gap-2 sm:flex-row sm:gap-4" aria-current={index === activeStep ? "step" : undefined}>
+                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-xs font-semibold ${index <= activeStep ? "border-white bg-white text-black" : "border-white/10 bg-white/[0.03] text-zinc-600"}`}>
                   {index + 1}
                 </div>
-                <span className={`${index <= activeStep ? "font-semibold text-slate-900" : "text-slate-400"} whitespace-nowrap`}>{item.label}</span>
-                {index < steps.length - 1 ? <span className="h-px w-4 shrink-0 bg-slate-200 sm:w-12" /> : null}
+                <span className={`${index <= activeStep ? "font-semibold text-zinc-100" : "text-zinc-600"} text-center text-[11px] leading-4 sm:whitespace-nowrap sm:text-xs`}>{item.label}</span>
+                {index < steps.length - 1 ? <span className={`hidden h-px w-14 shrink-0 sm:block ${index < activeStep ? "bg-white/50" : "bg-white/10"}`} /> : null}
               </div>
             ))}
           </div>
 
-          <section className="mx-auto mt-10 max-w-2xl overflow-hidden rounded-md border border-gray-100 bg-white shadow-sm">
-            <div className="border-b border-gray-100 px-5 py-4">
-              <h1 className="text-base font-semibold">Pesan {selection?.product.name || "Produk"}</h1>
+          <section className="mx-auto mt-8 max-w-6xl overflow-hidden rounded-xl border border-[var(--kavya-border)] bg-[var(--kavya-surface)]">
+            <div className="border-b border-white/[0.09] px-5 py-4 sm:px-7">
+              <h1 className="text-base font-semibold text-white">
+                {step === "payment" ? "Selesaikan pembayaran" : step === "done" ? "Pembayaran berhasil" : step === "process" ? "Pesanan sedang diproses" : `Pesan ${selection?.product.name || "Produk"}`}
+              </h1>
             </div>
 
             {step === "details" ? (
-              <div className="p-5">
-                {selection ? (
-                  <div className="mb-5 rounded-md border border-red-100 bg-red-50/40 p-4">
-                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <p className="text-xs font-medium uppercase text-red-500">Paket Dipilih</p>
-                        <h2 className="mt-1 text-lg font-semibold">{selection.product.name} - {selection.variant.name}</h2>
-                        <p className="mt-1 text-sm text-slate-500">
-                          {selection.duration} / {formatRupiah(selection.price)} - stok tersedia {selection.variant.stockCount}
-                        </p>
-                        <p className="mt-1 text-sm font-semibold text-slate-800">
-                          Total {quantity} akun: {formatRupiah(selection.price * quantity)}
-                        </p>
+              <div className="grid gap-6 p-5 text-zinc-200 sm:p-7 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.72fr)] lg:items-start">
+                <div className="min-w-0 space-y-6">
+                  {isAuthenticatedResellerCheckout ? (
+                    <div className="rounded-lg border border-white/[0.08] bg-white/[0.025] p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-semibold text-white">Data reseller</p>
+                        <span className="rounded-full border border-violet-400/20 bg-violet-400/10 px-2.5 py-1 text-[11px] font-semibold text-violet-200">
+                          Terisi dari akun reseller
+                        </span>
                       </div>
-                      <button type="button" onClick={backToCatalog} className="h-9 rounded-md border border-red-100 bg-white px-3 text-sm font-medium text-red-600">
-                        Ganti Paket
-                      </button>
+                      <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
+                        <div><dt className="text-xs text-zinc-500">Username</dt><dd className="mt-1 text-zinc-200">{resellerUser.username || "-"}</dd></div>
+                        <div><dt className="text-xs text-zinc-500">Email akun</dt><dd className="mt-1 break-all text-zinc-200">{resellerUser.email || "-"}</dd></div>
+                      </dl>
                     </div>
-                    <div className="mt-4 flex flex-col gap-3 border-t border-red-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">Jumlah akun</p>
-                        <p className="text-xs text-slate-500">Bisa beli lebih dari 1 selama stok varian mencukupi.</p>
-                      </div>
-                      <div className="inline-flex h-10 w-fit items-center overflow-hidden rounded-md border border-red-100 bg-white">
-                        <button
-                          type="button"
-                          onClick={() => changeQuantity(quantity - 1)}
-                          disabled={quantity <= 1}
-                          className="flex h-10 w-10 items-center justify-center text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-white"
-                          aria-label="Kurangi jumlah akun"
-                        >
-                          <i className="ri-subtract-line" />
-                        </button>
-                        <input
-                          value={quantity}
-                          onChange={(event) => changeQuantity(Number(event.target.value))}
-                          className="h-10 w-14 border-x border-red-100 text-center text-sm font-semibold outline-none"
-                          inputMode="numeric"
-                          aria-label="Jumlah akun"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => changeQuantity(quantity + 1)}
-                          disabled={quantity >= selection.variant.stockCount}
-                          className="flex h-10 w-10 items-center justify-center text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-white"
-                          aria-label="Tambah jumlah akun"
-                        >
-                          <i className="ri-add-line" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
+                  ) : null}
 
-                <div className="grid gap-4">
-                  <label className="block">
-                    <span className="text-sm font-medium">Nama Lengkap <span className="text-red-500">*</span></span>
-                    <input value={customer} onChange={(event) => setCustomer(event.target.value)} className="mt-2 h-11 w-full rounded-md border border-gray-200 px-4 text-sm outline-none focus:border-red-200" placeholder="Masukkan nama lengkap" />
-                  </label>
-
-                  <div className="grid gap-4 md:grid-cols-2">
+                  <div className="grid gap-4">
                     <label className="block">
-                      <span className="text-sm font-medium">
-                        {activeCheckoutRules.label}
-                        {activeCheckoutRules.required ? <span className="text-red-500"> *</span> : null}
+                      <span className="flex items-center justify-between gap-3 text-sm font-medium">
+                        <span>Nama reseller <span className="text-rose-400">*</span></span>
+                        {resellerNameLocked ? <span className="text-[11px] font-normal text-zinc-500">Terisi dari akun reseller</span> : null}
                       </span>
-                      <input value={email} onChange={(event) => setEmail(event.target.value)} className="mt-2 h-11 w-full rounded-md border border-gray-200 px-4 text-sm outline-none focus:border-red-200" placeholder={activeCheckoutRules.placeholder} />
-                      {activeCheckoutRules.helper ? <span className="mt-2 block text-xs text-amber-600">{activeCheckoutRules.helper}</span> : null}
+                      <input
+                        value={customer}
+                        onChange={(event) => setCustomer(event.target.value)}
+                        onBlur={() => setTouched((current) => ({ ...current, customer: true }))}
+                        readOnly={resellerNameLocked}
+                        aria-invalid={Boolean((touched.customer || submitAttempted) && fieldErrors.customer)}
+                        aria-describedby={fieldErrors.customer ? "checkout-customer-error" : undefined}
+                        className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-[var(--kavya-bg-elevated)] px-4 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15 read-only:cursor-not-allowed read-only:border-white/[0.06] read-only:bg-white/[0.025] read-only:text-zinc-400"
+                        placeholder="Masukkan nama reseller"
+                      />
+                      {(touched.customer || submitAttempted) && fieldErrors.customer ? <span id="checkout-customer-error" className="mt-2 block text-xs text-rose-300">{fieldErrors.customer}</span> : null}
                     </label>
+
+                    {activeCheckoutFields.map((field) => {
+                      const fieldId = `checkout-${field.key}`;
+                      const fieldError = checkoutFieldErrors[field.key];
+                      const showError = Boolean((touched.customerData || submitAttempted) && fieldError);
+                      return <label className="block" key={field.key}>
+                        <span className="text-sm font-medium">
+                          {field.label}
+                          {field.required ? <span className="text-rose-400"> *</span> : null}
+                        </span>
+                        {field.type === "select" ? (
+                          <select
+                            value={checkoutData[field.key] || ""}
+                            onChange={(event) => setCheckoutData((current) => ({ ...current, [field.key]: event.target.value }))}
+                            onBlur={() => setTouched((current) => ({ ...current, customerData: true }))}
+                            aria-invalid={showError}
+                            aria-describedby={showError ? `${fieldId}-error` : field.helperText ? `${fieldId}-help` : undefined}
+                            className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-[var(--kavya-bg-elevated)] px-4 text-sm text-white outline-none focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15"
+                          >
+                            <option value="">Pilih {field.label.toLowerCase()}</option>
+                            {(field.options || []).map((option) => <option key={option} value={option}>{option}</option>)}
+                          </select>
+                        ) : (
+                          <input
+                            type={field.type}
+                            autoComplete={field.type === "email" ? "email" : field.type === "tel" ? "tel" : undefined}
+                            value={checkoutData[field.key] || ""}
+                            onChange={(event) => setCheckoutData((current) => ({ ...current, [field.key]: event.target.value }))}
+                            onBlur={() => setTouched((current) => ({ ...current, customerData: true }))}
+                            aria-invalid={showError}
+                            aria-describedby={showError ? `${fieldId}-error` : field.helperText ? `${fieldId}-help` : undefined}
+                            className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-[var(--kavya-bg-elevated)] px-4 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15"
+                            placeholder={field.placeholder}
+                          />
+                        )}
+                        {showError ? (
+                          <span id={`${fieldId}-error`} className="mt-2 block text-xs text-rose-300">{fieldError}</span>
+                        ) : field.helperText ? (
+                          <span id={`${fieldId}-help`} className="mt-2 block text-xs leading-5 text-zinc-500">{field.helperText}</span>
+                        ) : null}
+                      </label>;
+                    })}
+                    {!hasStructuredCheckoutMetadata && !activeCheckoutFields.length && activeCheckoutRules.customerField === "optional" ? (
+                      <label className="block">
+                        <span className="text-sm font-medium">{activeCheckoutRules.label} <span className="font-normal text-zinc-500">(opsional)</span></span>
+                        <input
+                          value={email}
+                          onChange={(event) => setEmail(event.target.value)}
+                          className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-[var(--kavya-bg-elevated)] px-4 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15"
+                          placeholder={activeCheckoutRules.placeholder}
+                        />
+                      </label>
+                    ) : null}
+
                     <label className="block">
-                      <span className="text-sm font-medium">WhatsApp Reseller <span className="text-red-500">*</span></span>
-                      <input value={whatsapp} onChange={(event) => setWhatsapp(event.target.value)} className="mt-2 h-11 w-full rounded-md border border-gray-200 px-4 text-sm outline-none focus:border-red-200" placeholder="08123456789" />
-                      {resellerCheck.message ? (
+                      <span className="flex items-center justify-between gap-3 text-sm font-medium">
+                        <span>WhatsApp reseller <span className="text-rose-400">*</span></span>
+                        {resellerWhatsappLocked ? <span className="text-[11px] font-normal text-zinc-500">Terisi dari akun reseller</span> : null}
+                      </span>
+                      <input
+                        value={whatsapp}
+                        onChange={(event) => setWhatsapp(event.target.value)}
+                        onBlur={() => setTouched((current) => ({ ...current, whatsapp: true }))}
+                        readOnly={resellerWhatsappLocked}
+                        aria-invalid={Boolean((touched.whatsapp || submitAttempted) && fieldErrors.whatsapp)}
+                        aria-describedby={fieldErrors.whatsapp ? "checkout-whatsapp-error" : resellerCheck.message ? "checkout-whatsapp-status" : undefined}
+                        className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-[var(--kavya-bg-elevated)] px-4 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15 read-only:cursor-not-allowed read-only:border-white/[0.06] read-only:bg-white/[0.025] read-only:text-zinc-400"
+                        placeholder="08123456789"
+                      />
+                      {(touched.whatsapp || submitAttempted) && fieldErrors.whatsapp ? <span id="checkout-whatsapp-error" className="mt-2 block text-xs text-rose-300">{fieldErrors.whatsapp}</span> : null}
+                      {resellerCheck.message && !fieldErrors.whatsapp ? (
                         <span
-                          className={`mt-2 block rounded-md px-3 py-2 text-xs font-medium ${
+                          id="checkout-whatsapp-status"
+                          className={`mt-2 block rounded-md border px-3 py-2 text-xs font-medium ${
                             resellerCheck.status === "valid"
-                              ? "bg-emerald-50 text-emerald-700"
+                              ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-300"
                               : resellerCheck.status === "checking"
-                                ? "bg-slate-50 text-slate-500"
-                                : "bg-red-50 text-red-700"
+                                ? "border-white/10 bg-white/[0.03] text-zinc-400"
+                                : "border-rose-400/20 bg-rose-400/10 text-rose-300"
                           }`}
                         >
                           {resellerCheck.message}
                         </span>
                       ) : null}
                     </label>
-                  </div>
 
-                  <label className="block">
-                    <span className="text-sm font-medium">Catatan (opsional)</span>
-                    <textarea value={note} onChange={(event) => setNote(event.target.value.slice(0, 500))} className="mt-2 h-24 w-full rounded-md border border-gray-200 px-4 py-3 text-sm outline-none focus:border-red-200" placeholder="Catatan tambahan..." />
-                    <span className="mt-1 block text-xs text-slate-400">{note.length}/500 karakter</span>
-                  </label>
+                    <label className="block">
+                      <span className="text-sm font-medium">Catatan <span className="font-normal text-zinc-500">(opsional)</span></span>
+                      <textarea value={note} onChange={(event) => setNote(event.target.value.slice(0, 500))} className="mt-2 h-24 w-full resize-none rounded-lg border border-white/10 bg-[var(--kavya-bg-elevated)] px-4 py-3 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15" placeholder="Catatan tambahan untuk pesanan..." />
+                      <span className="mt-1 block text-right text-xs text-zinc-600">{note.length}/500</span>
+                    </label>
+                  </div>
                 </div>
 
-                {error ? <div className="mt-4 rounded-md bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+                <aside className="rounded-lg border border-white/[0.09] bg-[var(--kavya-bg-elevated)] p-5 lg:sticky lg:top-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Ringkasan pesanan</p>
+                      <h2 className="mt-3 text-lg font-semibold text-white">{selection?.product.name || "Produk"}</h2>
+                      <p className="mt-1 text-sm text-zinc-400">{selection?.variant.name || "-"}</p>
+                    </div>
+                    <button type="button" onClick={backToCatalog} className="min-h-11 shrink-0 rounded-lg border border-white/10 px-3 text-xs font-semibold text-zinc-300 hover:border-white/20 hover:bg-white/[0.04]">
+                      Ganti
+                    </button>
+                  </div>
 
-                <Button onClick={submitOrder} disabled={submitting || !selection || !whatsappReady} className="mt-5 h-12 w-full bg-red-500 hover:bg-red-600 disabled:cursor-not-allowed disabled:bg-slate-300">
-                  <span className="flex h-4 w-4 items-center justify-center"><i className="ri-shopping-cart-line" /></span>
-                  {submitting ? "Membuat order..." : resellerCheck.status === "checking" ? "Mengecek reseller..." : "Lanjutkan Order"}
-                </Button>
+                  <dl className="mt-5 space-y-3 border-y border-white/[0.08] py-5 text-sm">
+                    <div className="flex items-center justify-between gap-3"><dt className="text-zinc-500">Durasi</dt><dd className="font-medium text-zinc-200">{selection?.duration || "-"}</dd></div>
+                    <div className="flex items-center justify-between gap-3"><dt className="text-zinc-500">Harga per akun</dt><dd className="font-medium text-zinc-200">{formatRupiah(selection?.price || 0)}</dd></div>
+                    <div className="flex items-center justify-between gap-3"><dt className="text-zinc-500">Stok tersedia</dt><dd className="font-medium text-zinc-200">{selection?.variant.stockCount || 0}</dd></div>
+                  </dl>
+
+                  <div className="mt-5 flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-medium text-zinc-200">Jumlah akun</p>
+                      <p className="mt-1 text-xs text-zinc-500">Maksimal sesuai stok aktif.</p>
+                    </div>
+                    <div className="inline-flex h-11 items-center overflow-hidden rounded-lg border border-white/10 bg-black/20">
+                      <button type="button" onClick={() => changeQuantity(quantity - 1)} disabled={quantity <= 1} className="flex h-11 w-11 items-center justify-center text-zinc-400 hover:bg-white/[0.05] hover:text-white disabled:cursor-not-allowed disabled:text-zinc-700" aria-label="Kurangi jumlah akun">
+                        <i className="ri-subtract-line" />
+                      </button>
+                      <input value={quantity} onChange={(event) => changeQuantity(Number(event.target.value))} className="h-11 w-12 border-x border-white/10 bg-transparent text-center text-sm font-semibold text-white outline-none" inputMode="numeric" aria-label="Jumlah akun" />
+                      <button type="button" onClick={() => changeQuantity(quantity + 1)} disabled={quantity >= (selection?.variant.stockCount || 1)} className="flex h-11 w-11 items-center justify-center text-zinc-400 hover:bg-white/[0.05] hover:text-white disabled:cursor-not-allowed disabled:text-zinc-700" aria-label="Tambah jumlah akun">
+                        <i className="ri-add-line" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 flex items-end justify-between gap-4 border-t border-white/[0.08] pt-5">
+                    <span className="text-sm text-zinc-400">Total pembayaran</span>
+                    <strong className="text-2xl font-semibold tracking-tight text-white">{formatRupiah((selection?.price || 0) * quantity)}</strong>
+                  </div>
+
+                  {error ? <div role="alert" className="mt-4 rounded-lg border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{error}</div> : null}
+
+                  <button
+                    type="button"
+                    onClick={submitOrder}
+                    disabled={submitting || !selection || resellerCheck.status === "checking" || resellerCheck.status === "invalid"}
+                    className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-white px-4 text-sm font-semibold text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500"
+                  >
+                    {submitting ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-black/20 border-t-black" aria-hidden="true" /> : <i className="ri-arrow-right-line" aria-hidden="true" />}
+                    {submitting ? "Memproses pesanan..." : "Lanjut ke Pembayaran"}
+                  </button>
+                  <p className="mt-3 text-center text-xs leading-5 text-zinc-600">Tombol dikunci selama proses agar pesanan tidak dibuat dua kali.</p>
+                </aside>
               </div>
             ) : null}
 
             {step === "payment" ? (
-              <div className="grid gap-5 p-5 md:grid-cols-[0.85fr_1fr]">
-                <div className="flex min-h-0 items-center rounded-md border border-gray-100 bg-[#fbf7f0] p-4 md:min-h-[420px]">
-                  <div className="w-full">
-                    <p className="text-xs font-medium uppercase text-slate-400">Ringkasan</p>
-                    <h2 className="mt-2 text-lg font-semibold">{createdOrder?.product}</h2>
-                    <p className="mt-1 text-sm text-slate-500">
-                      {createdOrder?.variant} - {createdOrder?.duration} x{createdOrder?.qty || 1} akun
-                    </p>
-                    <div className="mt-4 text-2xl font-bold">{formatRupiah(createdOrder?.total || 0)}</div>
-                    <div className="mt-4 rounded-md bg-white/70 p-3 text-sm">
+              <div className="grid gap-6 p-5 sm:p-7 md:grid-cols-[0.92fr_1.08fr]">
+                <div className="rounded-lg border border-white/[0.08] bg-[var(--kavya-bg-elevated)] p-5">
+                  <p className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-600">Ringkasan pesanan</p>
+                  <h2 className="mt-4 text-xl font-semibold text-white">{createdOrder?.product}</h2>
+                  <p className="mt-1 text-sm leading-6 text-zinc-400">
+                    {createdOrder?.variant} / {createdOrder?.duration} / {createdOrder?.qty || 1} akun
+                  </p>
+                  <div className="mt-5 text-3xl font-semibold tracking-tight text-white">{formatRupiah(createdOrder?.total || 0)}</div>
+                  <dl className="mt-6 space-y-3 border-t border-white/[0.08] pt-5 text-sm">
                       {depositUsed > 0 ? (
-                        <div className="flex items-center justify-between gap-3 text-slate-500">
-                          <span>Deposit dipakai</span>
-                          <span className="font-semibold text-slate-800">{formatRupiah(depositUsed)}</span>
+                        <div className="flex items-center justify-between gap-3 text-zinc-500">
+                          <dt>Deposit dipakai</dt>
+                          <dd className="font-medium text-zinc-200">{formatRupiah(depositUsed)}</dd>
                         </div>
                       ) : null}
-                      <div className={`${depositUsed > 0 ? "mt-2" : ""} flex items-center justify-between gap-3 text-slate-500`}>
-                        <span>Nominal QRIS</span>
-                        <span className="font-semibold text-slate-800">{formatRupiah(qrisNominal || paymentDue)}</span>
+                      <div className="flex items-center justify-between gap-3 text-zinc-500">
+                        <dt>Nominal</dt>
+                        <dd className="font-medium text-zinc-200">{formatRupiah(qrisNominal || paymentDue)}</dd>
                       </div>
-                      <div className="mt-2 flex items-center justify-between gap-3 text-slate-500">
-                        <span>Biaya Admin</span>
-                        <span className="font-semibold text-slate-800">{formatRupiah(qrisFee)}</span>
+                      {qrisCustomerFee > 0 ? (
+                        <div className="flex items-center justify-between gap-3 text-zinc-500">
+                          <dt>Biaya admin</dt>
+                          <dd className="font-medium text-zinc-200">{formatRupiah(qrisCustomerFee)}</dd>
+                        </div>
+                      ) : null}
+                      <div className="flex items-center justify-between gap-3 border-t border-white/[0.08] pt-3 text-zinc-300">
+                        <dt>Total pembayaran</dt>
+                        <dd className="font-semibold text-white">{formatRupiah(qrisTotal || paymentDue)}</dd>
                       </div>
-                      <div className="mt-2 flex items-center justify-between gap-3 border-t border-slate-100 pt-2 text-slate-700">
-                        <span>Total Bayar QRIS</span>
-                        <span className="font-semibold text-red-600">{formatRupiah(qrisTotal || paymentDue)}</span>
-                      </div>
+                  </dl>
+                  <dl className="mt-6 space-y-3 border-t border-white/[0.08] pt-5 text-sm">
+                    <div>
+                      <dt className="text-xs uppercase tracking-wider text-zinc-600">Nomor pesanan</dt>
+                      <dd className="mt-2 flex min-w-0 items-center gap-2">
+                        <span className="min-w-0 break-all font-mono text-xs text-zinc-300">{createdOrder?.id}</span>
+                        <button type="button" onClick={() => copyCheckoutValue("order", createdOrder?.id || "")} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 text-zinc-400 hover:border-white/20 hover:text-white" aria-label="Salin nomor pesanan">
+                          <i className={copiedValue === "order" ? "ri-check-line text-emerald-300" : "ri-file-copy-line"} />
+                        </button>
+                      </dd>
                     </div>
-                    <div className="mt-3 text-sm text-slate-500">Order ID: {createdOrder?.id}</div>
-                    <div className="text-sm text-slate-500">Ref: {createdOrder?.paymentRef}</div>
-                    <div className="text-sm text-slate-500">Batas bayar: {createdOrder?.paymentExpiresAt || payment?.expiresAt || "-"}</div>
-                  </div>
+                    <div><dt className="text-xs uppercase tracking-wider text-zinc-600">Metode pembayaran</dt><dd className="mt-1 text-zinc-300">{payment?.paymentMethod || createdOrder?.paymentMethod || "QRIS"}</dd></div>
+                    <div><dt className="text-xs uppercase tracking-wider text-zinc-600">Status pembayaran</dt><dd className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${paymentStatusTone(currentPaymentStatus)}`}>{paymentStatusLabel(currentPaymentStatus)}</dd></div>
+                    <div><dt className="text-xs uppercase tracking-wider text-zinc-600">Batas pembayaran</dt><dd className="mt-1 text-zinc-300">{formatCheckoutDate(createdOrder?.paymentExpiresAt || payment?.expiresAt || "")}</dd></div>
+                  </dl>
                 </div>
-                <div className="rounded-md border border-gray-100 p-4 text-center">
-                  <p className="text-sm font-semibold">QRIS Pakasir</p>
-                  <p className="mt-1 text-xs text-slate-500">Scan QRIS sebesar {formatRupiah(qrisTotal || paymentDue)}, lalu status akan ikut update ke dashboard dan WhatsApp flow.</p>
-                  <div className="mx-auto mt-4 flex aspect-square w-full max-w-[284px] items-center justify-center rounded-md border border-gray-100 bg-white p-3">
-                    {qrSrc ? <img src={qrSrc} alt="QRIS Pakasir" className="h-full w-full object-contain" /> : <span className="text-sm text-slate-400">QRIS belum tersedia</span>}
+
+                <div className="rounded-lg border border-white/[0.08] bg-[var(--kavya-bg-elevated)] p-5 text-center">
+                  <div className="flex items-center justify-between gap-3 text-left">
+                    <div>
+                      <p className="text-base font-semibold text-white">{paymentStatusLabel(currentPaymentStatus)}</p>
+                      <p className="mt-1 text-sm text-zinc-500">Status pembayaran akan diperbarui secara otomatis.</p>
+                    </div>
+                    <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${countdown.expired ? "border-rose-400/20 bg-rose-400/10 text-rose-300" : "border-cyan-300/20 bg-cyan-300/10 text-cyan-200"}`}>
+                      {countdown.label}
+                    </span>
                   </div>
+                  {qrSrc ? (
+                    <button type="button" onClick={() => setQrExpanded(true)} className="mx-auto mt-5 flex aspect-square w-full max-w-[280px] items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-white p-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-violet-400 sm:max-w-[300px]" aria-label="Perbesar QRIS">
+                      <img src={qrSrc} alt="QRIS pembayaran Kavya" className="h-full w-full object-contain" />
+                    </button>
+                  ) : (
+                    <div className="mx-auto mt-5 flex aspect-square w-full max-w-[280px] items-center justify-center rounded-lg border border-white/10 bg-white/[0.025] p-4 text-sm text-zinc-500">
+                      QRIS belum tersedia. Coba periksa status.
+                    </div>
+                  )}
+                  {qrSrc ? <p className="mt-2 text-xs text-zinc-600">Tekan QRIS untuk memperbesar.</p> : null}
                   {payment?.providerError || createdOrder?.paymentError ? (
-                    <div className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-left text-xs text-amber-700">
-                      {payment?.providerError || createdOrder?.paymentError}
+                    <div role="alert" className="mt-4 rounded-lg border border-amber-300/20 bg-amber-300/10 px-4 py-3 text-left text-sm text-amber-200">
+                      Pembayaran belum dapat diperiksa. Coba lagi atau hubungi bantuan.
                     </div>
                   ) : null}
-                  <div className="mt-4 flex flex-wrap justify-center gap-2">
+                  {error ? <div role="alert" className="mt-4 rounded-lg border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-left text-sm text-rose-200">{error}</div> : null}
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => refreshCurrentOrder({ manual: true })}
+                      disabled={checkingPayment || paymentRefreshLockRef.current}
+                      className="inline-flex min-h-12 items-center justify-center rounded-lg bg-white px-4 text-sm font-semibold text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {checkingPayment ? <span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-black/20 border-t-black" aria-hidden="true" /> : null}
+                      {checkingPayment ? "Sedang memeriksa..." : "Cek Status Pembayaran"}
+                    </button>
                     {payment?.paymentUrl || createdOrder?.qrisUrl ? (
-                      <a href={payment?.paymentUrl || createdOrder?.qrisUrl} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center justify-center rounded-md bg-[#2b2b2b] px-4 text-sm font-medium text-white">
-                        Buka Pakasir
+                      <a href={payment?.paymentUrl || createdOrder?.qrisUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-12 items-center justify-center rounded-lg border border-white/10 px-4 text-sm font-semibold text-zinc-200 transition-colors hover:border-white/20 hover:bg-white/[0.04]">
+                        Buka Halaman Pembayaran
                       </a>
                     ) : null}
-                    <Link to={`/order-tracking?order=${createdOrder?.id || ""}`} className="inline-flex h-10 items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-sm font-medium text-slate-700">
-                      Lacak Order
-                    </Link>
+                  </div>
+                  <div className="mt-5 border-t border-white/[0.08] pt-4 text-left text-sm text-zinc-500">
+                    Bermasalah saat membayar? <a href={ownerContactHref(ownerWhatsApp, createdOrder?.id || "")} target="_blank" rel="noreferrer" className="font-medium text-zinc-200 underline decoration-white/20 underline-offset-4 hover:text-white">Hubungi bantuan</a>
                   </div>
                 </div>
+                {qrExpanded && qrSrc ? (
+                  <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="QRIS diperbesar" onClick={() => setQrExpanded(false)}>
+                    <div className="w-full max-w-md rounded-xl border border-white/10 bg-[var(--kavya-surface)] p-4" onClick={(event) => event.stopPropagation()}>
+                      <div className="flex items-center justify-between gap-3">
+                        <div><p className="font-semibold text-white">QRIS Pembayaran</p><p className="mt-1 break-all font-mono text-xs text-zinc-500">{createdOrder?.id}</p></div>
+                        <button type="button" onClick={() => setQrExpanded(false)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/10 text-zinc-400 hover:text-white" aria-label="Tutup QRIS">
+                          <i className="ri-close-line text-xl" />
+                        </button>
+                      </div>
+                      <div className="mt-4 aspect-square overflow-hidden rounded-lg bg-white p-3">
+                        <img src={qrSrc} alt="QRIS pembayaran Kavya diperbesar" className="h-full w-full object-contain" />
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
             {step === "process" || step === "done" ? (
-              <div className="p-8 text-center">
-                <div className={`mx-auto flex h-14 w-14 items-center justify-center rounded-full ${step === "done" ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"}`}>
+              <div className="p-6 text-center sm:p-10">
+                <div className={`mx-auto flex h-14 w-14 items-center justify-center rounded-full border ${step === "done" ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-300" : "border-amber-300/20 bg-amber-300/10 text-amber-200"}`}>
                   <i className={step === "done" ? "ri-check-line text-2xl" : "ri-time-line text-2xl"} />
                 </div>
-                <h2 className="mt-4 text-xl font-semibold">{stockRaceDeposit ? "Stok habis, saldo bertambah" : step === "done" ? "Order selesai" : "Pembayaran diterima, pesanan diproses"}</h2>
-                <p className="mt-2 text-sm text-slate-500">
+                <h2 className="mt-5 text-2xl font-semibold text-white">{stockRaceDeposit ? "Stok habis, saldo bertambah" : step === "done" ? "Pesanan selesai" : "Pembayaran berhasil"}</h2>
+                <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-zinc-400">
                   {stockRaceDeposit
                     ? "Pembayaran sudah diterima, tapi stok produk sudah habis. Nominal order otomatis masuk ke saldo reseller untuk order berikutnya."
                     : step === "done"
-                      ? `Pembelian berhasil. ${createdOrder?.qty && createdOrder.qty > 1 ? `${createdOrder.qty} detail akun sudah tersedia. ` : ""}Simpan Order ID untuk bantuan owner jika ada kendala.`
-                      : "Sistem sedang menyiapkan stok akun. Stok diberikan ke pembayar tercepat."}
+                      ? `Akun ${createdOrder?.product || "produk"} berhasil diberikan dan sudah tersimpan di menu Akun Saya.`
+                      : "Pesananmu sudah diterima dan sedang diproses."}
                 </p>
-                {step === "done" && createdOrder ? (
-                  <div className="mx-auto mt-4 inline-flex rounded-full bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
-                    Order ID: {createdOrder.id}
+                {createdOrder ? (
+                  <dl className="mx-auto mt-6 grid max-w-3xl gap-px overflow-hidden rounded-lg border border-white/[0.08] bg-white/[0.08] text-left sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="bg-[var(--kavya-bg-elevated)] p-4"><dt className="text-xs uppercase tracking-wider text-zinc-600">Nomor pesanan</dt><dd className="mt-2 break-all font-mono text-xs text-zinc-300">{createdOrder.id}</dd></div>
+                    <div className="bg-[var(--kavya-bg-elevated)] p-4"><dt className="text-xs uppercase tracking-wider text-zinc-600">Produk</dt><dd className="mt-2 text-sm font-medium text-zinc-200">{createdOrder.product}<span className="mt-1 block text-xs font-normal text-zinc-500">{createdOrder.variant}</span></dd></div>
+                    <div className="bg-[var(--kavya-bg-elevated)] p-4"><dt className="text-xs uppercase tracking-wider text-zinc-600">Nominal</dt><dd className="mt-2 text-sm font-medium text-zinc-200">{formatRupiah(createdOrder.total || 0)}</dd></div>
+                    <div className="bg-[var(--kavya-bg-elevated)] p-4"><dt className="text-xs uppercase tracking-wider text-zinc-600">Waktu pembayaran</dt><dd className="mt-2 text-sm text-zinc-300">{formatCheckoutDate(createdOrder.paidAt || "")}</dd></div>
+                  </dl>
+                ) : null}
+                {step === "done" && canShowCredentials ? (
+                  <div className="mx-auto mt-5 max-w-4xl rounded-lg border border-emerald-400/20 bg-emerald-400/[0.05] px-4 py-3 text-left text-sm text-emerald-200">
+                    Akun baru berhasil ditambahkan ke Akun Saya.
                   </div>
                 ) : null}
-                {step === "done" && createdOrder?.fulfillmentText ? (
+                {canShowCredentials ? (
                   <div className="mx-auto mt-5 grid max-w-4xl gap-4 text-left md:grid-cols-2">
-                    <div className="min-w-0 rounded-md border border-emerald-100 bg-emerald-50/40 p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-semibold text-emerald-900">Detail Akun</p>
-                        <span className="rounded-full bg-white px-2 py-1 text-[10px] font-semibold uppercase text-emerald-700">Paid</span>
+                    <div className="min-w-0 rounded-lg border border-emerald-400/15 bg-emerald-400/[0.04] p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <p className="text-sm font-semibold text-zinc-100">Detail Akun</p>
+                        <div className="flex gap-2">
+                          <button type="button" onClick={() => setCredentialsVisible((visible) => !visible)} className="min-h-9 rounded-lg border border-white/10 px-3 text-xs font-semibold text-zinc-300 hover:border-white/20 hover:text-white">
+                            {credentialsVisible ? "Sembunyikan" : "Tampilkan"}
+                          </button>
+                          <button type="button" onClick={() => copyCheckoutValue("credential", credentialText)} disabled={!credentialsVisible} className="min-h-9 rounded-lg border border-white/10 px-3 text-xs font-semibold text-zinc-300 hover:border-white/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-40">
+                            {copiedValue === "credential" ? "Tersalin" : "Salin"}
+                          </button>
+                        </div>
                       </div>
-                      <pre className="mt-3 max-h-72 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-white p-4 font-mono text-xs leading-5 text-slate-700">
-                        {fulfillment.account}
-                      </pre>
+                      <div className="mt-3 min-h-36 rounded-md border border-white/[0.06] bg-black/20 p-4">
+                        {credentialsVisible ? (
+                          <div className="space-y-2">
+                            {deliveryCredentialFields.length ? deliveryCredentialFields.map((field) => (
+                              <div key={field.key} className="flex min-h-11 items-center justify-between gap-3 rounded-md border border-white/[0.06] px-3 py-2">
+                                <div className="min-w-0"><span className="block text-[11px] uppercase tracking-wide text-zinc-600">{field.label}</span><strong className="mt-0.5 block break-all font-mono text-xs font-medium text-zinc-300">{field.value}</strong></div>
+                                <button type="button" onClick={() => copyCheckoutValue(field.key, field.value)} className="shrink-0 rounded-md border border-white/10 px-2.5 py-2 text-[11px] font-semibold text-zinc-300 hover:text-white">{copiedValue === field.key ? "Tersalin" : "Salin"}</button>
+                              </div>
+                            )) : <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-zinc-300">{credentialText}</pre>}
+                          </div>
+                        ) : (
+                          <div className="flex min-h-28 items-center justify-center text-center text-sm leading-6 text-zinc-500">
+                            Credential disembunyikan. Tekan Tampilkan untuk melihat selama 60 detik.
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <div className="min-w-0 rounded-md border border-amber-100 bg-amber-50/50 p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-semibold text-amber-900">S&K Produk</p>
-                        <span className="rounded-full bg-white px-2 py-1 text-[10px] font-semibold uppercase text-amber-700">Scroll jika panjang</span>
+                    <div className="min-w-0 rounded-lg border border-violet-300/15 bg-violet-300/[0.04] p-4">
+                      <div className="flex min-h-11 flex-wrap items-center justify-between gap-3">
+                        <div><p className="text-sm font-semibold text-zinc-100">Template Siap Kirim</p><p className="mt-1 text-xs text-zinc-500">{deliveryTemplateText ? "Siap dikirim ke customer" : deliverySnapshot?.status === "incomplete" ? "Detail akun belum lengkap" : "Template belum dikonfigurasi"}</p></div>
+                        {deliveryTemplateText ? <button type="button" onClick={() => copyCheckoutValue("template", deliveryTemplateText)} className="min-h-9 rounded-lg bg-white px-3 text-xs font-semibold text-black hover:bg-zinc-200">{copiedValue === "template" ? "Template berhasil disalin" : "Salin Semua"}</button> : null}
                       </div>
-                      <pre className="mt-3 max-h-72 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-white p-4 font-mono text-xs leading-5 text-slate-700">
-                        {snkText}
-                      </pre>
+                      {deliveryTemplateText ? <pre className="mt-3 max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-white/[0.06] bg-black/20 p-4 font-mono text-xs leading-5 text-zinc-300">{deliveryTemplateText}</pre> : <div className="mt-3 flex min-h-36 items-center justify-center rounded-md border border-white/[0.06] bg-black/20 p-4 text-center text-sm leading-6 text-zinc-500">{deliverySnapshot?.status === "incomplete" ? `Owner perlu melengkapi: ${(deliverySnapshot.missingFields || []).join(", ") || "detail akun"}.` : "Template pengiriman untuk varian ini belum tersedia."}</div>}
                     </div>
                   </div>
                 ) : null}
-                <div className="mt-5 flex flex-wrap justify-center gap-2">
-                  <Link to={`/order-tracking?order=${createdOrder?.id || ""}`} className="inline-flex h-10 items-center justify-center rounded-md bg-[#2b2b2b] px-4 text-sm font-medium text-white">
-                    Lacak Order
+                <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row sm:flex-wrap">
+                  <Link to={isAuthenticatedResellerCheckout && deliveredAccountId ? `/reseller-v2/accounts?account=${encodeURIComponent(deliveredAccountId)}&tab=template` : isResellerCheckout ? "/reseller-v2/accounts" : trackingHref} className="inline-flex min-h-12 items-center justify-center rounded-lg bg-white px-5 text-sm font-semibold text-black transition-colors hover:bg-zinc-200">
+                    {isAuthenticatedResellerCheckout ? "Lihat Akun yang Dibeli" : "Lacak Pesanan"}
                   </Link>
-                  <a href={ownerContactHref(ownerWhatsApp, createdOrder?.id || "")} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center justify-center rounded-md border border-red-100 bg-white px-4 text-sm font-medium text-red-600 hover:bg-red-50">
-                    Hubungi Owner
-                  </a>
+                  {isAuthenticatedResellerCheckout ? <Link to="/reseller-v2/orders" className="inline-flex min-h-12 items-center justify-center rounded-lg border border-white/10 px-5 text-sm font-semibold text-zinc-200 transition-colors hover:border-white/20 hover:bg-white/[0.04]">Lihat Pesanan</Link> : null}
+                  <Link to={isAuthenticatedResellerCheckout ? "/reseller-v2/ringkasan" : "/"} className="inline-flex min-h-12 items-center justify-center rounded-lg px-5 text-sm font-medium text-zinc-500 transition-colors hover:text-white">
+                    {isAuthenticatedResellerCheckout ? "Kembali ke Ringkasan" : "Kembali ke Beranda"}
+                  </Link>
                 </div>
               </div>
             ) : null}
           </section>
 
-          <p className="mt-20 text-center text-sm text-slate-400">Pembayaran aman - Proses cepat - Garansi penuh</p>
+          <p className="mt-10 text-center text-sm text-zinc-600">Pembayaran terhubung langsung dengan status pesanan Kavya.</p>
         </main>
       </PageTransition>
     );

@@ -90,6 +90,7 @@ await fs.writeFile(databasePath, JSON.stringify(db, null, 2));
 let failure = null;
 try {
   process.env.DATABASE_PATH = databasePath;
+  process.env.AUTH_SECRET = "kavya-regression-test-auth-secret-32-characters";
   process.env.PORT = String(port);
   process.env.PUBLIC_APP_URL = `http://127.0.0.1:${port}`;
   process.env.APP_PUBLIC_URL = `http://127.0.0.1:${port}`;

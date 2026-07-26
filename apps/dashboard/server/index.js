@@ -8,7 +8,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { handleInboundMessage, fulfillPaidOrder, formatRupiah, buildOrderCreatedReply, buildDepositCreatedReply, createDepositTopupOrder } from "./auto-order.js";
+import { handleInboundMessage, fulfillPaidOrder, formatRupiah, buildOrderCreatedReply, buildDepositCreatedReply, createDepositTopupOrder, refreshOrderDeliveryTemplateSnapshot } from "./auto-order.js";
 import {
   clearAccountsInGoogleSheets,
   ensureGoogleSheetsTemplate,
@@ -18,12 +18,63 @@ import {
   previewAccountSheetMapping,
   pushAccountsToGoogleSheets,
   pushFulfilledOrderToGoogleSheets,
+  syncDataResellerToGoogleSheetsSafely,
+  syncDataResellersToGoogleSheets,
   syncAccountCredentialsToGoogleSheets,
   syncGoogleSheetsStock,
 } from "./google-sheets.js";
 import { applyWaPriceSync, findWaPriceSource, previewWaPriceSync } from "./price-sync.js";
+import { registerAuthRoutes } from "./routes/auth-routes.js";
+import { registerAccountRoutes } from "./routes/account-routes.js";
+import { registerCatalogRoutes } from "./routes/catalog-routes.js";
+import { registerOperationsRoutes } from "./routes/operations-routes.js";
+import { registerOrderRoutes } from "./routes/order-routes.js";
+import { registerPaymentRoutes } from "./routes/payment-routes.js";
+import { registerProductAdminRoutes } from "./routes/product-admin-routes.js";
+import { registerResellerRoutes } from "./routes/reseller-routes.js";
+import { registerSettingsRoutes } from "./routes/settings-routes.js";
+import { registerSheetsRoutes } from "./routes/sheets-routes.js";
+import { registerStockRoutes } from "./routes/stock-routes.js";
+import { registerSystemRoutes } from "./routes/system-routes.js";
+import { registerWhatsAppRoutes } from "./routes/whatsapp-routes.js";
 import { mergeGoogleSheetsSettings } from "./settings-merge.js";
-import { databasePath, ensureDb, getDbVersion, makeId, nowText, onDbChange, readDb, todayText, updateDb, writeDb } from "./store.js";
+import { stockBlockedByAccountCondition } from "./google-sheets/account-condition.js";
+import { createOrderStockService } from "./services/order-stock-service.js";
+import { createFulfillmentNotificationService } from "./services/fulfillment-notification-service.js";
+import { createPaymentReconciliationService } from "./services/payment-reconciliation-service.js";
+import { createOperationsRepairService } from "./services/operations-repair-service.js";
+import { createReadMaintenanceService } from "./services/read-maintenance-service.js";
+import { snapshotVersion } from "./services/read-snapshot-service.js";
+import { createSettingsMigrationService } from "./services/settings-migration-service.js";
+import { createSettingsStartupMigrationService } from "./services/settings-startup-migration-service.js";
+import {
+  createPublicTrackingLimiter,
+  ensureOrderTrackingToken,
+  findOrderForPublicTracking,
+  safeTrackingOrder,
+  safeTrackingPayment,
+} from "./services/public-order-tracking-service.js";
+import { deriveProviderTotalPayment } from "./services/payment-total-service.js";
+import { selfRegistrationWelcomeMessage } from "./services/registration-service.js";
+import {
+  checkoutFieldsForVariant as structuredCheckoutFieldsForVariant,
+  normalizeCheckoutField,
+} from "./services/checkout-fields-service.js";
+import { isDeliverableManagedAccount } from "./services/sheet-sync-status-service.js";
+import { databasePath, ensureDb, getDbVersion, makeId, nowText, onDbChange, readDb, readDbSnapshot, todayText, updateDb, writeDb } from "./store.js";
+import {
+  SESSION_COOKIE_NAME,
+  assertTrustedBrowserMutation,
+  clearSessionCookie,
+  configuredOrigins,
+  corsOptions,
+  hashPassword,
+  isPasswordHash,
+  parseCookies,
+  requestUsesHttps,
+  sessionCookie,
+  verifyPassword,
+} from "./security.js";
 import {
   isCanvaProduct,
   isLinkPoolProduct,
@@ -62,14 +113,25 @@ const port = Number(configuredPort || 4174);
 const host = configuredHost || "127.0.0.1";
 const paymentTtlMinutes = Math.max(1, Math.floor(Number(process.env.PAYMENT_TTL_MINUTES || 15) || 15));
 const resellerRequiredMessage = "Nomor WhatsApp ini belum terdaftar sebagai reseller Kavya. Pembelian hanya untuk reseller aktif. Hubungi owner untuk daftar atau aktivasi reseller.";
+const allowedBrowserOrigins = configuredOrigins(
+  process.env.PUBLIC_DOMAIN,
+  process.env.CORS_ALLOWED_ORIGINS,
+  `http://${configuredHost || "127.0.0.1"}:${configuredPort || 4174}`,
+);
 
-app.use(cors());
+app.set("trust proxy", 1);
+app.use(cors(corsOptions(allowedBrowserOrigins)));
 app.use(express.json({ limit: "1mb" }));
 app.use("/api", (req, res, next) => {
   res.setHeader("Cache-Control", "private, no-store, no-cache, max-age=0, must-revalidate");
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
-  next();
+  try {
+    assertTrustedBrowserMutation(req, allowedBrowserOrigins);
+    next();
+  } catch (error) {
+    next(error);
+  }
 });
 
 function getProduct(db, productId) {
@@ -292,99 +354,24 @@ async function syncSheetsForProductOrThrow(db, product, reason = "stock_precheck
   return result;
 }
 
-function availableStockCount(db, product, variant) {
-  let availableCount = 0;
-  if (product && variant && isVariantOrderable(product, variant)) {
-    if (isLinkPoolProduct(db, product, variant)) {
-      availableCount = linkPoolsForVariant(db, product, variant).reduce((total, pool) => total + linkPoolAvailableCount(db, pool), 0);
-      if (availableCount <= 0 && isCanvaProduct(product)) {
-        availableCount = stockForVariant(db, product, variant, "available").length;
-      }
-    } else {
-      availableCount = stockForVariant(db, product, variant, "available").length;
-    }
-  }
-  return availableCount;
-}
-
-function availableStockOrThrow(db, product, variant, qty = 1) {
-  const availableCount = availableStockCount(db, product, variant);
-  if (availableCount < qty) {
-    const error = new Error(`Stok ${product?.name || "produk"} ${variant?.name || ""} tidak cukup. Tersedia ${availableCount}, diminta ${qty}.`);
-    error.status = 409;
-    throw error;
-  }
-  return availableCount;
-}
-
-async function ensureWebOrderStock(db, order, product, variant, qty = 1) {
-  const requestedQty = Math.max(1, Number(qty || 1));
-  const linkPoolOrder = isLinkPoolProduct(db, product, variant);
-  await syncSheetsForProductOrThrow(db, product, "web_order_stock_authority", { force: true });
-  async function retryAfterSync() {
-    await syncGoogleSheetsStockSafely(db, { silent: true, reason: "web_order_stock_recheck", force: true });
-  }
-
-  if (linkPoolOrder) {
-    let availableCount = availableStockCount(db, product, variant);
-    if (availableCount < requestedQty) {
-      try {
-        await retryAfterSync();
-        availableCount = availableStockCount(db, product, variant);
-      } catch {}
-    }
-    if (availableCount < requestedQty) {
-      const error = new Error(`Stok ${product?.name || "produk"} ${variant?.name || ""} tidak cukup. Tersedia ${availableCount}, diminta ${requestedQty}.`);
-      error.status = 409;
-      throw error;
-    }
-    return [];
-  }
-
-  let reservedStocks = reserveAvailableStocksForOrder(db, order, product, variant, requestedQty);
-  if (reservedStocks.length < requestedQty) {
-    try {
-      await retryAfterSync();
-      reservedStocks = reserveAvailableStocksForOrder(db, order, product, variant, requestedQty);
-    } catch {}
-  }
-  if (reservedStocks.length < requestedQty) {
-    const error = new Error(`Stok ${product?.name || "produk"} ${variant?.name || ""} tidak cukup. Tersedia ${reservedStocks.length}, diminta ${requestedQty}.`);
-    error.status = 409;
-    throw error;
-  }
-  return reservedStocks;
-}
-
-function clearReservedStockState(stock) {
-  stock.status = "available";
-  delete stock.reservedFor;
-  delete stock.reservedAccountId;
-  delete stock.reservedUntil;
-  delete stock.reservedAt;
-}
-
-function reserveAvailableStocksForOrder(db, order, product, variant, qty = 1) {
-  if (isLinkPoolProduct(db, product, variant)) return [];
-  const blockedStockIds = new Set((db.managedAccounts || [])
-    .filter((account) => account && !account.hidden && !account.returnedToStockAt && !isTerminalManagedAccountStatus(account.status || ""))
-    .filter((account) => String(account.orderId || account.sourceOrderId || "").trim() !== String(order.id || "").trim())
-    .map((account) => String(account.stockId || "").trim())
-    .filter(Boolean));
-  const stocks = stockForVariant(db, product, variant, "available")
-    .filter((stock) => !blockedStockIds.has(String(stock.id || "").trim()))
-    .slice(0, qty);
-  if (stocks.length < qty) return [];
-  const reservedAt = nowText();
-  for (const stock of stocks) {
-    stock.status = "reserved";
-    stock.reservedFor = order.id;
-    stock.reservedUntil = order.paymentExpiresAt || "";
-    stock.reservedAt = reservedAt;
-  }
-  order.reservedStockIds = stocks.map((stock) => stock.id);
-  return stocks;
-}
+const {
+  availableStockCount,
+  availableStockOrThrow,
+  clearReservedStockState,
+  ensureWebOrderStock,
+  reserveAvailableStocksForOrder,
+} = createOrderStockService({
+  isCanvaProduct,
+  isLinkPoolProduct,
+  isTerminalManagedAccountStatus,
+  isVariantOrderable,
+  linkPoolAvailableCount,
+  linkPoolsForVariant,
+  nowText,
+  stockForVariant,
+  syncGoogleSheetsStockSafely,
+  syncSheetsForProductOrThrow,
+});
 
 function publicCatalog(db, options = {}) {
   const includeEmpty = Boolean(options.includeEmpty);
@@ -407,6 +394,9 @@ function publicCatalog(db, options = {}) {
             ...variant,
             prices: pricesAllowedForVariant(variant),
             checkoutRequirements: checkoutRequirementsForVariant(db, product, variant),
+            checkoutFields: structuredCheckoutFieldsForVariant(product, variant, {
+              legacyRequirements: checkoutRequirementsForVariant(db, product, variant),
+            }),
             stockCount,
             stockIds: linkPool
               ? Array.from({ length: stockCount }, (_, index) => `${variant.id}-link-slot-${index}`)
@@ -479,29 +469,23 @@ function firstUsableSecret(...values) {
 
 function parseBotPublicUrlInput(value) {
   const raw = String(value || "").trim();
-  if (!raw) return { publicUrl: "", tokenFromUrl: "" };
+  if (!raw) return { publicUrl: "" };
   try {
     const url = new URL(raw);
-    const tokenFromUrl = url.searchParams.get("token") || "";
     if (url.pathname.includes("/session/qr")) {
       url.pathname = url.pathname.replace(/\/session\/qr.*$/, "") || "/";
     }
     url.search = "";
     url.hash = "";
-    return {
-      publicUrl: url.toString().replace(/\/$/, ""),
-      tokenFromUrl: /^TOKEN_/i.test(tokenFromUrl) ? "" : tokenFromUrl,
-    };
+    return { publicUrl: url.toString().replace(/\/$/, "") };
   } catch {
-    return { publicUrl: raw.replace(/\/session\/qr.*$/, "").replace(/\/$/, ""), tokenFromUrl: "" };
+    return { publicUrl: raw.replace(/\/session\/qr.*$/, "").replace(/\/$/, "") };
   }
 }
 
 function randomSecret(prefix) {
   return `${prefix}_${crypto.randomBytes(24).toString("hex")}`;
 }
-
-const runtimeAuthSecretFallback = randomSecret("auth");
 
 function assertInboundToken(req, db = {}) {
   const expectedTokens = configuredTokens(
@@ -528,7 +512,11 @@ function assertPakasirSecret(req, db = {}) {
     firstUsableSecret(db.settings?.pakasirWebhookSecret),
     firstUsableSecret(process.env.PAKASIR_WEBHOOK_SECRET),
   );
-  if (!expectedTokens.length) return;
+  if (!expectedTokens.length) {
+    const error = new Error("Pakasir webhook secret belum dikonfigurasi");
+    error.status = 503;
+    throw error;
+  }
   const actual = req.get("x-pakasir-secret") || req.body?.secret;
   if (!expectedTokens.includes(String(actual || "").trim())) {
     const error = new Error("Invalid Pakasir webhook secret");
@@ -538,13 +526,22 @@ function assertPakasirSecret(req, db = {}) {
 }
 
 function ownerCredentials(db = {}) {
+  const passwordHash = firstUsableSecret(db.settings?.ownerPasswordHash);
   const storedPassword = firstUsableSecret(db.settings?.ownerPassword);
   const envPassword = firstUsableSecret(process.env.OWNER_PASSWORD, process.env.OWNER_LOGIN_PASSWORD);
-  const password = storedPassword && storedPassword !== "admin12345" ? storedPassword : envPassword;
   return {
     email: firstConfigured(db.settings?.ownerEmail, process.env.OWNER_EMAIL, process.env.OWNER_LOGIN_EMAIL),
-    password,
+    passwordHash,
+    legacyPassword: storedPassword && storedPassword !== "admin12345" ? storedPassword : envPassword,
   };
+}
+
+function ownerPasswordConfigured(credentials = {}) {
+  return Boolean(credentials.passwordHash || credentials.legacyPassword);
+}
+
+function verifyOwnerPassword(credentials = {}, password = "") {
+  return verifyPassword(password, credentials.passwordHash || credentials.legacyPassword || "");
 }
 
 function ownerProfile(db) {
@@ -638,12 +635,36 @@ function ownerIntegrationSettings(db) {
   };
 }
 
+function maskedOwnerIntegrationSettings(db) {
+  const settings = ownerIntegrationSettings(db);
+  const masked = structuredClone(settings);
+  const mask = (value) => value ? STORED_SECRET_PLACEHOLDER : "";
+  masked.pakasir.apiKey = mask(settings.pakasir.apiKey);
+  masked.pakasir.webhookSecret = mask(settings.pakasir.webhookSecret);
+  masked.bailey.botToken = mask(settings.bailey.botToken);
+  masked.bailey.inboundToken = mask(settings.bailey.inboundToken);
+  masked.gmail.clientSecret = mask(settings.gmail.clientSecret);
+  masked.gmail.refreshToken = mask(settings.gmail.refreshToken);
+  masked.gmail.imapPassword = mask(settings.gmail.imapPassword);
+  masked.cloudflare.tunnelToken = mask(settings.cloudflare.tunnelToken);
+  return masked;
+}
+
+function mergeStoredSecret(input, stored = "") {
+  const value = String(input ?? "").trim();
+  return value === STORED_SECRET_PLACEHOLDER ? String(stored || "") : value;
+}
+
 function base64url(value) {
   return Buffer.from(typeof value === "string" ? value : JSON.stringify(value)).toString("base64url");
 }
 
 function authSecret() {
-  return firstUsableSecret(process.env.AUTH_SECRET, process.env.SESSION_SECRET, process.env.OWNER_PASSWORD) || runtimeAuthSecretFallback;
+  const secret = firstUsableSecret(process.env.AUTH_SECRET, process.env.SESSION_SECRET);
+  if (!secret || secret.length < 32) {
+    throw new Error("AUTH_SECRET wajib diisi dengan secret acak minimal 32 karakter dan tidak boleh memakai password owner");
+  }
+  return secret;
 }
 
 function signPayload(payload) {
@@ -660,6 +681,19 @@ function sessionTtlSeconds(remember = false) {
   return Number.isFinite(ttl) && ttl > 0 ? ttl : remember ? rememberTtl : defaultTtl;
 }
 
+function setSessionCookie(req, res, token, remember = false) {
+  res.setHeader("Set-Cookie", sessionCookie(token, {
+    secure: requestUsesHttps(req) || process.env.NODE_ENV === "production",
+    maxAgeSeconds: sessionTtlSeconds(remember),
+  }));
+}
+
+function removeSessionCookie(req, res) {
+  res.setHeader("Set-Cookie", clearSessionCookie({
+    secure: requestUsesHttps(req) || process.env.NODE_ENV === "production",
+  }));
+}
+
 function issueAuthToken(session, sessionVersion = 0, options = {}) {
   const now = Math.floor(Date.now() / 1000);
   const header = base64url({ alg: "HS256", typ: "JWT" });
@@ -674,6 +708,16 @@ function issueAuthToken(session, sessionVersion = 0, options = {}) {
     exp: now + sessionTtlSeconds(Boolean(options.remember)),
   });
   return `${header}.${payload}.${signPayload(`${header}.${payload}`)}`;
+}
+
+function authSessionResponse(req, res, session, sessionVersion = 0, remember = false) {
+  const token = issueAuthToken(session, sessionVersion, { remember });
+  setSessionCookie(req, res, token, remember);
+  const payload = { ...session };
+  // CLI/regression clients may continue using Bearer tokens. Browser sessions
+  // receive only an HttpOnly cookie, so JavaScript never stores the JWT.
+  if (!req.get("origin")) payload.token = token;
+  res.json(payload);
 }
 
 function verifyAuthToken(token) {
@@ -703,7 +747,8 @@ function sessionVersionForAuth(db, auth) {
 function requireAuth(roles = ["owner", "reseller"]) {
   return async (req, res, next) => {
     const header = req.get("authorization") || "";
-    const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+    const bearer = header.startsWith("Bearer ") ? header.slice(7) : "";
+    const token = bearer || parseCookies(req.get("cookie") || "")[SESSION_COOKIE_NAME] || "";
     const auth = verifyAuthToken(token);
     if (!auth) {
       res.status(401).json({ error: "Sesi login tidak valid atau sudah berakhir" });
@@ -900,12 +945,12 @@ function deliveredAccountsForOrder(db, order = {}, options = {}) {
   const deliveredStockIds = new Set((order.deliveredStockIds || []).map((item) => String(item || "").trim()).filter(Boolean));
   const orderId = String(order.id || "").trim();
   const direct = (db.managedAccounts || []).filter((account) => (
-    (includeHidden || (!account.hidden && !account.returnedToStockAt))
+    (includeHidden || isDeliverableManagedAccount(account))
     && String(account.orderId || account.sourceOrderId || "").trim() === orderId
   ));
   if (direct.length) return direct;
   const fallback = (db.managedAccounts || []).filter((account) => {
-    if (!includeHidden && (account.hidden || account.returnedToStockAt)) return false;
+    if (!includeHidden && !isDeliverableManagedAccount(account)) return false;
     if (!deliveredStockIds.size || !deliveredStockIds.has(String(account.stockId || "").trim())) return false;
     if (order.expiresAt && String(account.expiresAt || "").trim() === String(order.expiresAt || "").trim()) return true;
     return sameMinuteBucket(account.startedAt, order.paidAt || order.createdAt);
@@ -918,7 +963,7 @@ function directManagedAccountsForOrder(db, order = {}, options = {}) {
   const orderId = String(order.id || "").trim();
   if (!orderId) return [];
   return (db.managedAccounts || []).filter((account) => (
-    (includeHidden || (!account.hidden && !account.returnedToStockAt))
+    (includeHidden || isDeliverableManagedAccount(account))
     && String(account.orderId || account.sourceOrderId || "").trim() === orderId
   ));
 }
@@ -1019,6 +1064,9 @@ function repairHistoricalStockReuse(db) {
 
   for (const stock of db.stock || []) {
     if (!isGoogleSheetsBackedStock(stock)) continue;
+    // Sheet-owned account health is authoritative. Recovery may repair
+    // historical links, but must never reopen or rewrite a blocked row.
+    if (stockBlockedByAccountCondition(stock)) continue;
     const stockStatus = String(stock.status || "").toLowerCase();
     const sheetReturned = stockStatus === "available";
     if (sheetReturned) continue;
@@ -1129,6 +1177,7 @@ function deliveryAccountSummary(account = {}, options = {}) {
     product: account.product || "",
     variant: account.variant || "",
     email: account.email || "",
+    loginPhone: account.loginPhone || "",
     profile: account.profile || "",
     startedAt: account.startedAt || "",
     expiresAt: account.expiresAt || "",
@@ -1141,6 +1190,10 @@ function deliveryAccountSummary(account = {}, options = {}) {
   if (includeSecrets) {
     summary.password = account.password || "";
     summary.pin = account.pin || "";
+    summary.canvaLink = account.canvaLink || "";
+    summary.deliveryTemplateSnapshot = account.deliveryTemplateSnapshot || null;
+    summary.deliveryTemplateUnreadAt = account.deliveryTemplateUnreadAt || "";
+    summary.deliveryTemplateOpenedAt = account.deliveryTemplateOpenedAt || "";
   }
   if (includeSheetMeta) {
     summary.sheetName = account.sheetName || "";
@@ -1157,6 +1210,16 @@ function orderBaseForApi(order = {}, options = {}) {
   if (!detail) {
     base.fulfillmentText = "";
     base.snkText = "";
+    base.deliveryTemplateSnapshot = order.deliveryTemplateSnapshot ? {
+      status: order.deliveryTemplateSnapshot.status || "not_configured",
+      variantId: order.deliveryTemplateSnapshot.variantId || order.variantId || "",
+      sku: order.deliveryTemplateSnapshot.sku || order.variantCode || "",
+      templateVersion: Number(order.deliveryTemplateSnapshot.templateVersion || 0),
+      renderedAt: order.deliveryTemplateSnapshot.renderedAt || "",
+      missingFields: order.deliveryTemplateSnapshot.missingFields || [],
+    } : null;
+    delete base.deliveryTemplateSnapshots;
+    delete base.trackingToken;
   }
   return base;
 }
@@ -1248,6 +1311,24 @@ function activityBelongsToReseller(db, auth, activity) {
 }
 
 const loginAttempts = new Map();
+const publicTrackingLimiter = createPublicTrackingLimiter();
+
+async function recordPublicTrackingAudit({ outcome, clientKey, orderId = "" }) {
+  const clientHash = crypto.createHash("sha256").update(String(clientKey || "unknown")).digest("hex").slice(0, 12);
+  await updateDb((db) => {
+    db.activities = db.activities || [];
+    db.activities.unshift({
+      id: makeId("act"),
+      type: "security",
+      title: "Public order tracking",
+      description: `Outcome ${outcome}; client ${clientHash}${orderId ? `; order ${orderId}` : ""}.`,
+      createdAt: nowText(),
+      orderId,
+    });
+    db.activities = db.activities.slice(0, 5_000);
+    return null;
+  });
+}
 
 function loginAttemptKey(req, email) {
   return `${req.ip || req.socket?.remoteAddress || "local"}::${email}`;
@@ -1633,6 +1714,27 @@ function resellerWelcomeMessage(db, reseller) {
   ]);
 }
 
+async function sendRegistrationCodeWhatsApp(db, { to, name, code }) {
+  return sendWhatsAppMessage(db, {
+    to,
+    text: [
+      `Halo ${name || "Kak"},`,
+      "",
+      `Kode OTP pendaftaran reseller Kavya: ${code}`,
+      "",
+      "Kode berlaku 10 menit. Jangan berikan kode ini kepada siapa pun.",
+      "Abaikan pesan ini jika kamu tidak meminta pendaftaran.",
+    ].join("\n"),
+  });
+}
+
+async function sendSelfRegistrationWelcomeWhatsApp(db, reseller) {
+  return sendWhatsAppMessage(db, {
+    to: reseller.whatsapp,
+    text: selfRegistrationWelcomeMessage(reseller),
+  });
+}
+
 async function sendResellerWelcomeWhatsApp(db, reseller) {
   return sendWhatsAppMessage(db, {
     to: reseller.whatsapp,
@@ -1770,129 +1872,22 @@ async function notifyResellerProfileChanged(db, before = {}, after = {}, actor =
   return { ...delivery, logged: true, changes };
 }
 
-async function fulfillPaidOrderAndNotify(db, orderId) {
-  const result = fulfillPaidOrder(db, orderId);
-  if (!result?.ok || !result.order || !result.reply) return result;
-  if (result.order.googleSheetsSyncStatus !== "synced") {
-    await pushFulfilledOrderToGoogleSheets(db, result);
-  }
-  const sheetCommitRequired = (result.order.deliveredStockIds || []).some((stockId) => {
-    const stock = (db.stock || []).find((item) => item.id === stockId);
-    return String(stock?.sheetSource || "").toLowerCase() === "google_sheets";
-  });
-  if (sheetCommitRequired && result.order.googleSheetsSyncStatus !== "synced") {
-    result.order.orderStatus = "processing";
-    result.order.deliveryStatus = "sheet_sync_failed";
-    result.order.fulfillmentBlockedReason = result.order.googleSheetsSyncError || "google_sheets_sync_failed";
-    db.activities = db.activities || [];
-    db.activities.unshift({
-      id: makeId("act"),
-      type: "order",
-      title: `Order ${result.order.id} tertahan saat commit Sheets`,
-      description: `Akun belum boleh dianggap terkirim karena assignment Google Sheets gagal: ${result.order.fulfillmentBlockedReason}.`,
-      createdAt: nowText(),
-      orderId: result.order.id,
-    });
-    return {
-      ...result,
-      reply: "",
-      delivery: { sent: false, skipped: true, reason: "google_sheets_sync_failed" },
-    };
-  }
-  if (isSmokeTestOrder(result.order)) {
-    result.order.whatsappNotificationStatus = "skipped";
-    result.order.whatsappNotificationError = "";
-    result.order.whatsappNotificationSentAt = "";
-    result.order.whatsappNotificationAttemptedAt = nowText();
-    result.order.whatsappNotificationAttemptCount = Number(result.order.whatsappNotificationAttemptCount || 0) + 1;
-    return { ...result, delivery: { sent: false, skipped: true, reason: "smoke_test" } };
-  }
-  if (result.order.whatsappNotificationStatus === "sent") {
-    return { ...result, delivery: { sent: true, skipped: true } };
-  }
-  result.order.whatsappNotificationAttemptedAt = nowText();
-  result.order.whatsappNotificationAttemptCount = Number(result.order.whatsappNotificationAttemptCount || 0) + 1;
-
-  if (result.order.source === "whatsapp") {
-    const paymentChatJid = String(result.order.whatsappPaymentMessageChatJid || "").trim();
-    const deleteTarget = paymentChatJid || result.order.whatsapp;
-    const notifyTarget =
-      (result.order.type === "deposit_topup" || result.order.orderType === "deposit_topup") && paymentChatJid
-        ? paymentChatJid
-        : result.order.whatsapp;
-    const deletePayment = result.order.whatsappPaymentMessageKey
-      ? await deleteWhatsAppMessage(db, {
-          to: deleteTarget,
-          messageKey: result.order.whatsappPaymentMessageKey,
-        })
-      : { deleted: false, skipped: true, reason: "payment_message_key_not_recorded" };
-    const accountDelivery = await sendWhatsAppMessage(db, {
-      to: notifyTarget,
-      text: result.reply,
-    });
-    const snkDelivery = result.snkText
-      ? await sendWhatsAppMessage(db, {
-          to: result.order.whatsapp,
-          text: result.snkText,
-        })
-      : { sent: false, skipped: true, reason: "snk_empty" };
-    result.delivery = { account: accountDelivery, snk: snkDelivery, deletePayment };
-    result.order.whatsappPaymentDeleteStatus = deletePayment.deleted ? "deleted" : deletePayment.skipped ? "skipped" : "failed";
-    if (!deletePayment.deleted && !deletePayment.skipped) {
-      result.order.whatsappPaymentDeleteError = deletePayment.reason || "whatsapp_delete_failed";
-    }
-    result.order.whatsappNotificationStatus = accountDelivery.sent ? "sent" : "failed";
-    result.order.whatsappSnkNotificationStatus = snkDelivery.sent ? "sent" : snkDelivery.skipped ? "skipped" : "failed";
-    if (accountDelivery.sent) {
-      result.order.whatsappNotificationSentAt = nowText();
-      result.order.whatsappNotificationError = "";
-    } else {
-      result.order.whatsappNotificationError = accountDelivery.reason || "whatsapp_send_failed";
-    }
-    if (snkDelivery.sent) {
-      result.order.whatsappSnkNotificationSentAt = nowText();
-    } else if (!snkDelivery.skipped) {
-      result.order.whatsappSnkNotificationError = snkDelivery.reason || "whatsapp_snk_send_failed";
-    }
-    return result;
-  }
-
-  const deliveryText =
-    result.order.deliveryStatus === "stock_unavailable_deposit"
-      ? result.reply
-      : (result.order.type === "deposit_topup" || result.order.orderType === "deposit_topup")
-        ? resellerDepositPaidMessage(
-            (db.resellers || []).find((item) => item.id === result.order.resellerId) || activeResellerByWhatsapp(db, result.order.whatsapp) || {},
-            result.order,
-            (db.payments || []).find((item) => item.orderId === result.order.id || item.ref === result.order.paymentRef) || {},
-          )
-      : joinBotMessageLines([
-          "Pembayaran berhasil ✧⁠*⁠。",
-          "",
-          "Periksa detail akun dan SnK di halaman selesai website Kavya.",
-          "",
-          ` Order ID : ${result.order.id}`,
-          ` Produk   : ${result.order.product} ${result.order.variant}`,
-          ` Total    : ${formatRupiah(result.order.total)}`,
-          "",
-          "๑ Jika terdapat kendala, owner bisa cek menggunakan Order ID di dashboard. ๑",
-          "",
-          "Terimakasih ෆ⁠╹⁠ .̮ ⁠╹⁠ෆ",
-        ]);
-  const delivery = await sendWhatsAppMessage(db, {
-    to: result.order.whatsapp,
-    text: deliveryText,
-  });
-  result.delivery = delivery;
-  result.order.whatsappNotificationStatus = delivery.sent ? "sent" : "failed";
-  if (delivery.sent) {
-    result.order.whatsappNotificationSentAt = nowText();
-    result.order.whatsappNotificationError = "";
-  } else {
-    result.order.whatsappNotificationError = delivery.reason || "whatsapp_send_failed";
-  }
-  return result;
-}
+const { fulfillPaidOrderAndNotify } = createFulfillmentNotificationService({
+  activeResellerByWhatsapp,
+  deleteWhatsAppMessage,
+  formatRupiah,
+  fulfillPaidOrder,
+  getProduct,
+  isSmokeTestOrder,
+  joinBotMessageLines,
+  makeId,
+  nowText,
+  pushFulfilledOrderToGoogleSheets,
+  resellerDepositPaidMessage,
+  sendWhatsAppMessage,
+  syncGoogleSheetsStockSafely,
+  syncSheetsForProductOrThrow,
+});
 
 async function readJsonIfExists(filePath, fallback) {
   try {
@@ -2542,7 +2537,7 @@ function normalizeRentalPatch(body, fallback = {}) {
 
 function publicUser(user) {
   if (!user) return null;
-  const { password: _password, sessionVersion: _sessionVersion, ...safeUser } = user;
+  const { password: _password, passwordHash: _passwordHash, sessionVersion: _sessionVersion, ...safeUser } = user;
   return safeUser;
 }
 
@@ -2795,6 +2790,14 @@ function sheetCheckoutRequirements(product = {}, variant = {}) {
 }
 
 function checkoutRequirementsForVariant(db, product = {}, variant = {}, options = {}) {
+  if (
+    Array.isArray(variant?.checkoutFields)
+    || Array.isArray(product?.checkoutFields)
+    || Array.isArray(variant?.sheetCheckoutFields)
+    || Array.isArray(product?.sheetCheckoutFields)
+  ) {
+    return null;
+  }
   const qty = Math.max(1, Math.floor(Number(options.qty || 1)));
   const configured = configuredCheckoutRequirements(product, variant);
   if (configured) {
@@ -3828,6 +3831,103 @@ function rebuildManagedAccountsForOrder(db, order = {}, options = {}) {
   return { created, skippedReason: created.length ? "" : "nothing_to_rebuild" };
 }
 
+function repairCompletedOrderSheetAssignment(db, orderId = "") {
+  const wantedId = String(orderId || "").trim();
+  const order = (db.orders || []).find((item) => item.id === wantedId || item.paymentRef === wantedId);
+  if (!order) return { ok: false, status: 404, reason: "order_not_found" };
+  const deliveredIds = new Set((order.deliveredStockIds || []).map((item) => String(item || "").trim()).filter(Boolean));
+  const recoverableFailedCommit = (
+    deliveredIds.size > 0
+    && String(order.deliveryStatus || "").toLowerCase() === "sheet_sync_failed"
+    && Boolean(order.fulfillmentText)
+  );
+  if (!isFulfilledProductOrder(order) && !recoverableFailedCommit) {
+    return { ok: false, status: 409, reason: "order_not_fulfilled", order };
+  }
+
+  const deliveredStocks = (db.stock || []).filter((stock) => (
+    deliveredIds.has(String(stock.id || "").trim())
+    || String(stock.sheetOrderId || "").trim() === String(order.id || "").trim()
+  ));
+  if (!deliveredStocks.length) return { ok: false, status: 409, reason: "delivered_stock_missing", order };
+
+  const terminalStatuses = new Set(["expired", "replaced", "disabled"]);
+  for (const stock of deliveredStocks) {
+    const stockId = String(stock.id || "").trim();
+    const conflictingAccount = (db.managedAccounts || []).find((account) => {
+      if (String(account.stockId || "").trim() !== stockId) return false;
+      if (account.hidden || account.returnedToStockAt) return false;
+      if (terminalStatuses.has(String(account.status || "").trim().toLowerCase())) return false;
+      return String(account.orderId || account.sourceOrderId || "").trim() !== String(order.id || "").trim();
+    });
+    const conflictingOrderId = String(stock.sheetOrderId || "").trim();
+    if (conflictingAccount || (conflictingOrderId && conflictingOrderId !== order.id && String(stock.status || "").toLowerCase() === "sold")) {
+      return {
+        ok: false,
+        status: 409,
+        reason: "stock_owned_by_another_order",
+        order,
+        stockId,
+        conflictingOrderId: conflictingAccount?.orderId || conflictingAccount?.sourceOrderId || conflictingOrderId,
+      };
+    }
+  }
+
+  const reseller = resellerById(db, order.resellerId) || activeResellerByWhatsapp(db, order.whatsapp);
+  const repairedAt = nowText();
+  const startedAt = String(order.paidAt || order.createdAt || repairedAt).trim();
+  const durationDayCount = Math.max(1, Number(order.durationDays || durationDays(order.duration) || 1));
+  const expiresAt = String(order.expiresAt || addAccountDaysText(durationDayCount, startedAt, { keepTime: true })).trim();
+
+  order.deliveredStockIds = [...new Set(deliveredStocks.map((stock) => String(stock.id || "").trim()).filter(Boolean))];
+  for (const stock of deliveredStocks) {
+    stock.status = "sold";
+    stock.soldAt = startedAt;
+    stock.soldDuration = order.duration || stock.soldDuration || "";
+    stock.soldDurationDays = durationDayCount;
+    stock.soldExpiresAt = expiresAt;
+    stock.sheetOrderId = order.id;
+    stock.resellerId = order.resellerId || reseller?.id || stock.resellerId || "";
+    stock.reseller = reseller?.name || reseller?.username || order.reseller || stock.reseller || "";
+    stock.buyer = order.customer || stock.buyer || "";
+    stock.whatsapp = normalizeWhatsappNumber(order.whatsapp || primaryResellerWhatsapp(reseller) || stock.whatsapp || "");
+    delete stock.sheetRemovedAt;
+    delete stock.reservedFor;
+    delete stock.reservedAccountId;
+    delete stock.reservedUntil;
+    delete stock.reservedAt;
+  }
+
+  let restored = 0;
+  for (const account of db.managedAccounts || []) {
+    const linkedOrderId = String(account.orderId || account.sourceOrderId || "").trim();
+    if (linkedOrderId !== order.id || !order.deliveredStockIds.includes(String(account.stockId || "").trim())) continue;
+    account.hidden = false;
+    account.status = accountStatusFromDate(expiresAt, durationDayCount);
+    account.orderId = order.id;
+    account.sourceOrderId = order.id;
+    account.resellerId = order.resellerId || reseller?.id || account.resellerId || "";
+    account.reseller = reseller?.name || reseller?.username || order.reseller || account.reseller || "";
+    account.whatsapp = normalizeWhatsappNumber(order.whatsapp || primaryResellerWhatsapp(reseller) || account.whatsapp || "");
+    account.startedAt = startedAt;
+    account.duration = order.duration || account.duration || "";
+    account.durationDays = durationDayCount;
+    account.expiresAt = expiresAt;
+    account.repairedAt = repairedAt;
+    delete account.returnedToStockAt;
+    delete account.sheetClearedAt;
+    delete account.archivedAt;
+    restored += 1;
+  }
+
+  const rebuilt = rebuildManagedAccountsForOrder(db, order, { source: "owner_sheet_repair" });
+  const accounts = directManagedAccountsForOrder(db, order, { includeHidden: false });
+  if (!accounts.length) {
+    return { ok: false, status: 409, reason: rebuilt.skippedReason || "managed_account_rebuild_failed", order };
+  }
+  return { ok: true, order, accounts, restored, rebuilt: rebuilt.created.length };
+}
+
 function repairManagedAccountOwnership(db, options = {}) {
   db.managedAccounts = db.managedAccounts || [];
   const scopeAccountId = String(options.accountId || "").trim();
@@ -4402,19 +4502,6 @@ function stockProductVariant(db, stock = {}) {
   return { product, variant };
 }
 
-function stockPoolKeyForStock(db, stock = {}) {
-  const { product, variant } = stockProductVariant(db, stock);
-  if (!product || !variant) return "";
-  return variantStockGroupKey(product, variant);
-}
-
-function replacementStockMatchesAccount(db, account = {}, stock = {}) {
-  if (!stock || stock.status !== "available") return false;
-  const { product, variant } = resolveAccountProductVariant(db, account);
-  if (!product || !variant || stock.productId !== product.id) return false;
-  return stockPoolKeyForStock(db, stock) === (account.stockPoolKey || variantStockGroupKey(product, variant));
-}
-
 function remainingAccountDuration(account = {}) {
   const startedAt = toAccountDateTime(account.startedAt);
   const expires = toAccountDateTime(account.expiresAt, { endOfDay: !hasTimePart(account.expiresAt), referenceDate: startedAt });
@@ -4433,7 +4520,7 @@ function buildWarrantyCompleteText(account = {}, remainingLabel = "") {
   return [
     "IKY ✦ WARRANTY COMPLETE ──",
     "",
-    "Akun garansi/replacement telah diproses.",
+    "Akun garansi telah diproses.",
     "Jika masih ada kendala, kirim screenshot lalu reply chat ini.",
     "",
     "──────────",
@@ -4453,171 +4540,6 @@ function buildWarrantyCompleteText(account = {}, remainingLabel = "") {
     "IKY ✦ Warranty Service",
     "Secure • Reliable • Trusted",
   ].join("\n");
-}
-
-function buildWarrantyCompleteTextV2(account = {}, remainingLabel = "") {
-  return [
-    "IKY ✦ WARRANTY COMPLETE ──",
-    "",
-    "Akun garansi/replacement telah diproses.",
-    "Jika masih ada kendala, kirim screenshot lalu reply chat ini.",
-    "",
-    "──────────",
-    `⊳ aplikasi : ${account.product || "-"}`,
-    `⊳ email akun : ${account.email || "-"}`,
-    `⊳ password : ${account.password || "-"}`,
-    `⊳ profil + pin : ${[account.profile, account.pin].filter(Boolean).join(" / ") || "-"}`,
-    `⊳ durasi sisa : ${remainingLabel || "-"}`,
-    "──────────",
-    "",
-    "NOTE !",
-    "• Disarankan login melalui aplikasi.",
-    "• Gunakan akun hanya pada 1 device.",
-    "• Jika gagal login, gunakan tips login sebelumnya.",
-    "",
-    "──────────",
-    "IKY ✦ Warranty Service",
-    "Secure • Reliable • Trusted",
-  ].join("\n");
-}
-
-function replaceManagedAccountFromStock(db, accountId, body = {}) {
-  const account = (db.managedAccounts || []).find((item) => item.id === accountId);
-  if (!account) return null;
-  if (isTerminalManagedAccountStatus(account.status)) {
-    const error = new Error("Akun lama sudah nonaktif atau sudah direplace");
-    error.status = 400;
-    throw error;
-  }
-
-  const replacementStockId = String(body.replacementStockId || body.stockId || "").trim();
-  const replacementStock = (db.stock || []).find((item) => item.id === replacementStockId);
-  if (!replacementStock) {
-    const error = new Error("Stok pengganti tidak ditemukan");
-    error.status = 404;
-    throw error;
-  }
-  if (!replacementStockMatchesAccount(db, account, replacementStock)) {
-    const error = new Error("Stok pengganti harus available dan berada di pool produk yang sama");
-    error.status = 400;
-    throw error;
-  }
-
-  const remaining = remainingAccountDuration(account);
-  if (!remaining.days) {
-    const error = new Error("Akun lama sudah habis durasi, tidak bisa direplace otomatis");
-    error.status = 400;
-    throw error;
-  }
-
-  const oldDisposition = String(body.oldAccountDisposition || "release_via_sheets").trim();
-  const shouldReleaseViaSheets = oldDisposition !== "keep_sold";
-  const reason = String(body.reason || "").trim();
-  const replacedAt = nowText();
-  const { product, variant } = resolveAccountProductVariant(db, account);
-  const stockPoolKey = account.stockPoolKey || (product && variant ? variantStockGroupKey(product, variant) : stockPoolKeyForStock(db, replacementStock));
-
-  const replacementAccount = {
-    id: makeId("acc"),
-    stockId: replacementStock.id,
-    manual: true,
-    source: "replacement",
-    usageMode: account.usageMode || "monthly",
-    snapshotAt: replacedAt,
-    resellerId: account.resellerId || "",
-    product: account.product || product?.name || "",
-    productId: account.productId || product?.id || replacementStock.productId || "",
-    variant: account.variant || variant?.name || "",
-    variantId: account.variantId || variant?.id || "",
-    variantCode: account.variantCode || variant?.code || "",
-    stockPoolKey,
-    duration: `${remaining.days} Hari`,
-    durationDays: remaining.days,
-    email: replacementStock.email || "",
-    password: replacementStock.password || "",
-    buyer: account.buyer || "",
-    reseller: account.reseller || "",
-    whatsapp: normalizeWhatsappNumber(account.whatsapp || ""),
-    profile: replacementStock.profile || "",
-    pin: replacementStock.pin || "",
-    signInCode: replacementStock.signInCode || "",
-    verificationCode: replacementStock.verificationCode || "",
-    resetLink: replacementStock.resetLink || "",
-    householdLink: replacementStock.householdLink || "",
-    device: account.device || "",
-    startedAt: replacedAt,
-    expiresAt: remaining.expiresAt,
-    status: accountStatusFromDate(remaining.expiresAt, remaining.days),
-    replacedAccountId: account.id,
-    replacementReason: reason,
-    hidden: false,
-  };
-
-  const oldEmail = account.email || account.id;
-  account.status = "replaced";
-  account.replacedAt = replacedAt;
-  account.replacedByAccountId = replacementAccount.id;
-  account.replacedByStockId = replacementStock.id;
-  account.replacementReason = reason;
-  account.replacementDisposition = shouldReleaseViaSheets ? "release_via_sheets" : "keep_sold";
-  account.hidden = false;
-
-  let returnedStock = null;
-  const oldStock = account.stockId ? (db.stock || []).find((item) => item.id === account.stockId) : null;
-  if (oldStock) {
-    oldStock.status = "sold";
-    oldStock.notes = [
-      shouldReleaseViaSheets
-        ? `READY/release via Sheets setelah replace ${replacedAt}`
-        : `BAD/cek manual setelah replace ${replacedAt}`,
-      reason,
-      oldStock.notes,
-    ].filter(Boolean).join(" | ");
-  }
-
-  Object.assign(replacementStock, {
-    status: "sold",
-    soldAt: replacedAt,
-    soldVariant: replacementAccount.variant,
-    soldVariantId: replacementAccount.variantId,
-    soldDuration: replacementAccount.duration,
-    soldDurationDays: replacementAccount.durationDays,
-    reservedFor: "",
-    reservedAccountId: "",
-    reservedUntil: "",
-    device: replacementAccount.device || replacementStock.device || "",
-    sheetOrderId: `RPL-${account.id}`,
-    notes: [`Replacement dari ${oldEmail}`, reason, replacementStock.notes].filter(Boolean).join(" | "),
-  });
-
-  db.managedAccounts = db.managedAccounts || [];
-  db.managedAccounts.unshift(replacementAccount);
-  db.activities = db.activities || [];
-  db.activities.unshift({
-    id: makeId("act"),
-    type: "account",
-    title: `Akun ${oldEmail} direplace`,
-    description: `${account.reseller || account.buyer || "reseller"} pindah ke ${replacementAccount.email}. Akun lama ${shouldReleaseViaSheets ? "menunggu release dari Sheets" : "ditahan untuk cek manual"}. Sisa durasi ${remaining.label}.`,
-    createdAt: replacedAt,
-    resellerId: account.resellerId || "",
-    whatsapp: normalizeWhatsappNumber(account.whatsapp || ""),
-    accountId: replacementAccount.id,
-    accountEmail: replacementAccount.email,
-    oldAccountId: account.id,
-    oldAccountEmail: oldEmail,
-    stockId: replacementStock.id,
-  });
-
-  return {
-    oldAccount: account,
-    newAccount: replacementAccount,
-    returnedStock,
-    replacementStock,
-    remaining,
-    shouldReturnOldStock: false,
-    shouldReleaseViaSheets,
-    warrantyCompleteText: buildWarrantyCompleteTextV2(replacementAccount, remaining.label),
-  };
 }
 
 function accountStartedAtMs(account = {}) {
@@ -5833,11 +5755,7 @@ function buildPakasirPaymentLink({ project, amount, orderId }) {
 }
 
 function derivePakasirTotalPayment(amount = 0, fee = 0, providerTotal = 0) {
-  const nominal = Math.max(0, Number(amount || 0));
-  const adminFee = Math.max(0, Number(fee || 0));
-  const reportedTotal = Math.max(0, Number(providerTotal || 0));
-  const computedTotal = nominal > 0 ? nominal + adminFee : 0;
-  return Math.max(reportedTotal, computedTotal);
+  return deriveProviderTotalPayment(amount, fee, providerTotal);
 }
 
 function parsePakasirTransaction(payload = {}) {
@@ -5997,32 +5915,10 @@ async function createPakasirQris(db, order) {
   }
 }
 
-async function readDbWithExpiredOrders() {
-  const db = await readDb();
-  let changed = false;
-  if (hasExpiredPendingOrders(db)) {
-    expirePendingOrders(db);
-    changed = true;
-  }
-  if (syncOrderResellerMetadata(db)) changed = true;
-  if (reconcileGoogleSheetsStockOrderLinks(db)) changed = true;
-  if (backfillManagedAccountsFromCompletedOrders(db)) changed = true;
-  if (syncManagedAccountCredentialsFromOrders(db)) changed = true;
-  if (syncNetflixManagedPasswordConsensus(db)) changed = true;
-  if (refreshManagedAccountStatuses(db)) changed = true;
-  if (syncManagedAccountWhatsappFromOrders(db)) changed = true;
-  if (syncSoldStockMetadata(db)) changed = true;
-  if (syncHistoricalStockConflicts(db)) changed = true;
-  if (repairHistoricalStockReuse(db)) changed = true;
-  if (!changed) return db;
-  await writeDb(db, { notify: true, reason: "db:self-heal" });
-  return readDb();
-}
-
 function shouldRefreshGoogleSheetsForResellerView(db, auth) {
   if (auth?.role !== "reseller") return false;
   if (!googleSheetsConfigured(db)) return false;
-  const maxAgeMs = Math.max(60_000, Number(process.env.RESELLER_VIEW_SHEETS_MAX_AGE_MS || 300_000));
+  const maxAgeMs = Math.max(60_000, Number(process.env.RESELLER_VIEW_SHEETS_MAX_AGE_MS || 60_000));
   const lastSyncAt = toDateTime(db.settings?.googleSheetsLastSyncAt || "");
   if (!lastSyncAt) return true;
   return Date.now() - lastSyncAt.getTime() >= maxAgeMs;
@@ -6122,7 +6018,7 @@ function throwDuplicateResellerError(duplicate) {
 
 function normalizeResellerSelfInput(body, current = {}) {
   const name = String(body.name ?? current.name ?? "").trim();
-  const username = String(body.username ?? current.username ?? (name || "reseller"))
+  const username = String(current.username ?? (name || "reseller"))
     .trim()
     .toLowerCase()
     .replace(/\s+/g, ".");
@@ -6145,7 +6041,7 @@ function normalizeResellerSelfInput(body, current = {}) {
 }
 
 function safeResellerForSelf(reseller = {}) {
-  const { password, ...safe } = reseller;
+  const { password, passwordHash, ...safe } = reseller;
   return {
     ...safe,
     allowedAccessTools: resellerAccessTools(safe),
@@ -6222,174 +6118,23 @@ function safePublicPayment(payment = {}, order = null) {
   };
 }
 
-function pakasirStatusIsPaid(status = "") {
-  const text = String(status || "").toLowerCase();
-  return ["paid", "success", "settlement", "settled", "completed", "complete", "berhasil", "sukses"].some((word) => text.includes(word));
-}
-
-function paymentPaidAmount(payment = {}, order = {}) {
-  return Math.max(
-    0,
-    derivePakasirTotalPayment(payment.amount || order.paymentDue || 0, payment.fee || order.paymentFee || 0, payment.totalPayment || 0),
-    Number(payment.amount || 0),
-    Number(order.paymentDue || 0),
-  );
-}
-
-async function reconcilePakasirPaymentInDb(db, ref, options = {}) {
-  const payment = (db.payments || []).find((item) => item.ref === ref || item.orderId === ref);
-  const order = (db.orders || []).find((item) => item.paymentRef === ref || item.id === ref || item.id === payment?.orderId);
-  if (!payment || !order) return { ok: false, skipped: true, reason: "payment_or_order_missing" };
-  if (payment.provider !== "pakasir") return { ok: true, skipped: true, reason: "not_pakasir", order, payment };
-  if (order.deliveryStatus === "sent" && order.whatsappNotificationStatus === "sent") {
-    return { ok: true, skipped: true, reason: "already_sent", order, payment };
-  }
-
-  const status = String(payment.status || order.qrisStatus || "").toLowerCase();
-  const shouldCheck = ["pending", "expired", "created", "waiting_payment", ""].includes(status)
-    || ["pending", "expired", "created", "waiting_payment", "cancelled"].includes(String(order.qrisStatus || "").toLowerCase())
-    || ["cancelled"].includes(String(order.orderStatus || "").toLowerCase());
-  if (!shouldCheck) return { ok: true, skipped: true, reason: "status_not_checkable", order, payment };
-
-  const lastChecked = toDateTime(payment.providerLastCheckedAt);
-  const throttleMs = Number(options.throttleMs || 0);
-  if (throttleMs > 0 && lastChecked && Date.now() - lastChecked.getTime() < throttleMs) {
-    return { ok: true, skipped: true, reason: "throttled", order, payment };
-  }
-
-  const checkedAt = nowText();
-  const detail = await fetchPakasirTransactionDetail(db, order, payment);
-  payment.providerLastCheckedAt = checkedAt;
-  payment.providerDetailStatus = detail.status || "";
-  payment.providerDetailError = detail.ok ? "" : detail.error || detail.reason || "pakasir_detail_failed";
-  if (detail.payload) payment.providerDetailRaw = detail.payload;
-  if (detail.transaction?.totalPayment) payment.totalPayment = detail.transaction.totalPayment;
-  if (detail.transaction?.fee) payment.fee = detail.transaction.fee;
-  if (detail.transaction?.paymentMethod) payment.paymentMethod = detail.transaction.paymentMethod;
-
-  if (!detail.paid) return { ok: detail.ok, checked: true, paid: false, detail, order, payment };
-
-  payment.status = "paid";
-  payment.paidAt = payment.paidAt || (detail.paidAt ? dateTimeText(toDateTime(detail.paidAt) || new Date()) : checkedAt);
-  order.paidAt = order.paidAt || payment.paidAt;
-  order.paymentProviderStatus = "paid";
-  order.paymentProviderCheckedAt = checkedAt;
-
-  const prepared = preparePaidOrderForFulfillment(db, order, payment);
-  if (prepared.reply && prepared.order.deliveryStatus === "late_paid_deposit") return prepared;
-  return fulfillPaidOrderAndNotify(db, order.id);
-}
-
-function creditLatePaidQrisToDeposit(db, order, payment, amount) {
-  const reseller = (db.resellers || []).find((item) => item.id === order.resellerId) || activeResellerByWhatsapp(db, order.whatsapp);
-  if (!reseller || !amount || order.latePaidDepositCredited) {
-    return { ok: true, order, reply: order.fulfillmentText || "Pembayaran terlambat sudah tercatat." };
-  }
-
-  const creditedAt = nowText();
-  const depositBefore = Math.max(0, Number(reseller.deposit || 0));
-  const depositAfter = depositBefore + amount;
-  reseller.deposit = depositAfter;
-  order.qrisStatus = "paid";
-  order.orderStatus = "cancelled";
-  order.deliveryStatus = "late_paid_deposit";
-  order.latePaidDepositCredited = true;
-  order.latePaidDepositCreditedAt = creditedAt;
-  order.latePaidDepositAmount = amount;
-  order.fulfillmentText = `Pembayaran ${formatRupiah(amount)} diterima setelah order expired. Nominal masuk ke saldo reseller. Saldo sekarang ${formatRupiah(depositAfter)}.`;
-  payment.status = "paid";
-  payment.paidAt = payment.paidAt || creditedAt;
-  payment.latePaidDepositCredited = true;
-  payment.latePaidDepositAmount = amount;
-  payment.depositBefore = depositBefore;
-  payment.depositAfter = depositAfter;
-
-  db.activities = db.activities || [];
-  db.activities.unshift({
-    id: makeId("act"),
-    type: "order",
-    title: `Pembayaran ${order.paymentRef || order.id} terlambat`,
-    description: `${formatRupiah(amount)} diterima setelah order expired dan dikreditkan ke deposit ${reseller.name || reseller.username || order.whatsapp}.`,
-    createdAt: creditedAt,
-    orderId: order.id,
-    resellerId: reseller.id || order.resellerId || "",
-    whatsapp: normalizeWhatsappNumber(order.whatsapp || reseller.whatsapp || ""),
-  });
-
-  return { ok: true, order, reply: order.fulfillmentText };
-}
-
-function preparePaidOrderForFulfillment(db, order, payment) {
-  const paidAt = nowText();
-  const wasExpired = order.qrisStatus === "expired" || order.orderStatus === "cancelled";
-  const amount = paymentPaidAmount(payment, order);
-  payment.status = "paid";
-  payment.paidAt = payment.paidAt || paidAt;
-  order.paidAt = order.paidAt || paidAt;
-
-  if (wasExpired && Number(order.depositUsed || 0) > 0 && order.depositRefunded && amount < Number(order.total || 0)) {
-    return creditLatePaidQrisToDeposit(db, order, payment, amount);
-  }
-
-  if (wasExpired) {
-    order.latePaymentRecovered = true;
-    order.latePaymentRecoveredAt = paidAt;
-    order.previousExpiredStatus = order.previousExpiredStatus || `${order.qrisStatus || ""}/${order.orderStatus || ""}`;
-    db.activities = db.activities || [];
-    db.activities.unshift({
-      id: makeId("act"),
-      type: "order",
-      title: `Pembayaran ${order.paymentRef || order.id} diterima setelah expired`,
-      description: `${order.product} ${order.variant} tetap diproses karena pembayaran Pakasir sudah paid.`,
-      createdAt: paidAt,
-      orderId: order.id,
-      resellerId: order.resellerId || "",
-      whatsapp: normalizeWhatsappNumber(order.whatsapp || ""),
-    });
-  }
-
-  order.qrisStatus = "paid";
-  order.orderStatus = order.deliveryStatus === "sent" ? "completed" : "processing";
-  if (order.deliveryStatus === "waiting_payment") order.deliveryStatus = wasExpired ? "paid_after_expired" : "paid";
-  return { ok: true, order };
-}
-
-function prepareManualApprovedOrderForFulfillment(db, order, payment, options = {}) {
-  const approvedAt = nowText();
-  const actor = String(options.actor || "owner").trim() || "owner";
-  const reason = String(options.reason || "").trim() || "manual approval";
-  payment.status = "manual";
-  payment.paidAt = payment.paidAt || approvedAt;
-  payment.providerStatus = "owner_approved";
-  payment.providerWebhookStatus = "owner_approved";
-  payment.manualApproved = true;
-  payment.manualApprovedAt = approvedAt;
-  payment.manualApprovedBy = actor;
-  payment.manualApprovalReason = reason;
-  order.paidAt = order.paidAt || approvedAt;
-  order.qrisStatus = "manual";
-  order.orderStatus = order.deliveryStatus === "sent" ? "completed" : "processing";
-  if (order.deliveryStatus === "waiting_payment" || order.deliveryStatus === "paid_after_expired") {
-    order.deliveryStatus = "manual_approved";
-  }
-  order.paymentMethod = order.paymentMethod || "Owner manual approval";
-  order.manualApproved = true;
-  order.manualApprovedAt = approvedAt;
-  order.manualApprovedBy = actor;
-  order.manualApprovalReason = reason;
-  db.activities = db.activities || [];
-  db.activities.unshift({
-    id: makeId("act"),
-    type: "order",
-    title: `Order ${order.id} di-approve manual`,
-    description: `${actor} melanjutkan order tanpa pembayaran QRIS otomatis. Alasan: ${reason}.`,
-    createdAt: approvedAt,
-    orderId: order.id,
-    resellerId: order.resellerId || "",
-    whatsapp: normalizeWhatsappNumber(order.whatsapp || ""),
-  });
-  return { ok: true, order };
-}
+const {
+  pakasirStatusIsPaid,
+  prepareManualApprovedOrderForFulfillment,
+  preparePaidOrderForFulfillment,
+  reconcilePakasirPaymentInDb,
+} = createPaymentReconciliationService({
+  activeResellerByWhatsapp,
+  dateTimeText,
+  derivePakasirTotalPayment,
+  fetchPakasirTransactionDetail,
+  formatRupiah,
+  fulfillPaidOrderAndNotify,
+  makeId,
+  normalizeWhatsappNumber,
+  nowText,
+  toDateTime,
+});
 
 async function getWhatsAppBotStatus(db) {
   const tokens = configuredTokens(
@@ -7381,12 +7126,18 @@ function buildSheetsRowAudit(db) {
 
   for (const stock of rows) {
     const sold = String(stock.status || "").toLowerCase() === "sold";
+    const condition = String(stock.accountCondition || "NORMAL").trim().toUpperCase();
     const linked = accounts.filter((account) => String(account.stockId || "").trim() === String(stock.id || "").trim() && !account.hidden && !account.returnedToStockAt);
     const sellerInput = String(stock.sheetSellerInput || "").trim();
     const resolvedSeller = sellerInput ? resellerBySellerText(db, sellerInput) : null;
 
     if (!stock.sheetName || !Number(stock.sheetRow || 0) || (!stock.email && !stock.loginPhone && !stock.password)) {
       addIssue(stock, "high", "invalid", "Baris Sheets tidak valid", "Identitas akun atau metadata sheet/row belum lengkap.");
+    }
+    if (stock.accountConditionKnown === false) {
+      addIssue(stock, "high", "ambiguous", "Kondisi akun tidak dikenal", `KONDISI AKUN '${stock.accountConditionRaw || condition || "-"}' diblokir sampai diperiksa Owner.`);
+    } else if (stock.accountConditionBlocked) {
+      addIssue(stock, condition === "BERMASALAH" || condition === "DISABLED" ? "high" : "medium", "condition", "Kondisi akun perlu perhatian", `KONDISI AKUN ${condition}; baris tidak dihitung sebagai stok tersedia.`);
     }
     if (stock.sheetResellerConflict || (sold && sellerInput && !resolvedSeller)) {
       addIssue(stock, "high", "ambiguous", "Seller Sheets ambigu", `SELLER '${sellerInput || "-"}' belum mengarah ke tepat satu reseller aktif.`);
@@ -7397,7 +7148,7 @@ function buildSheetsRowAudit(db) {
     if (sold && linked.length === 0) {
       addIssue(stock, "high", "mismatch", "Akun sold belum tampil di Manage Account", "Baris terjual di Sheets belum mempunyai managed account aktif.");
     }
-    if (!sold && linked.length > 0) {
+    if (!sold && linked.length > 0 && !stockBlockedByAccountCondition(stock)) {
       addIssue(stock, "high", "mismatch", "Baris kosong masih memiliki akun aktif", `${linked.length} managed account masih aktif walau SELLER di Sheets kosong.`);
     }
     if (sold && linked.length > 1) {
@@ -7457,8 +7208,14 @@ function buildDeliveryAuditQueue(db) {
     const qty = Math.max(1, Number(order.qty || 1));
     const linkedAccounts = deliveredAccountsForOrder(db, order, { includeHidden: true })
       .filter((account) => !account.returnedToStockAt && !account.hidden);
+    const uniqueLinkedAccounts = [...new Map(linkedAccounts.map((account) => {
+      const stockId = String(account.stockId || "").trim();
+      const sheetSlot = account.sheetName && account.sheetRow ? `${account.sheetName}:${account.sheetRow}` : "";
+      const identitySlot = `${account.email || account.loginPhone || account.id || ""}:${account.profile || ""}`.toLowerCase();
+      return [stockId || sheetSlot || identitySlot || String(account.id || ""), account];
+    })).values()];
     const removedConflictStocks = Array.isArray(order.historyConflictRemovedStockIds) ? order.historyConflictRemovedStockIds.filter(Boolean) : [];
-    const missingSheetAccounts = linkedAccounts.filter((account) => (
+    const missingSheetAccounts = uniqueLinkedAccounts.filter((account) => (
       String(account.sheetSource || "").toLowerCase() === "google_sheets"
       && (!account.sheetName || !account.sheetRow)
     ));
@@ -7476,7 +7233,7 @@ function buildDeliveryAuditQueue(db) {
       });
     }
 
-    if ((delivery === "sent" || status === "completed") && linkedAccounts.length === 0) {
+    if ((delivery === "sent" || status === "completed") && uniqueLinkedAccounts.length === 0) {
       issues.push({
         id: `delivery-order-missing-${order.id}`,
         severity: "high",
@@ -7490,26 +7247,26 @@ function buildDeliveryAuditQueue(db) {
       continue;
     }
 
-    if ((delivery === "sent" || status === "completed") && linkedAccounts.length < qty) {
+    if ((delivery === "sent" || status === "completed") && uniqueLinkedAccounts.length < qty) {
       issues.push({
         id: `delivery-order-under-${order.id}`,
         severity: "high",
         kind: "delivery",
         title: "Jumlah akun terkirim kurang dari qty order",
-        detail: `${order.id} butuh ${qty} akun, tapi baru ${linkedAccounts.length} akun yang tertaut.`,
+        detail: `${order.id} butuh ${qty} akun, tapi baru ${uniqueLinkedAccounts.length} akun unik yang tertaut.`,
         createdAt: order.fulfillmentSentAt || order.paidAt || order.createdAt || "",
         orderId: order.id,
         href: operationLink({ orderId: order.id }),
       });
     }
 
-    if (linkedAccounts.length > qty) {
+    if (uniqueLinkedAccounts.length > qty) {
       issues.push({
         id: `delivery-order-over-${order.id}`,
         severity: "high",
         kind: "delivery",
         title: "Jumlah akun tertaut melebihi qty order",
-        detail: `${order.id} qty ${qty}, tapi ada ${linkedAccounts.length} akun tertaut. Ini sinyal double drop atau rebuild ganda.`,
+        detail: `${order.id} qty ${qty}, tapi ada ${uniqueLinkedAccounts.length} akun unik tertaut. Ini sinyal double drop yang perlu diperiksa.`,
         createdAt: order.fulfillmentSentAt || order.paidAt || order.createdAt || "",
         orderId: order.id,
         href: operationLink({ orderId: order.id }),
@@ -7519,7 +7276,7 @@ function buildDeliveryAuditQueue(db) {
     if (missingSheetAccounts.length) {
       issues.push({
         id: `delivery-sheet-pending-${order.id}`,
-        severity: linkedAccounts.length ? "medium" : "high",
+        severity: uniqueLinkedAccounts.length ? "medium" : "high",
         kind: "sheet",
         title: "Akun terkirim belum punya metadata Sheets lengkap",
         detail: `${order.id} punya ${missingSheetAccounts.length} akun delivery tanpa sheetName/sheetRow lengkap.`,
@@ -7853,6 +7610,21 @@ function buildResellerHealthQueue(db) {
   const issues = [];
   const activeAccounts = (db.managedAccounts || []).filter((account) => !account.hidden && !account.returnedToStockAt);
   const activeOrders = (db.orders || []).filter((order) => order.type !== "deposit_topup" && order.orderType !== "deposit_topup");
+
+  for (const reseller of db.resellers || []) {
+    const syncStatus = String(reseller.googleSheetsResellerSyncStatus || "").toLowerCase();
+    if (!["pending", "conflict"].includes(syncStatus)) continue;
+    issues.push({
+      id: `reseller-sheet-sync-${reseller.id}`,
+      severity: syncStatus === "conflict" ? "high" : "medium",
+      kind: "reseller",
+      title: syncStatus === "conflict" ? "Data reseller bentrok di Google Sheets" : "Sinkronisasi data reseller tertunda",
+      detail: `${reseller.username || reseller.name || reseller.id} belum tersinkron aman ke tab data reseller. Jalankan Sinkronkan Data Reseller dari panel Owner.`,
+      createdAt: reseller.googleSheetsResellerSyncAttemptedAt || reseller.selfRegisteredAt || reseller.joinedAt || "",
+      resellerId: reseller.id,
+      href: "/owner-v2/resellers",
+    });
+  }
 
   for (const account of activeAccounts) {
     if (isMalformedManagedAccount(account)) {
@@ -8237,7 +8009,7 @@ function buildManualQueue(db, reconcile, expiry, wallet, whatsappHealth, reselle
 
 let automatedSheetsAuditSnapshot = null;
 
-async function buildOperationsCenter(db) {
+async function buildOperationsAudit(db) {
   const deliveryAudit = buildDeliveryAuditQueue(db);
   const stockLocks = buildReservedStockQueue(db);
   const reconcile = buildReconcileReport(db);
@@ -8279,9 +8051,20 @@ function scheduleKavyaRestart() {
 
 async function ensureRuntimeSettings() {
   const db = await readDb();
+  const settingsMigration = createSettingsMigrationService({ nowText });
+  const startupSettingsMigration = createSettingsStartupMigrationService({
+    databasePath,
+    fsApi: fs,
+    makeId,
+    migration: settingsMigration,
+    now: () => new Date(),
+    nowText,
+  });
+  const migrationResult = await startupSettingsMigration.run(db);
+  let changed = false;
+  if (migrationResult.changed) changed = true;
   db.settings = { ...(db.settings || {}) };
   const settings = db.settings;
-  let changed = false;
   const setDefault = (key, value) => {
     if (settings[key]) return;
     const normalized = String(value || "").trim();
@@ -8311,11 +8094,28 @@ async function ensureRuntimeSettings() {
   setDefault("publicDomain", defaultPublicDomain);
   setDefault("botPublicUrl", defaultPublicDomain);
   const envOwnerPassword = firstUsableSecret(process.env.OWNER_PASSWORD, process.env.OWNER_LOGIN_PASSWORD);
-  if (settings.ownerPassword === "admin12345" && envOwnerPassword) {
-    settings.ownerPassword = envOwnerPassword;
+  const storedOwnerPassword = firstUsableSecret(settings.ownerPassword);
+  if (!settings.ownerPasswordHash && storedOwnerPassword && storedOwnerPassword !== "admin12345") {
+    settings.ownerPasswordHash = hashPassword(storedOwnerPassword);
+    delete settings.ownerPassword;
     changed = true;
-  } else {
-    setDefault("ownerPassword", envOwnerPassword);
+  } else if (!settings.ownerPasswordHash && envOwnerPassword) {
+    settings.ownerPasswordHash = hashPassword(envOwnerPassword);
+    delete settings.ownerPassword;
+    changed = true;
+  } else if (settings.ownerPassword) {
+    delete settings.ownerPassword;
+    changed = true;
+  }
+  for (const reseller of db.resellers || []) {
+    if (!reseller.passwordHash && reseller.password) {
+      reseller.passwordHash = hashPassword(reseller.password);
+      delete reseller.password;
+      changed = true;
+    } else if (reseller.passwordHash && reseller.password) {
+      delete reseller.password;
+      changed = true;
+    }
   }
   setDefault("baileySessionId", process.env.WHATSAPP_BAILEY_SESSION_ID || "kavya-main");
   setDefault("baileyBotNumber", process.env.WHATSAPP_BOT_NUMBER || settings.ownerWhatsAppNumber || process.env.OWNER_WHATSAPP_NUMBER || "");
@@ -8396,12 +8196,18 @@ async function proxyWhatsAppBotRequest(req, res, next) {
     const incoming = new URL(req.originalUrl || req.url, "http://localhost");
     const upstream = new URL(botUrl);
     upstream.pathname = incoming.pathname.replace(/^\/whatsapp-bot/, "") || "/";
-    upstream.search = incoming.search;
+    upstream.search = "";
 
     const headers = {};
     if (req.get("accept")) headers.accept = req.get("accept");
-    if (req.get("authorization")) headers.authorization = req.get("authorization");
     if (req.get("content-type")) headers["content-type"] = req.get("content-type");
+    const botToken = firstUsableSecret(db.settings?.whatsappBotToken, process.env.WHATSAPP_BOT_TOKEN);
+    if (!botToken) {
+      const error = new Error("Token bot WhatsApp belum dikonfigurasi");
+      error.status = 503;
+      throw error;
+    }
+    headers.authorization = `Bearer ${botToken}`;
 
     const response = await fetch(upstream, {
       method: req.method,
@@ -8416,760 +8222,105 @@ async function proxyWhatsAppBotRequest(req, res, next) {
   }
 }
 
-app.get("/api/health", async (_req, res) => {
-  const db = await readDb();
-  const pakasir = getPakasirCredentials(db);
-  const [database, backup] = await Promise.all([readDatabaseInfo(), readBackupInfo()]);
-  res.json({
-    ok: true,
-    databasePath,
-    database,
-    backup,
-    googleSheetsConfigured: googleSheetsConfigured(db),
-    googleSheetsLastSyncAt: db.settings?.googleSheetsLastSyncAt || "",
-    ownerWhatsAppNumber: db.settings?.ownerWhatsAppNumber || process.env.OWNER_WHATSAPP_NUMBER || "",
-    warrantyWhatsAppNumber: warrantyWhatsAppNumber(db),
-    whatsappInboundConfigured: Boolean(firstConfigured(db.settings?.whatsappInboundToken, process.env.WHATSAPP_INBOUND_TOKEN)),
-    pakasirConfigured: pakasir.configured,
-    maintenance: maintenanceMode(db),
-  });
+registerSystemRoutes(app, {
+  ensureDb,
+  firstConfigured,
+  getDbVersion,
+  getPakasirCredentials,
+  googleSheetsConfigured,
+  maintenanceMode,
+  makeId,
+  mergedWhatsappRentals,
+  nowText,
+  onDbChange,
+  readActiveLegacyGroupLists,
+  readDb,
+  readDbSnapshot,
+  requireAuth,
+  setMaintenanceMode,
+  updateDb,
+  warrantyWhatsAppNumber,
 });
 
-app.get("/api/maintenance", async (_req, res) => {
-  const db = await readDb();
-  res.json({ ok: true, maintenance: maintenanceMode(db) });
+registerAuthRoutes(app, {
+  assertLoginAllowed,
+  authSessionResponse,
+  cleanupPasswordResets,
+  clearLoginFailures,
+  defaultResellerAccessTools,
+  findDuplicateReseller,
+  findPasswordResetAccount,
+  firstConfigured,
+  firstUsableSecret,
+  hashPassword,
+  makeId,
+  normalizeLoginIdentifier,
+  normalizeResellerAccessTools,
+  normalizeWhatsappNumber,
+  nowText,
+  ownerCredentials,
+  ownerPasswordConfigured,
+  ownerProfile,
+  passwordResetDeliveryError,
+  publicUser,
+  randomSecret,
+  readDb,
+  recordLoginFailure,
+  removeSessionCookie,
+  requireAuth,
+  resetCodeHash,
+  resetTokenHash,
+  sendResetCodeWhatsApp,
+  sendRegistrationCodeWhatsApp,
+  sendSelfRegistrationWelcomeWhatsApp,
+  syncDataResellerToGoogleSheetsSafely,
+  todayText,
+  updateDb,
+  verifyOwnerPassword,
+  verifyPassword,
 });
 
-app.post("/api/maintenance", requireAuth(["owner"]), async (req, res) => {
-  const state = await updateDb((db) => {
-    setMaintenanceMode(db, Boolean(req.body.enabled), req.body.reason || "", "manual");
-    db.activities = db.activities || [];
-    db.activities.unshift({
-      id: makeId("act"),
-      type: "security",
-      title: Boolean(req.body.enabled) ? "Maintenance order diaktifkan" : "Maintenance order dimatikan",
-      description: Boolean(req.body.enabled)
-        ? `Order baru ditahan sementara. Alasan: ${req.body.reason || "manual"}`
-        : "Order baru kembali dibuka dari panel owner.",
-      createdAt: nowText(),
-    });
-    return maintenanceMode(db);
-  });
-  res.json({ ok: true, maintenance: state });
+registerSettingsRoutes(app, {
+  STORED_SECRET_PLACEHOLDER,
+  firstUsableSecret,
+  gmailOAuthConfigured,
+  gmailOAuthState,
+  maskedOwnerIntegrationSettings,
+  mergeGoogleSheetsSettings,
+  mergeStoredSecret,
+  nowText,
+  ownerIntegrationSettings,
+  ownerProfile,
+  parseBotPublicUrlInput,
+  readDb,
+  readDbSnapshot,
+  requireAuth,
+  updateDb,
+  validateGmailConnectionForStatus,
+  verifyGmailOAuthState,
 });
 
-app.get("/api/bootstrap", requireAuth(["owner"]), async (_req, res) => {
-  const db = await readDbWithExpiredOrders();
-  db.whatsappRentals = await mergedWhatsappRentals(db);
-  db.whatsappGroupLists = await readActiveLegacyGroupLists();
-  res.json(db);
-});
-
-app.get("/api/events", async (req, res) => {
-  await ensureDb();
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache, no-transform");
-  res.setHeader("Connection", "keep-alive");
-  res.flushHeaders?.();
-
-  let closed = false;
-  let unsubscribe = () => {};
-  let heartbeat = null;
-  const cleanup = () => {
-    if (closed) return;
-    closed = true;
-    if (heartbeat) clearInterval(heartbeat);
-    unsubscribe();
-  };
-  const send = (event) => {
-    if (closed || res.destroyed || res.writableEnded) return;
-    try {
-      res.write(`event: ${event.type}\n`);
-      res.write(`data: ${JSON.stringify(event)}\n\n`);
-    } catch {
-      cleanup();
-    }
-  };
-
-  send({ type: "connected", version: getDbVersion(), at: nowText() });
-  unsubscribe = onDbChange(send);
-  heartbeat = setInterval(() => {
-    send({ type: "heartbeat", version: getDbVersion(), at: nowText() });
-  }, 25000);
-
-  req.on("close", cleanup);
-  res.on("close", cleanup);
-  res.on("error", cleanup);
-});
-
-app.post("/api/auth/login", async (req, res) => {
-  const db = await readDb();
-  const requestedRole = req.body.role === "owner" || req.body.role === "reseller" ? req.body.role : "auto";
-  const email = String(req.body.email || "").trim().toLowerCase();
-  const password = String(req.body.password || "");
-  const remember = req.body.remember === true;
-  assertLoginAllowed(req, email);
-
-  if (requestedRole === "owner" || requestedRole === "auto") {
-    const owner = ownerCredentials(db);
-    const profile = ownerProfile(db);
-    if (!owner.password) {
-      if (requestedRole === "owner") {
-        recordLoginFailure(req, email);
-        res.status(401).json({ error: "Password owner belum dikonfigurasi. Set OWNER_PASSWORD atau reset password owner lewat OTP WhatsApp." });
-        return;
-      }
-    } else {
-      const ownerCandidates = [owner.email, profile.email, profile.username, `${profile.username}@kavya.id`]
-        .filter(Boolean)
-        .map((value) => String(value).toLowerCase());
-      if (ownerCandidates.includes(email) && password === owner.password) {
-        const profile = ownerProfile(db);
-        const session = {
-          ok: true,
-          role: "owner",
-          user: { id: "owner", name: profile.name, email: profile.email, username: profile.username, whatsapp: profile.whatsapp },
-        };
-        clearLoginFailures(req, email);
-        res.json({ ...session, token: issueAuthToken(session, db.settings?.ownerSessionVersion || 0, { remember }) });
-        return;
-      }
-    }
-    if (requestedRole === "owner") {
-      recordLoginFailure(req, email);
-      res.status(401).json({ error: "Email atau password owner salah" });
-      return;
-    }
-  }
-
-  const reseller = db.resellers.find((item) => {
-    const candidates = [item.email, item.username, `${item.username}@kavya.id`].filter(Boolean).map((value) => String(value).toLowerCase());
-    return candidates.includes(email) && item.password === password;
-  });
-  if (!reseller) {
-    recordLoginFailure(req, email);
-    res.status(401).json({ error: "Email/username atau password salah" });
-    return;
-  }
-  if (reseller.isActive === false) {
-    recordLoginFailure(req, email);
-    res.status(403).json({ error: "Akun reseller sedang nonaktif" });
-    return;
-  }
-  const session = { ok: true, role: "reseller", user: publicUser(reseller) };
-  clearLoginFailures(req, email);
-  res.json({ ...session, token: issueAuthToken(session, reseller.sessionVersion || 0, { remember }) });
-});
-
-app.post("/api/auth/password-reset/request", async (req, res, next) => {
-  try {
-    const identifier = String(req.body.identifier || req.body.email || "").trim();
-    if (!identifier) {
-      res.status(400).json({ error: "Email atau username wajib diisi" });
-      return;
-    }
-
-    assertLoginAllowed(req, normalizeLoginIdentifier(identifier));
-    const dbForSend = await readDb();
-    const botConfigured = Boolean(
-      firstUsableSecret(dbForSend.settings?.whatsappBotToken, process.env.WHATSAPP_BOT_TOKEN)
-        && firstConfigured(process.env.WHATSAPP_BOT_URL, dbForSend.settings?.whatsappBotUrl, "http://127.0.0.1:4016"),
-    );
-
-    const created = await updateDb((db) => {
-      cleanupPasswordResets(db);
-      const account = findPasswordResetAccount(db, identifier);
-      const whatsapp = normalizeWhatsappNumber(account?.whatsapp);
-      if (!account) return { account: null, code: "", reason: "account_not_found" };
-      if (!whatsapp) return { account: { ...account, whatsapp: "" }, code: "", reason: "whatsapp_number_not_found" };
-      if (!botConfigured) return { account: { ...account, whatsapp }, code: "", reason: "whatsapp_bot_not_configured" };
-      const resetId = makeId("rst");
-      const code = String(crypto.randomInt(100000, 1000000));
-      db.passwordResets = db.passwordResets || [];
-      db.passwordResets.unshift({
-        id: resetId,
-        role: account.role,
-        accountId: account.id,
-        whatsapp,
-        codeHash: resetCodeHash(resetId, code),
-        attempts: 0,
-        createdAt: nowText(),
-        createdAtMs: Date.now(),
-        expiresAtMs: Date.now() + Number(process.env.PASSWORD_RESET_CODE_TTL_MS || 10 * 60 * 1000),
-        sent: false,
-      });
-      return { account: { ...account, whatsapp }, resetId, code, reason: "" };
-    });
-
-    if (!created.account || !created.code) {
-      const status = created.reason === "account_not_found" ? 404 : created.reason === "whatsapp_bot_not_configured" ? 503 : 400;
-      res.status(status).json({
-        ok: false,
-        botConfigured,
-        deliveryStatus: created.reason || "not_sent",
-        error: passwordResetDeliveryError(created.reason),
-      });
-      return;
-    }
-
-    const delivery = await sendResetCodeWhatsApp(dbForSend, {
-      to: created.account.whatsapp,
-      name: created.account.name,
-      code: created.code,
-    });
-    await updateDb((db) => {
-      const reset = (db.passwordResets || []).find((item) => item.id === created.resetId);
-      if (reset) {
-        reset.sent = Boolean(delivery.sent);
-        reset.deliveryError = delivery.reason || "";
-      }
-      return null;
-    });
-
-    if (!delivery.sent) {
-      res.status(502).json({
-        ok: false,
-        botConfigured,
-        deliveryStatus: delivery.reason || "send_failed",
-        error: passwordResetDeliveryError(delivery.reason),
-      });
-      return;
-    }
-
-    res.json({
-      ok: true,
-      botConfigured,
-      destination: "",
-      deliveryStatus: "sent",
-      message: "Kode OTP sudah dikirim ke nomor WhatsApp terdaftar.",
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/auth/password-reset/verify", async (req, res, next) => {
-  try {
-    const identifier = String(req.body.identifier || req.body.email || "").trim();
-    const code = String(req.body.code || "").replace(/[^\d]/g, "");
-    if (!identifier || code.length !== 6) {
-      res.status(400).json({ error: "Email/username dan kode 6 digit wajib diisi" });
-      return;
-    }
-
-    const result = await updateDb((db) => {
-      cleanupPasswordResets(db);
-      const account = findPasswordResetAccount(db, identifier);
-      if (!account) return { ok: false };
-      const reset = (db.passwordResets || []).find(
-        (item) => item.role === account.role && item.accountId === account.id && !item.usedAt && Number(item.expiresAtMs || 0) > Date.now(),
-      );
-      if (!reset) return { ok: false };
-      if (Number(reset.attempts || 0) >= Number(process.env.PASSWORD_RESET_MAX_ATTEMPTS || 5)) return { ok: false, locked: true };
-      if (reset.codeHash !== resetCodeHash(reset.id, code)) {
-        reset.attempts = Number(reset.attempts || 0) + 1;
-        return { ok: false };
-      }
-      const resetToken = randomSecret("reset");
-      reset.verifiedAt = nowText();
-      reset.resetTokenHash = resetTokenHash(resetToken);
-      reset.resetTokenExpiresAtMs = Date.now() + Number(process.env.PASSWORD_RESET_TOKEN_TTL_MS || 10 * 60 * 1000);
-      return { ok: true, resetToken };
-    });
-
-    if (!result.ok) {
-      res.status(400).json({ error: result.locked ? "Kode terlalu sering salah. Minta kode baru." : "Kode tidak valid atau sudah kadaluarsa" });
-      return;
-    }
-    res.json({ ok: true, resetToken: result.resetToken });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/auth/password-reset/confirm", async (req, res, next) => {
-  try {
-    const resetToken = String(req.body.resetToken || "").trim();
-    const newPassword = String(req.body.newPassword || "");
-    const confirmPassword = String(req.body.confirmPassword || "");
-    if (!resetToken || !newPassword) {
-      res.status(400).json({ error: "Token reset dan password baru wajib diisi" });
-      return;
-    }
-    if (newPassword.length < 8) {
-      res.status(400).json({ error: "Password baru minimal 8 karakter" });
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      res.status(400).json({ error: "Konfirmasi password tidak sama" });
-      return;
-    }
-
-    const result = await updateDb((db) => {
-      cleanupPasswordResets(db);
-      const hash = resetTokenHash(resetToken);
-      const reset = (db.passwordResets || []).find(
-        (item) => item.resetTokenHash === hash && !item.usedAt && Number(item.resetTokenExpiresAtMs || 0) > Date.now(),
-      );
-      if (!reset) return { ok: false };
-      if (reset.role === "owner") {
-        db.settings = { ...(db.settings || {}) };
-        db.settings.ownerPassword = newPassword;
-        db.settings.ownerSessionVersion = Number(db.settings.ownerSessionVersion || 0) + 1;
-      } else {
-        const reseller = (db.resellers || []).find((item) => item.id === reset.accountId);
-        if (!reseller) return { ok: false };
-        reseller.password = newPassword;
-        reseller.sessionVersion = Number(reseller.sessionVersion || 0) + 1;
-      }
-      reset.usedAt = nowText();
-      db.activities = db.activities || [];
-      db.activities.unshift({
-        id: makeId("act"),
-        type: "security",
-        title: "Password panel direset",
-        description: `${reset.role === "owner" ? "Owner" : "Reseller"} berhasil reset password lewat OTP WhatsApp.`,
-        createdAt: nowText(),
-      });
-      return { ok: true };
-    });
-
-    if (!result.ok) {
-      res.status(400).json({ error: "Token reset tidak valid atau sudah kadaluarsa" });
-      return;
-    }
-    res.json({ ok: true });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/auth/change-password", requireAuth(["owner", "reseller"]), async (req, res) => {
-  const currentPassword = String(req.body.currentPassword || "");
-  const newPassword = String(req.body.newPassword || "");
-  const confirmPassword = String(req.body.confirmPassword || "");
-  if (!currentPassword || !newPassword) {
-    res.status(400).json({ error: "Password lama dan password baru wajib diisi" });
-    return;
-  }
-  if (newPassword.length < 8) {
-    res.status(400).json({ error: "Password baru minimal 8 karakter" });
-    return;
-  }
-  if (newPassword !== confirmPassword) {
-    res.status(400).json({ error: "Konfirmasi password tidak sama" });
-    return;
-  }
-
-  const nextSession = await updateDb((db) => {
-    if (req.auth.role === "owner") {
-      const owner = ownerCredentials(db);
-      if (currentPassword !== owner.password) {
-        const error = new Error("Password lama salah");
-        error.status = 401;
-        throw error;
-      }
-      const nextVersion = Number(db.settings?.ownerSessionVersion || 0) + 1;
-      db.settings = { ...(db.settings || {}), ownerPassword: newPassword, ownerSessionVersion: nextVersion };
-      const profile = ownerProfile(db);
-      return {
-        session: {
-          ok: true,
-          role: "owner",
-          user: { id: "owner", name: profile.name, email: profile.email, username: profile.username, whatsapp: profile.whatsapp },
-        },
-        sessionVersion: nextVersion,
-      };
-    }
-
-    const reseller = (db.resellers || []).find((item) => item.id === req.auth.sub);
-    if (!reseller) {
-      const error = new Error("Reseller tidak ditemukan");
-      error.status = 404;
-      throw error;
-    }
-    if (currentPassword !== reseller.password) {
-      const error = new Error("Password lama salah");
-      error.status = 401;
-      throw error;
-    }
-    reseller.password = newPassword;
-    reseller.sessionVersion = Number(reseller.sessionVersion || 0) + 1;
-    return {
-      session: { ok: true, role: "reseller", user: publicUser(reseller) },
-      sessionVersion: reseller.sessionVersion,
-    };
-  });
-  res.json({ ok: true, token: issueAuthToken(nextSession.session, nextSession.sessionVersion) });
-});
-
-app.get("/api/owner-profile", requireAuth(["owner"]), async (_req, res) => {
-  const db = await readDb();
-  res.json(ownerProfile(db));
-});
-
-app.put("/api/owner-profile", requireAuth(["owner"]), async (req, res) => {
-  const updated = await updateDb((db) => {
-    const current = ownerProfile(db);
-    const name = String(req.body.name ?? current.name).trim();
-    const username = String(req.body.username ?? current.username).trim().toLowerCase().replace(/\s+/g, ".");
-    const email = String(req.body.email ?? current.email).trim();
-    const whatsapp = String(req.body.whatsapp ?? current.whatsapp).replace(/[^\d]/g, "");
-    const initial = String(req.body.initial || name.slice(0, 1) || "O").trim().slice(0, 2).toUpperCase();
-    if (!name) {
-      const error = new Error("Nama owner wajib diisi");
-      error.status = 400;
-      throw error;
-    }
-    if (!email || !email.includes("@")) {
-      const error = new Error("Email owner tidak valid");
-      error.status = 400;
-      throw error;
-    }
-    if (!whatsapp) {
-      const error = new Error("Nomor WhatsApp owner wajib diisi");
-      error.status = 400;
-      throw error;
-    }
-    db.settings = {
-      ...(db.settings || {}),
-      ownerName: name,
-      ownerUsername: username,
-      ownerEmail: email,
-      ownerWhatsAppNumber: whatsapp,
-      ownerInitial: initial || "O",
-    };
-    return ownerProfile(db);
-  });
-  res.json(updated);
-});
-
-app.get("/api/owner-settings", requireAuth(["owner"]), async (_req, res) => {
-  const settings = await updateDb(async (db) => {
-    await validateGmailConnectionForStatus(db);
-    return ownerIntegrationSettings(db);
-  });
-  res.json(settings);
-});
-
-app.put("/api/owner-settings", requireAuth(["owner"]), async (req, res) => {
-  const updated = await updateDb((db) => {
-    db.settings = { ...(db.settings || {}) };
-    if (req.body.profile) {
-      const name = String(req.body.profile.name || "").trim();
-      const username = String(req.body.profile.username || "owner").trim().toLowerCase().replace(/\s+/g, ".");
-      const email = String(req.body.profile.email || "").trim();
-      const whatsapp = String(req.body.profile.whatsapp || "").replace(/[^\d]/g, "");
-      if (!name) {
-        const error = new Error("Nama owner wajib diisi");
-        error.status = 400;
-        throw error;
-      }
-      if (!email || !email.includes("@")) {
-        const error = new Error("Email owner tidak valid");
-        error.status = 400;
-        throw error;
-      }
-      db.settings.ownerName = name;
-      db.settings.ownerUsername = username;
-      db.settings.ownerEmail = email;
-      db.settings.ownerWhatsAppNumber = whatsapp;
-      db.settings.ownerInitial = String(req.body.profile.initial || name.slice(0, 1) || "O").trim().slice(0, 2).toUpperCase();
-    }
-    if (req.body.pakasir) {
-      db.settings.pakasirApiKey = String(req.body.pakasir.apiKey || "").trim();
-      db.settings.pakasirMerchantId = String(req.body.pakasir.merchantId || "").trim();
-      db.settings.pakasirProject = db.settings.pakasirMerchantId;
-      db.settings.pakasirWebhookSecret = String(req.body.pakasir.webhookSecret || "").trim();
-    }
-    if (req.body.bailey) {
-      const parsedPublicUrl = parseBotPublicUrlInput(req.body.bailey.publicUrl);
-      db.settings.baileySessionId = String(req.body.bailey.sessionId || "").trim();
-      db.settings.baileyBotNumber = String(req.body.bailey.botNumber || "").replace(/[^\d]/g, "");
-      db.settings.whatsappBotPublicUrl = parsedPublicUrl.publicUrl;
-      db.settings.baileyWebhookUrl = String(req.body.bailey.webhookUrl || "").trim();
-      db.settings.baileyQrisGenerateUrl = String(req.body.bailey.qrisGenerateUrl || "").trim();
-      db.settings.whatsappBotToken = String(req.body.bailey.botToken || parsedPublicUrl.tokenFromUrl || "").trim();
-      db.settings.whatsappInboundToken = String(req.body.bailey.inboundToken || "").trim();
-    }
-    if (req.body.gmail) {
-      const requestedMode = String(req.body.gmail.mode || "").trim().toLowerCase();
-      db.settings.gmailMode = requestedMode === "imap" ? "imap" : "oauth";
-      db.settings.gmailClientId = String(req.body.gmail.clientId || "").trim();
-      db.settings.gmailClientSecret = String(req.body.gmail.clientSecret || "").trim();
-      db.settings.gmailRedirectUri = String(req.body.gmail.redirectUri || "").trim();
-      db.settings.gmailInboxEmail = String(req.body.gmail.inboxEmail || "").trim();
-      db.settings.gmailImapHost = String(req.body.gmail.imapHost || "imap.gmail.com").trim();
-      db.settings.gmailImapPort = String(req.body.gmail.imapPort || "993").replace(/[^\d]/g, "") || "993";
-      db.settings.gmailImapUser = String(req.body.gmail.imapUser || req.body.gmail.inboxEmail || "").trim();
-      db.settings.gmailImapPassword = String(req.body.gmail.imapPassword || "").replace(/\s+/g, "").trim();
-      db.settings.gmailImapSecure = req.body.gmail.imapSecure === false ? "false" : "true";
-    }
-    if (req.body.googleSheets) {
-      Object.assign(
-        db.settings,
-        mergeGoogleSheetsSettings(db.settings, req.body.googleSheets, { storedSecretPlaceholder: STORED_SECRET_PLACEHOLDER }),
-      );
-    }
-    if (req.body.cloudflare) {
-      db.settings.publicDomain = String(req.body.cloudflare.publicDomain || "").trim().replace(/\/$/, "");
-      db.settings.botPublicUrl = db.settings.publicDomain || db.settings.botPublicUrl;
-      const envCloudflaredToken = firstUsableSecret(process.env.CLOUDFLARED_TOKEN);
-      if (envCloudflaredToken) {
-        db.settings.cloudflareTunnelToken = envCloudflaredToken;
-      } else {
-        delete db.settings.cloudflareTunnelToken;
-      }
-    }
-    if (req.body.payment) {
-      db.settings.ownerQrisImageUrl = String(req.body.payment.ownerQrisImageUrl || "").trim();
-      db.settings.ownerQrisNote = String(req.body.payment.ownerQrisNote || "").trim();
-      db.settings.danaNumber = String(req.body.payment.danaNumber || "").trim();
-      db.settings.danaName = String(req.body.payment.danaName || "").trim();
-      db.settings.livinNumber = String(req.body.payment.livinNumber || "").trim();
-      db.settings.livinName = String(req.body.payment.livinName || "").trim();
-      db.settings.bcaNumber = String(req.body.payment.bcaNumber || "").trim();
-      db.settings.bcaName = String(req.body.payment.bcaName || "").trim();
-      db.settings.gopayNumber = String(req.body.payment.gopayNumber || "").trim();
-      db.settings.gopayName = String(req.body.payment.gopayName || "").trim();
-      db.settings.shopeepayNumber = String(req.body.payment.shopeepayNumber || "").trim();
-      db.settings.shopeepayName = String(req.body.payment.shopeepayName || "").trim();
-    }
-    return ownerIntegrationSettings(db);
-  });
-  res.json(updated);
-});
-
-app.get("/api/resellers/deposit-instructions", requireAuth(["reseller"]), async (_req, res) => {
-  const db = await readDb();
-  const settings = ownerIntegrationSettings(db);
-  const payment = settings.payment || {};
-  const pakasirConnected = settings.status.pakasir === "connected";
-  const methods = {
-    qris_auto: {
-      label: "Deposit otomatis QRIS",
-      note: pakasirConnected
-        ? "Saldo otomatis diproses via Pakasir bila integrasi aktif."
-        : "Pakasir sedang disconnected. Pilih QRIS owner manual atau metode bank.",
-      available: pakasirConnected,
-    },
-    qris_owner: {
-      label: "QRIS owner manual",
-      imageUrl: payment.ownerQrisImageUrl || "",
-      note: payment.ownerQrisNote || "",
-      available: Boolean(payment.ownerQrisImageUrl),
-    },
-    dana: {
-      label: "DANA",
-      accountNumber: payment.danaNumber || "",
-      accountName: payment.danaName || "",
-      available: Boolean(payment.danaNumber),
-    },
-    livin: {
-      label: "Livin Mandiri",
-      accountNumber: payment.livinNumber || "",
-      accountName: payment.livinName || "",
-      available: Boolean(payment.livinNumber),
-    },
-    bca: {
-      label: "BCA",
-      accountNumber: payment.bcaNumber || "",
-      accountName: payment.bcaName || "",
-      available: Boolean(payment.bcaNumber),
-    },
-    gopay: {
-      label: "GoPay",
-      accountNumber: payment.gopayNumber || "",
-      accountName: payment.gopayName || "",
-      available: Boolean(payment.gopayNumber),
-    },
-    shopeepay: {
-      label: "ShopeePay",
-      accountNumber: payment.shopeepayNumber || "",
-      accountName: payment.shopeepayName || "",
-      available: Boolean(payment.shopeepayNumber),
-    },
-  };
-  res.json({
-    ownerName: settings.profile?.name || settings.profile?.username || "Owner",
-    ownerWhatsapp: settings.profile?.whatsapp || "",
-    pakasirConnected,
-    methods,
-  });
-});
-
-app.get("/api/gmail/oauth/start", requireAuth(["owner"]), async (_req, res) => {
-  const db = await readDb();
-  const settings = ownerIntegrationSettings(db);
-  if (!gmailOAuthConfigured(db)) {
-    res.status(400).json({ error: "Client ID, Client Secret, dan Redirect URI Gmail wajib diisi dulu" });
-    return;
-  }
-  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-  url.searchParams.set("client_id", settings.gmail.clientId);
-  url.searchParams.set("redirect_uri", settings.gmail.redirectUri);
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", "https://www.googleapis.com/auth/gmail.readonly");
-  url.searchParams.set("access_type", "offline");
-  url.searchParams.set("prompt", "consent");
-  url.searchParams.set("state", gmailOAuthState());
-  res.json({ ok: true, url: url.toString() });
-});
-
-app.get("/api/gmail/oauth/callback", async (req, res, next) => {
-  try {
-    if (!verifyGmailOAuthState(req.query.state)) {
-      res.status(400).send("State OAuth Gmail tidak valid atau kadaluarsa.");
-      return;
-    }
-    const code = String(req.query.code || "").trim();
-    if (!code) {
-      res.status(400).send("Kode OAuth Gmail tidak ditemukan.");
-      return;
-    }
-
-    const db = await readDb();
-    const settings = ownerIntegrationSettings(db);
-    const response = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        code,
-        client_id: settings.gmail.clientId,
-        client_secret: settings.gmail.clientSecret,
-        redirect_uri: settings.gmail.redirectUri,
-        grant_type: "authorization_code",
-      }),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload.refresh_token) {
-      res.status(400).send(payload.error_description || payload.error || "Gagal menyambungkan Gmail. Pastikan consent diberikan dengan akses offline.");
-      return;
-    }
-
-    await updateDb((nextDb) => {
-      nextDb.settings.gmailRefreshToken = String(payload.refresh_token || "").trim();
-      nextDb.settings.gmailConnectedAt = nowText();
-      nextDb.settings.gmailOAuthStatus = "connected";
-      nextDb.settings.gmailLastError = "";
-      nextDb.settings.gmailLastErrorAt = "";
-      return null;
-    });
-    res.send("Gmail berhasil tersambung. Silakan kembali ke dashboard Kavya.");
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get("/api/products", requireAuth(["owner"]), async (_req, res) => {
-  const db = await readDb();
-  res.json(db.products);
-});
-
-app.get("/api/products/price-sync/preview", requireAuth(["owner"]), async (_req, res, next) => {
-  try {
-    const db = await readDb();
-    const source = await findWaPriceSource(legacyRootDir);
-    if (!source) {
-      res.status(404).json({ error: "Sumber pricelist WA reseller tidak ditemukan" });
-      return;
-    }
-    const preview = previewWaPriceSync(db, source.text);
-    res.json({
-      ok: true,
-      source: { keyword: source.keyword, groupJid: source.groupJid, filePath: source.filePath, score: source.score },
-      ...preview,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/products/price-sync/apply", requireAuth(["owner"]), async (_req, res, next) => {
-  try {
-    const result = await updateDb(async (db) => {
-      const source = await findWaPriceSource(legacyRootDir);
-      if (!source) {
-        const error = new Error("Sumber pricelist WA reseller tidak ditemukan");
-        error.status = 404;
-        throw error;
-      }
-      const preview = previewWaPriceSync(db, source.text);
-      const updated = applyWaPriceSync(db, preview);
-      db.activities = db.activities || [];
-      db.activities.unshift({
-        id: makeId("act"),
-        type: "stock",
-        title: "Harga produk disinkronkan dari list WA",
-        description: `${updated} harga produk diperbarui dari ${source.keyword}.`,
-        createdAt: nowText(),
-      });
-      return {
-        ok: true,
-        updated,
-        source: { keyword: source.keyword, groupJid: source.groupJid, filePath: source.filePath, score: source.score },
-        ...preview,
-      };
-    });
-    res.json(result);
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get("/api/public/catalog", async (_req, res) => {
-  const db = await readDbWithExpiredOrders();
-  const includeEmpty = ["1", "true", "yes"].includes(String(_req.query.includeEmpty || "").toLowerCase());
-  res.json(publicCatalog(db, { includeEmpty }));
-});
-
-app.post("/api/public/catalog/precheck", async (req, res, next) => {
-  try {
-    const result = await updateDb(async (db) => {
-      const product = getProduct(db, req.body.productId);
-      const variant = product?.variants?.find((item) => item.id === req.body.variantId) || null;
-      if (!product || product.isArchived || product.isActive === false || !variant || !isVariantOrderable(product, variant)) {
-        const error = new Error("Produk atau varian tidak tersedia untuk order baru");
-        error.status = 409;
-        error.catalog = publicCatalog(db, { includeEmpty: false });
-        throw error;
-      }
-      await syncSheetsForProductOrThrow(db, product, "catalog_precheck", { force: true });
-      const lockError = orderLockError(product, variant);
-      if (lockError) {
-        lockError.catalog = publicCatalog(db, { includeEmpty: false });
-        throw lockError;
-      }
-      const duration = normalizeDurationLabel(req.body.duration || "", variant);
-      if (!durationAllowedForVariant(variant, duration)) {
-        const error = new Error(`Durasi ${duration} sedang tidak aktif untuk ${variant.name}.`);
-        error.status = 409;
-        error.catalog = publicCatalog(db, { includeEmpty: false });
-        throw error;
-      }
-      const stockCount = availableStockCount(db, product, variant);
-      return {
-        ok: true,
-        productId: product?.id || req.body.productId || "",
-        variantId: variant?.id || req.body.variantId || "",
-        stockCount,
-        catalog: publicCatalog(db, { includeEmpty: false }),
-      };
-    });
-    res.json(result);
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get("/api/public/reseller-check", async (req, res) => {
-  const db = await readDb();
-  const reseller = activeResellerByWhatsapp(db, req.query.whatsapp || "");
-  res.json({
-    ok: true,
-    active: Boolean(reseller),
-    message: reseller ? "Nomor reseller aktif terverifikasi." : resellerRequiredMessage,
-  });
+registerCatalogRoutes(app, {
+  activeResellerByWhatsapp,
+  applyWaPriceSync,
+  availableStockCount,
+  durationAllowedForVariant,
+  findWaPriceSource,
+  getProduct,
+  isVariantOrderable,
+  legacyRootDir,
+  makeId,
+  normalizeDurationLabel,
+  nowText,
+  orderLockError,
+  previewWaPriceSync,
+  publicCatalog,
+  readDb,
+  readDbSnapshot,
+  requireAuth,
+  resellerRequiredMessage,
+  syncSheetsForProductOrThrow,
+  updateDb,
 });
 
 function normalizeCode(value, fallback) {
@@ -9199,6 +8350,12 @@ function normalizeMessageTemplatesInput(input = {}, fallback = {}) {
     delivery: String(source.delivery ?? previous.delivery ?? "").trim(),
     warranty: String(source.warranty ?? previous.warranty ?? "").trim(),
   };
+}
+
+function normalizeCheckoutFieldsInput(input, fallback) {
+  const source = Array.isArray(input) ? input : Array.isArray(fallback) ? fallback : null;
+  if (!source) return undefined;
+  return source.map((field) => normalizeCheckoutField(field)).filter(Boolean);
 }
 
 function normalizeOrderLockInput(input = undefined, fallback = {}) {
@@ -9259,6 +8416,7 @@ function normalizeProductInput(body, fallback = {}) {
   const code = normalizeCode(body.code, fallback.code || body.name || fallback.name);
   const variants = Array.isArray(body.variants) ? body.variants : fallback.variants || [];
   const productRequirements = normalizeCheckoutRequirementsInput(body.checkoutRequirements, fallback.checkoutRequirements);
+  const productCheckoutFields = normalizeCheckoutFieldsInput(body.checkoutFields, fallback.checkoutFields);
   const messageTemplates = normalizeMessageTemplatesInput(body.messageTemplates, fallback.messageTemplates);
   const orderLock = normalizeOrderLockInput(body.orderLock, fallback.orderLock);
 
@@ -9273,7 +8431,17 @@ function normalizeProductInput(body, fallback = {}) {
     needsProfile: body.needsProfile === undefined ? Boolean(fallback.needsProfile) : Boolean(body.needsProfile),
     needsPin: body.needsPin === undefined ? Boolean(fallback.needsPin) : Boolean(body.needsPin),
     ...(productRequirements ? { checkoutRequirements: productRequirements } : {}),
+    ...(productCheckoutFields ? { checkoutFields: productCheckoutFields } : {}),
     messageTemplates,
+    deliveryTemplate: String(body.deliveryTemplate ?? fallback.deliveryTemplate ?? ""),
+    deliveryTemplateVersion: Math.max(0, Number(body.deliveryTemplateVersion ?? fallback.deliveryTemplateVersion ?? 0)),
+    requiredDeliveryFields: Array.isArray(body.requiredDeliveryFields)
+      ? body.requiredDeliveryFields
+      : Array.isArray(fallback.requiredDeliveryFields)
+        ? fallback.requiredDeliveryFields
+        : [],
+    deliveryTemplateUpdatedAt: String(body.deliveryTemplateUpdatedAt ?? fallback.deliveryTemplateUpdatedAt ?? ""),
+    deliveryTemplateUpdatedBy: String(body.deliveryTemplateUpdatedBy ?? fallback.deliveryTemplateUpdatedBy ?? ""),
     orderLock,
     code,
     variants: variants.map((variant, index) => {
@@ -9315,8 +8483,23 @@ function normalizeProductInput(body, fallback = {}) {
         ...(normalizeCheckoutRequirementsInput(variant.checkoutRequirements, fallbackVariant.checkoutRequirements) ? {
           checkoutRequirements: normalizeCheckoutRequirementsInput(variant.checkoutRequirements, fallbackVariant.checkoutRequirements),
         } : {}),
+        ...(normalizeCheckoutFieldsInput(variant.checkoutFields, fallbackVariant.checkoutFields) ? {
+          checkoutFields: normalizeCheckoutFieldsInput(variant.checkoutFields, fallbackVariant.checkoutFields),
+        } : {}),
         orderLock: normalizeOrderLockInput(variant.orderLock, fallbackVariant.orderLock),
-        deliveryTemplate: String(variant.deliveryTemplate ?? fallbackVariant.deliveryTemplate ?? "").trim(),
+        deliveryTemplate: String(variant.deliveryTemplate ?? fallbackVariant.deliveryTemplate ?? ""),
+        deliveryTemplateVersion: Math.max(0, Number(
+          variant.deliveryTemplateVersion
+          ?? fallbackVariant.deliveryTemplateVersion
+          ?? ((variant.deliveryTemplate ?? fallbackVariant.deliveryTemplate) ? 1 : 0),
+        )),
+        requiredDeliveryFields: Array.isArray(variant.requiredDeliveryFields)
+          ? variant.requiredDeliveryFields
+          : Array.isArray(fallbackVariant.requiredDeliveryFields)
+            ? fallbackVariant.requiredDeliveryFields
+            : [],
+        deliveryTemplateUpdatedAt: String(variant.deliveryTemplateUpdatedAt ?? fallbackVariant.deliveryTemplateUpdatedAt ?? ""),
+        deliveryTemplateUpdatedBy: String(variant.deliveryTemplateUpdatedBy ?? fallbackVariant.deliveryTemplateUpdatedBy ?? ""),
         warrantyTemplate: String(variant.warrantyTemplate ?? fallbackVariant.warrantyTemplate ?? "").trim(),
       };
     }),
@@ -9352,296 +8535,55 @@ function productDependencyMessage(summary) {
   ].filter(Boolean).join(", ");
 }
 
-app.post("/api/products", requireAuth(["owner"]), async (req, res) => {
-  const created = await updateDb((db) => {
-    const product = {
-      ...normalizeProductInput(req.body),
-      isArchived: false,
-      archivedAt: "",
-      id: makeId("prod"),
-    };
-    db.products.unshift(product);
-    return product;
-  });
-  res.status(201).json(created);
+registerProductAdminRoutes(app, {
+  makeId,
+  normalizeProductInput,
+  nowText,
+  productDependencyMessage,
+  productDependencySummary,
+  readDb,
+  requireAuth,
+  updateDb,
 });
 
-app.put("/api/products/:id", requireAuth(["owner"]), async (req, res) => {
-  const updated = await updateDb((db) => {
-    const index = db.products.findIndex((product) => product.id === req.params.id);
-    if (index === -1) return null;
-    const current = db.products[index];
-    const product = {
-      ...current,
-      ...normalizeProductInput(req.body, current),
-      id: current.id,
-    };
-    db.products[index] = product;
-    return product;
-  });
-  if (!updated) return res.status(404).json({ error: "Produk tidak ditemukan" });
-  res.json(updated);
+registerStockRoutes(app, {
+  buildDailyStockAssignment,
+  createdAtMs,
+  getProduct,
+  getVariant,
+  isCanvaProduct,
+  isGoogleSheetsBackedStock,
+  linkPoolAvailableCount,
+  makeId,
+  normalizeWhatsappNumber,
+  notifyResellerAccountChanged,
+  nowText,
+  pushAccountsToGoogleSheets,
+  readDb,
+  requireAuth,
+  syncCredentialsToSheetsSafely,
+  syncPasswordByEmail,
+  todayText,
+  updateDb,
 });
 
-app.post("/api/products/:id/lock", requireAuth(["owner"]), async (req, res) => {
-  const updated = await updateDb((db) => {
-    const product = db.products.find((item) => item.id === req.params.id);
-    if (!product) return null;
-    const enabled = Boolean(req.body?.enabled);
-    const updatedAt = nowText();
-    product.orderLock = {
-      enabled,
-      reason: enabled ? String(req.body?.reason || "").trim() : "",
-      updatedAt,
-      updatedBy: "owner",
-      scope: "product",
-    };
-    db.activities = db.activities || [];
-    db.activities.unshift({
-      id: makeId("act"),
-      type: "stock",
-      title: enabled ? `${product.name} di-lock untuk order baru` : `Lock order ${product.name} dibuka`,
-      description: enabled
-        ? `Order baru untuk ${product.name} ditahan manual.${product.orderLock.reason ? ` Alasan: ${product.orderLock.reason}` : ""}`
-        : `Order baru untuk ${product.name} aktif lagi.`,
-      createdAt: updatedAt,
-      productId: product.id,
-    });
-    return product;
-  });
-  if (!updated) return res.status(404).json({ error: "Produk tidak ditemukan" });
-  res.json(updated);
-});
 
-app.post("/api/products/:id/variants/:variantId/lock", requireAuth(["owner"]), async (req, res) => {
-  const updated = await updateDb((db) => {
-    const product = db.products.find((item) => item.id === req.params.id);
-    const variant = product?.variants?.find((item) => item.id === req.params.variantId);
-    if (!product || !variant) return null;
-    const enabled = Boolean(req.body?.enabled);
-    const updatedAt = nowText();
-    variant.orderLock = {
-      enabled,
-      reason: enabled ? String(req.body?.reason || "").trim() : "",
-      updatedAt,
-      updatedBy: "owner",
-      scope: "variant",
-    };
-    db.activities = db.activities || [];
-    db.activities.unshift({
-      id: makeId("act"),
-      type: "stock",
-      title: enabled ? `${product.name} ${variant.name} di-lock` : `Lock order ${product.name} ${variant.name} dibuka`,
-      description: enabled
-        ? `Order baru untuk ${product.name} ${variant.name} ditahan manual.${variant.orderLock.reason ? ` Alasan: ${variant.orderLock.reason}` : ""}`
-        : `Order baru untuk ${product.name} ${variant.name} aktif lagi.`,
-      createdAt: updatedAt,
-      productId: product.id,
-      variant: variant.name,
-    });
-    return product;
-  });
-  if (!updated) return res.status(404).json({ error: "Produk atau variant tidak ditemukan" });
-  res.json(updated);
-});
 
-app.post("/api/products/:id/archive", requireAuth(["owner"]), async (req, res) => {
-  const archived = await updateDb((db) => {
-    const product = db.products.find((item) => item.id === req.params.id);
-    if (!product) return null;
-    const archivedAt = nowText();
-    product.isArchived = true;
-    product.isActive = false;
-    product.archivedAt = archivedAt;
-    db.activities = db.activities || [];
-    db.activities.unshift({
-      id: makeId("act"),
-      type: "stock",
-      title: `${product.name} diarsipkan`,
-      description: "Produk disembunyikan dari katalog dan order baru. Order, stok, dan akun lama tetap disimpan.",
-      createdAt: archivedAt,
-      productId: product.id,
-    });
-    return product;
-  });
-  if (!archived) return res.status(404).json({ error: "Produk tidak ditemukan" });
-  res.json(archived);
-});
-
-app.post("/api/products/:id/unarchive", requireAuth(["owner"]), async (req, res) => {
-  const restored = await updateDb((db) => {
-    const product = db.products.find((item) => item.id === req.params.id);
-    if (!product) return null;
-    const restoredAt = nowText();
-    product.isArchived = false;
-    product.archivedAt = "";
-    product.isActive = true;
-    db.activities = db.activities || [];
-    db.activities.unshift({
-      id: makeId("act"),
-      type: "stock",
-      title: `${product.name} dipulihkan`,
-      description: "Produk kembali aktif dan bisa tampil di katalog jika punya stok ready.",
-      createdAt: restoredAt,
-      productId: product.id,
-    });
-    return product;
-  });
-  if (!restored) return res.status(404).json({ error: "Produk tidak ditemukan" });
-  res.json(restored);
-});
-
-app.delete("/api/products/:id", requireAuth(["owner"]), async (req, res) => {
-  const deleted = await updateDb((db) => {
-    const index = db.products.findIndex((product) => product.id === req.params.id);
-    if (index === -1) return null;
-    const product = db.products[index];
-    const dependencies = productDependencySummary(db, product);
-    if (dependencies.total > 0) {
-      const error = new Error(`Produk masih punya ${productDependencyMessage(dependencies)}. Pakai Arsipkan supaya data lama tetap aman.`);
-      error.status = 409;
-      throw error;
-    }
-    db.products.splice(index, 1);
-    db.activities = db.activities || [];
-    db.activities.unshift({
-      id: makeId("act"),
-      type: "stock",
-      title: `${product.name} dihapus permanen`,
-      description: "Produk dihapus karena tidak memiliki stok, akun reseller, atau order terkait.",
-      createdAt: nowText(),
-      productId: product.id,
-    });
-    return true;
-  });
-  if (!deleted) return res.status(404).json({ error: "Produk tidak ditemukan" });
-  res.json({ ok: true });
-});
-
-app.get("/api/stock", requireAuth(["owner", "reseller"]), async (req, res) => {
-  const db = await readDb();
-  const search = String(req.query.search || "").toLowerCase();
-  const status = String(req.query.status || "all");
-  const productId = String(req.query.productId || "all");
-  if (req.auth.role === "reseller") {
-    if (!["all", "available"].includes(status)) {
-      res.json([]);
-      return;
-    }
-    const grouped = new Map();
-    const addSummary = (nextProductId, nextVariantId, amount, extraSearch = "") => {
-      if (!nextProductId || !nextVariantId || amount <= 0) return;
-      const product = getProduct(db, nextProductId);
-      const variant = getVariant(db, nextProductId, nextVariantId);
-      if (!product || !variant || isCanvaProduct(product)) return;
-      if (productId !== "all" && nextProductId !== productId) return;
-      const matchSearch = !search || [product.name, variant.name, variant.code, extraSearch].join(" ").toLowerCase().includes(search);
-      if (!matchSearch) return;
-      const key = `${nextProductId}::${nextVariantId}`;
-      const current = grouped.get(key) || {
-        id: `summary-${nextProductId}-${nextVariantId}`,
-        productId: nextProductId,
-        variantId: nextVariantId,
-        email: "",
-        password: "",
-        profile: "",
-        pin: "",
-        status: "available",
-        stockType: "summary",
-        availableCount: 0,
-      };
-      current.availableCount += amount;
-      current.email = `${current.availableCount} akun ready`;
-      grouped.set(key, current);
-    };
-
-    for (const item of db.stock || []) {
-      if (item.status !== "available") continue;
-      addSummary(item.productId, item.variantId, 1, item.email || "");
-    }
-    for (const pool of db.linkPools || []) {
-      const available = linkPoolAvailableCount(db, pool);
-      if (available <= 0) continue;
-      addSummary(pool.productId, pool.variantId, available, `${pool.poolKey || ""} ${pool.link || ""}`);
-    }
-
-    res.json(Array.from(grouped.values()).sort((left, right) => (
-      `${left.productId}-${left.variantId}`.localeCompare(`${right.productId}-${right.variantId}`)
-    )));
-    return;
-  }
-  const rows = db.stock.filter((item) => {
-    const product = getProduct(db, item.productId);
-    const variant = getVariant(db, item.productId, item.variantId);
-    if (isCanvaProduct(product)) return false;
-    const matchStatus = status === "all" || item.status === status;
-    const matchProduct = productId === "all" || item.productId === productId;
-    const matchSearch = [item.id, item.email, product?.name, variant?.name, variant?.code].join(" ").toLowerCase().includes(search);
-    return matchStatus && matchProduct && matchSearch;
-  });
-  const linkRows = (db.linkPools || [])
-    .filter((pool) => {
-      const product = getProduct(db, pool.productId);
-      const variant = getVariant(db, pool.productId, pool.variantId);
-      const available = linkPoolAvailableCount(db, pool);
-      if (!product || !variant || available <= 0) return false;
-      const matchStatus = status === "all" || status === "available";
-      const matchProduct = productId === "all" || pool.productId === productId;
-      const matchSearch = [pool.id, pool.link, pool.poolKey, product?.name, variant?.name, variant?.code].join(" ").toLowerCase().includes(search);
-      return matchStatus && matchProduct && matchSearch;
-    })
-    .map((pool) => {
-      const available = linkPoolAvailableCount(db, pool);
-      return {
-        id: pool.id,
-        productId: pool.productId,
-        variantId: pool.variantId,
-        email: `Kuota ${available}/${Number(pool.quota || 0)} tersedia`,
-        password: pool.link || "",
-        profile: "-",
-        pin: "-",
-        status: "available",
-        stockType: "link_pool",
-        linkPoolId: pool.id,
-        sheetSource: "google_sheets",
-        sheetPool: pool.poolKey || pool.key || "",
-        sheetPoolSchema: "link",
-        sheetRow: pool.sheetRow || 0,
-        sheetName: pool.sheetName || "",
-        notes: pool.notes || "",
-      };
-    });
-  const allRows = [...rows, ...linkRows];
-  res.json(allRows);
-});
-
-app.get("/api/google-sheets/status", requireAuth(["owner"]), async (_req, res) => {
-  const db = await readDb();
-  res.json({
-    configured: googleSheetsConfigured(db),
-    settings: googleSheetsPublicSettings(db),
-    lastSyncAt: db.settings?.googleSheetsLastSyncAt || "",
-    lastSyncSummary: db.settings?.googleSheetsLastSyncSummary || null,
-  });
-});
-
-app.get("/api/google-sheets/mapping-preview", requireAuth(["owner"]), async (req, res, next) => {
-  try {
-    const db = await readDb();
-    const preview = await previewAccountSheetMapping(db, {
-      accountId: req.query.accountId || req.query.account_id || "",
-      stockId: req.query.stockId || req.query.stock_id || "",
-      sheetStockKey: req.query.sheetStockKey || req.query.sheet_stock_key || "",
-      email: req.query.email || "",
-    });
-    if (!preview.ok) {
-      res.status(404).json(preview);
-      return;
-    }
-    res.json(preview);
-  } catch (error) {
-    next(error);
-  }
+registerSheetsRoutes(app, {
+  buildSheetsSyncPreview,
+  cloneForPreview,
+  enableMaintenanceMode,
+  ensureGoogleSheetsTemplate,
+  ensureNetflixSheetsTemplate,
+  friendlyGoogleSheetsError,
+  googleSheetsConfigured,
+  googleSheetsPublicSettings,
+  previewAccountSheetMapping,
+  readDb,
+  requireAuth,
+  syncGoogleSheetsStockSafely,
+  syncDataResellersToGoogleSheets,
+  updateDb,
 });
 
 function cloneForPreview(value) {
@@ -9746,1037 +8688,92 @@ function buildSheetsSyncPreview(beforeDb, afterDb, syncResult = {}) {
   };
 }
 
-app.post("/api/google-sheets/netflix/template", requireAuth(["owner"]), async (_req, res, next) => {
-  try {
-    const result = await ensureNetflixSheetsTemplate(await readDb());
-    res.json(result);
-  } catch (error) {
-    next(error);
-  }
+
+
+registerOrderRoutes(app, {
+  addAccountDaysText,
+  addMinutesText,
+  assertOrderIntakeOpen,
+  assertResellerCanOrder,
+  authReseller,
+  checkoutRequirementsForVariant,
+  structuredCheckoutFieldsForVariant,
+  clearReservedStockState,
+  createPakasirQris,
+  depositBreakdown,
+  durationAllowedForVariant,
+  durationDays,
+  enableMaintenanceMode,
+  ensureWebOrderStock,
+  ensureOrderTrackingToken,
+  expirePendingOrders,
+  findOrderForPublicTracking,
+  formatRupiah,
+  fulfillPaidOrderAndNotify,
+  getProduct,
+  isSmokeTestReseller,
+  isVariantOrderable,
+  makeId,
+  normalizeDurationLabel,
+  normalizeWhatsappNumber,
+  nowText,
+  orderBelongsToReseller,
+  orderLockError,
+  parseOrderQty,
+  paymentTtlMinutes,
+  prepareManualApprovedOrderForFulfillment,
+  preparePaidOrderForFulfillment,
+  priceForDuration,
+  primaryResellerWhatsapp,
+  pushFulfilledOrderToGoogleSheets,
+  publicTrackingLimiter,
+  readDbSnapshot,
+  recordPublicTrackingAudit,
+  refreshOrderDeliveryTemplateSnapshot,
+  repairCompletedOrderSheetAssignment,
+  requireAuth,
+  resellerRequiredMessage,
+  serializeOrderForApi,
+  safeTrackingOrder,
+  splitCustomerEmails,
+  splitDeviceNames,
+  updateDb,
+  variantStockGroupKey,
 });
 
-app.post("/api/google-sheets/template", requireAuth(["owner"]), async (_req, res, next) => {
-  try {
-    const result = await ensureGoogleSheetsTemplate(await readDb());
-    res.json(result);
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/google-sheets/sync", requireAuth(["owner"]), async (_req, res, next) => {
-  try {
-    const result = await updateDb((db) => syncGoogleSheetsStockSafely(db, { reason: "manual_sync", force: true }));
-    res.json(result);
-  } catch (error) {
-    await updateDb((db) => {
-      const friendly = friendlyGoogleSheetsError(error);
-      if (friendly.code !== "google_sheets_rate_limited") {
-        enableMaintenanceMode(db, `Google Sheets gagal sync manual: ${friendly.message || "unknown_error"}`, "google_sheets");
-      }
-      return null;
-    }).catch(() => undefined);
-    next(friendlyGoogleSheetsError(error));
-  }
-});
-
-app.post("/api/google-sheets/preview", requireAuth(["owner"]), async (_req, res, next) => {
-  try {
-    const db = await readDb();
-    if (!googleSheetsConfigured(db)) {
-      res.status(400).json({ error: "Google Sheets belum dikonfigurasi" });
-      return;
-    }
-    const previewDb = cloneForPreview(db);
-    const result = await syncGoogleSheetsStockSafely(previewDb, { silent: true, reason: "preview_sync", force: true });
-    res.json({ ok: true, preview: buildSheetsSyncPreview(db, previewDb, result) });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/google-sheets/netflix/sync", requireAuth(["owner"]), async (_req, res, next) => {
-  try {
-    const result = await updateDb((db) => syncGoogleSheetsStockSafely(db, { reason: "manual_sync", force: true }));
-    res.json(result);
-  } catch (error) {
-    next(friendlyGoogleSheetsError(error));
-  }
-});
-
-app.post("/api/stock", requireAuth(["owner"]), async (req, res) => {
-  const created = await updateDb((db) => {
-    const product = getProduct(db, req.body.productId) || db.products[0];
-    const variant = product?.variants?.find((item) => item.id === req.body.variantId) || product?.variants?.[0];
-    if (!product || !variant) {
-      const error = new Error("Produk atau varian tidak valid");
-      error.status = 400;
-      throw error;
-    }
-    const stock = {
-      id: makeId("stk"),
-      productId: product.id,
-      variantId: variant.id,
-      email: req.body.email,
-      password: req.body.password,
-      profile: req.body.profile || "",
-      pin: req.body.pin || "",
-      signInCode: req.body.signInCode || "",
-      verificationCode: req.body.verificationCode || "",
-      resetLink: req.body.resetLink || "",
-      householdLink: req.body.householdLink || "",
-      status: req.body.status || "available",
-      createdAt: todayText(),
-      notes: req.body.notes || "",
-    };
-    db.stock.unshift(stock);
-    db.activities.unshift({
-      id: makeId("act"),
-      type: "stock",
-      title: `Stok ${product.name} ditambahkan`,
-      description: `${stock.email} masuk ke stok ${stock.status}.`,
-      createdAt: nowText(),
-    });
-    return stock;
-  });
-  res.status(201).json(created);
-});
-
-app.put("/api/stock/:id", requireAuth(["owner"]), async (req, res) => {
-  const updated = await updateDb(async (db) => {
-    const item = db.stock.find((stock) => stock.id === req.params.id);
-    if (!item) return null;
-    const sheetBacked = isGoogleSheetsBackedStock(item);
-    if (sheetBacked) {
-      const mutableKeys = new Set(["password", "signInCode", "verificationCode", "resetLink", "householdLink"]);
-      const blockedKeys = Object.keys(req.body || {}).filter((key) => !mutableKeys.has(key));
-      if (blockedKeys.length) {
-        const error = new Error(`Stok Google Sheets harus diubah dari Sheets. Field web yang diblokir: ${blockedKeys.join(", ")}`);
-        error.status = 409;
-        throw error;
-      }
-    }
-    const previousPassword = String(item.password || "");
-    Object.assign(item, req.body);
-    const nextPassword = String(item.password || "");
-    if (req.body.password !== undefined && previousPassword !== nextPassword) {
-      const passwordSync = syncPasswordByEmail(db, item.email, nextPassword, { sourceStockId: item.id });
-      item.googleSheetsCredentialSync = await syncCredentialsToSheetsSafely(db, {
-        email: item.email,
-        password: nextPassword,
-        stockIds: [item.id],
-        sheetStockKeys: [item.sheetStockKey].filter(Boolean),
-      });
-      const notificationDedupe = new Set();
-      for (const account of passwordSync.affectedAccounts || []) {
-        await notifyResellerAccountChanged(db, account, [{ key: "password", label: "Password/Link" }], { dedupeSet: notificationDedupe });
-      }
-    }
-    return item;
-  });
-  if (!updated) return res.status(404).json({ error: "Stok tidak ditemukan" });
-  res.json(updated);
-});
-
-app.post("/api/stock/:id/release-reservation", requireAuth(["owner"]), async (req, res) => {
-  const updated = await updateDb((db) => {
-    const stock = (db.stock || []).find((item) => item.id === req.params.id);
-    if (!stock) return null;
-    if (String(stock.status || "").toLowerCase() !== "reserved") {
-      const error = new Error("Stok ini tidak sedang reserved");
-      error.status = 400;
-      throw error;
-    }
-
-    const linkedAccount = (db.managedAccounts || []).find((account) => (
-      String(account.id || "").trim() === String(stock.reservedAccountId || "").trim()
-      && !account.hidden
-      && !account.returnedToStockAt
-    ));
-    if (linkedAccount) {
-      const error = new Error("Stok reserved ini masih dipakai akun harian aktif, jadi tidak boleh dilepas.");
-      error.status = 409;
-      throw error;
-    }
-
-    const order = (db.orders || []).find((item) => String(item.id || "").trim() === String(stock.reservedFor || "").trim()) || null;
-    const orderTerminal = !order
-      || ["cancelled"].includes(String(order.orderStatus || "").toLowerCase())
-      || ["expired"].includes(String(order.qrisStatus || "").toLowerCase())
-      || (createdAtMs(order.paymentExpiresAt || "") && createdAtMs(order.paymentExpiresAt || "") < Date.now());
-    if (!orderTerminal) {
-      const error = new Error("Order yang menahan stok ini masih aktif. Lepas lock hanya untuk reservasi stale/expired.");
-      error.status = 409;
-      throw error;
-    }
-
-    stock.status = "available";
-    delete stock.reservedFor;
-    delete stock.reservedAccountId;
-    delete stock.reservedUntil;
-    delete stock.reservedAt;
-
-    db.activities = db.activities || [];
-    db.activities.unshift({
-      id: makeId("act"),
-      type: "stock",
-      title: "Reserved stock dilepas manual",
-      description: `${stock.email || stock.id} lock reservasinya dilepas oleh owner${order ? ` dari order ${order.id}` : ""}.`,
-      createdAt: nowText(),
-      stockId: stock.id,
-      orderId: order?.id || "",
-    });
-    return stock;
-  });
-  if (!updated) return res.status(404).json({ error: "Stok tidak ditemukan" });
-  res.json({ ok: true, stock: updated });
-});
-
-app.post("/api/stock/:id/assign-daily", requireAuth(["owner"]), async (req, res) => {
-  const assigned = await updateDb(async (db) => {
-    const stock = db.stock.find((item) => item.id === req.params.id);
-    if (!stock) return null;
-    const account = buildDailyStockAssignment(db, stock, req.body);
-    stock.status = "reserved";
-    stock.reservedFor = account.reseller || account.whatsapp || account.resellerId || "";
-    stock.reservedAccountId = account.id;
-    stock.reservedUntil = account.expiresAt;
-    stock.soldVariant = account.variant || "";
-    stock.soldVariantId = account.variantId || "";
-    stock.soldDuration = account.duration || "";
-    stock.soldDurationDays = account.durationDays || 0;
-    db.managedAccounts = db.managedAccounts || [];
-    db.managedAccounts.unshift(account);
-    db.activities = db.activities || [];
-    db.activities.unshift({
-      id: makeId("act"),
-      type: "account",
-      title: `Akun ${account.email} di-assign harian`,
-      description: `${account.email} dipakai ${account.reseller || account.whatsapp || "reseller"} selama ${account.durationDays} hari.`,
-      createdAt: nowText(),
-      resellerId: account.resellerId || "",
-      whatsapp: normalizeWhatsappNumber(account.whatsapp || ""),
-      accountId: account.id,
-      accountEmail: account.email,
-      stockId: stock.id,
-    });
-    await pushAccountsToGoogleSheets(db, [account], { id: "MANUAL", device: req.body.device || req.body.buyer || "", note: req.body.buyer || "" });
-    return { account, stock };
-  });
-  if (!assigned) return res.status(404).json({ error: "Stok tidak ditemukan" });
-  res.status(201).json(assigned);
-});
-
-app.delete("/api/stock/:id", requireAuth(["owner"]), async (req, res) => {
-  const deleted = await updateDb((db) => {
-    const index = db.stock.findIndex((stock) => stock.id === req.params.id);
-    if (index === -1) return null;
-    const existing = db.stock[index];
-    if (isGoogleSheetsBackedStock(existing)) {
-      const error = new Error("Stok Google Sheets tidak boleh dihapus dari web. Hapus atau kosongkan row di Google Sheets.");
-      error.status = 409;
-      throw error;
-    }
-    const [item] = db.stock.splice(index, 1);
-    db.activities.unshift({
-      id: makeId("act"),
-      type: "stock",
-      title: "Stok dihapus",
-      description: `${item.email || item.id} dihapus dari daftar stok.`,
-      createdAt: nowText(),
-    });
-    return item;
-  });
-  if (!deleted) return res.status(404).json({ error: "Stok tidak ditemukan" });
-  res.json({ ok: true });
-});
-
-app.get("/api/orders", requireAuth(["owner", "reseller"]), async (req, res) => {
-  const db = await readDbWithExpiredOrders();
-  if (req.auth.role === "reseller") {
-    res.json((db.orders || [])
-      .filter((order) => orderBelongsToReseller(db, req.auth, order))
-      .map((order) => serializeOrderForApi(db, order, { viewerRole: "reseller", detail: false })));
-    return;
-  }
-  res.json((db.orders || []).map((order) => serializeOrderForApi(db, order, { viewerRole: "owner", detail: false })));
-});
-
-app.get("/api/orders/:id", requireAuth(["owner", "reseller"]), async (req, res) => {
-  const db = await readDbWithExpiredOrders();
-  const order = db.orders.find((item) => item.id.toLowerCase() === req.params.id.toLowerCase() || item.paymentRef?.toLowerCase() === req.params.id.toLowerCase());
-  if (!order) return res.status(404).json({ error: "Order tidak ditemukan" });
-  if (req.auth.role === "reseller" && !orderBelongsToReseller(db, req.auth, order)) {
-    return res.status(404).json({ error: "Order tidak ditemukan" });
-  }
-  res.json(serializeOrderForApi(db, order, { viewerRole: req.auth.role, detail: true }));
-});
-
-app.get("/api/public/orders/:id", async (req, res) => {
-  const db = await readDbWithExpiredOrders();
-  const order = (db.orders || []).find((item) => item.id.toLowerCase() === req.params.id.toLowerCase() || item.paymentRef?.toLowerCase() === req.params.id.toLowerCase());
-  if (!order) return res.status(404).json({ error: "Order tidak ditemukan" });
-  res.json(serializeOrderForApi(db, order, { viewerRole: "public", detail: false }));
-});
-
-app.post("/api/orders", requireAuth(["owner", "reseller"]), async (req, res) => {
-  const created = await updateDb(async (db) => {
-    assertOrderIntakeOpen(db);
-    const product = getProduct(db, req.body.productId) || db.products[0];
-    const variant = product?.variants?.find((item) => item.id === req.body.variantId) || product?.variants?.[0];
-    if (!product || product.isArchived || product.isActive === false || !variant || !isVariantOrderable(product, variant)) {
-      const error = new Error("Produk atau varian tidak aktif untuk order");
-      error.status = 400;
-      throw error;
-    }
-    const lockError = orderLockError(product, variant);
-    if (lockError) throw lockError;
-    const orderDuration = normalizeDurationLabel(req.body.duration || "1 Bulan", variant);
-    if (!durationAllowedForVariant(variant, orderDuration)) {
-      const error = new Error(`Durasi ${orderDuration} sedang tidak aktif untuk ${variant.name}.`);
-      error.status = 400;
-      throw error;
-    }
-    const price = priceForDuration(variant, orderDuration);
-    if (!Number.isFinite(price) || price <= 0) {
-      const error = new Error(`Harga ${orderDuration} untuk ${product.name} ${variant.name} belum dikonfigurasi.`);
-      error.status = 400;
-      throw error;
-    }
-    const qty = parseOrderQty(req.body.qty);
-    const reseller = req.auth.role === "reseller" ? authReseller(db, req.auth) : assertResellerCanOrder(db, req.body.whatsapp || "");
-    if (!reseller || reseller.isActive === false) {
-      const error = new Error(resellerRequiredMessage);
-      error.status = 403;
-      throw error;
-    }
-    const cleanWhatsapp = req.auth.role === "reseller"
-      ? primaryResellerWhatsapp(reseller)
-      : normalizeWhatsappNumber(req.body.whatsapp || "");
-    if (!cleanWhatsapp) {
-      const error = new Error("Nomor WhatsApp reseller belum terisi. Lengkapi data reseller dulu sebelum order.");
-      error.status = 400;
-      throw error;
-    }
-    const total = price * qty;
-    const paymentPlan = depositBreakdown(reseller, total);
-    const excludeFromSalesMetrics = isSmokeTestReseller(reseller);
-    const requirements = checkoutRequirementsForVariant(db, product, variant, { qty });
-    const customerField = requirements.customerField || "optional";
-    const rawCustomerData = String(req.body.customerData || req.body.customerInfo || req.body.email || req.body.device || "").trim();
-    const customerEmails = customerField === "email" ? splitCustomerEmails(req.body.email || rawCustomerData) : [];
-    const deviceText = customerField === "device" ? String(req.body.device || rawCustomerData).trim() : "";
-    const deviceItems = customerField === "device" ? splitDeviceNames(deviceText) : [];
-    if (customerField === "email" && customerEmails.length < Math.max(qty, Number(requirements.minItems || 1))) {
-      const error = new Error(`${product.name} wajib isi ${Math.max(qty, Number(requirements.minItems || 1))} email customer.`);
-      error.status = 400;
-      throw error;
-    }
-    if (customerField === "device" && requirements.required && !deviceText) {
-      const error = new Error(`${requirements.label || "Device customer"} wajib diisi.`);
-      error.status = 400;
-      throw error;
-    }
-    if (customerField === "device" && deviceItems.length < Number(requirements.minItems || 1)) {
-      const error = new Error(`${requirements.label || "Device customer"} wajib isi minimal ${Number(requirements.minItems || 1)} item. Pisahkan dengan koma atau baris baru.`);
-      error.status = 400;
-      throw error;
-    }
-    const createdAt = nowText();
-    const paymentExpiresAt = addMinutesText(paymentTtlMinutes);
-    const orderDurationDays = durationDays(orderDuration);
-    const expiresAt = addAccountDaysText(orderDurationDays, createdAt, { keepTime: true });
-    const order = {
-      id: makeId("ORD").toUpperCase(),
-      paymentRef: makeId("PAY").toUpperCase(),
-      customer: req.body.customer || req.body.whatsapp || "Customer",
-      whatsapp: cleanWhatsapp,
-      resellerId: reseller?.id || "",
-      reseller: reseller?.name || reseller?.username || cleanWhatsapp,
-      excludeFromSalesMetrics,
-      internalTestAccount: excludeFromSalesMetrics ? "kya" : "",
-      product: product.name,
-      productId: product.id,
-      variant: variant.name,
-      variantId: variant.id,
-      variantCode: variant.code,
-      customerVariant: variant.name,
-      customerVariantId: variant.id,
-      customerVariantCode: variant.code,
-      stockPoolKey: variantStockGroupKey(product, variant),
-      duration: orderDuration,
-      durationDays: orderDurationDays,
-      qty,
-      total,
-      depositBefore: paymentPlan.depositBefore,
-      depositUsed: paymentPlan.depositUsed,
-      depositAfter: paymentPlan.depositAfter,
-      paymentDue: paymentPlan.paymentDue,
-      email: customerField === "email" ? customerEmails.join(", ") : "",
-      customerEmails,
-      device: customerField === "device" ? deviceText : "",
-      customerData: customerField === "optional" ? rawCustomerData : "",
-      checkoutRequirements: requirements,
-      note: req.body.note || "",
-      qrisStatus: paymentPlan.paymentDue > 0 ? "pending" : "paid",
-      orderStatus: paymentPlan.paymentDue > 0 ? "pending" : "processing",
-      deliveryStatus: paymentPlan.paymentDue > 0 ? "waiting_payment" : "paid_by_deposit",
-      channel: "Reseller",
-      source: "web",
-      stockPolicy: "pay_first",
-      paymentMethod:
-        paymentPlan.paymentDue > 0 && paymentPlan.depositUsed > 0
-          ? "Deposit + QRIS auto"
-          : paymentPlan.depositUsed > 0
-            ? "Deposit reseller"
-            : "QRIS auto",
-      createdAt,
-      expiresAt,
-      paymentExpiresAt,
-      deliveredStockIds: [],
-    };
-    const reservedStocks = await ensureWebOrderStock(db, order, product, variant, qty);
-    if (paymentPlan.depositUsed > 0) {
-      reseller.deposit = paymentPlan.depositAfter;
-    }
-    const payment = {
-      ref: order.paymentRef,
-      orderId: order.id,
-      status: paymentPlan.paymentDue > 0 ? "pending" : "paid",
-      amount: paymentPlan.paymentDue,
-      provider: paymentPlan.paymentDue > 0 ? "pakasir" : "deposit",
-      depositBefore: paymentPlan.depositBefore,
-      depositUsed: paymentPlan.depositUsed,
-      depositAfter: paymentPlan.depositAfter,
-      totalPayment: paymentPlan.paymentDue > 0 ? paymentPlan.paymentDue : total,
-      paymentMethod: order.paymentMethod,
-      createdAt,
-      expiresAt: paymentExpiresAt,
-    };
-    if (paymentPlan.paymentDue > 0) {
-      const pakasir = await createPakasirQris(db, order);
-      if (pakasir.providerStatus !== "created") {
-        if (paymentPlan.depositUsed > 0) reseller.deposit = paymentPlan.depositBefore;
-        for (const stock of reservedStocks) clearReservedStockState(stock);
-        enableMaintenanceMode(db, `Pakasir QRIS gagal: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`, "pakasir");
-        const error = new Error(`Pakasir QRIS gagal. Order tidak dibuat dan deposit tidak dipotong: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`);
-        error.status = 503;
-        error.maintenance = { reason: `Pakasir QRIS gagal: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`, source: "pakasir" };
-        throw error;
-      }
-      Object.assign(payment, pakasir);
-      order.qrisUrl = pakasir.paymentUrl || `${db.settings.botPublicUrl || "http://127.0.0.1:4174"}/api/payments/${order.paymentRef}`;
-      if (pakasir.providerError) order.paymentError = pakasir.providerError;
-    } else {
-      order.qrisUrl = "";
-    }
-    db.payments.unshift(payment);
-    db.orders.unshift(order);
-    db.activities = db.activities || [];
-    db.activities.unshift({
-      id: makeId("act"),
-      type: "order",
-      title: `Order ${order.id} dibuat dari Web`,
-      description:
-        paymentPlan.paymentDue > 0
-          ? `${product.name} ${variant.name} x${qty}. Deposit dipakai ${formatRupiah(paymentPlan.depositUsed)}, sisa QRIS ${formatRupiah(paymentPlan.paymentDue)}.`
-          : `${product.name} ${variant.name} x${qty} lunas memakai deposit reseller.`,
-      createdAt: nowText(),
-      orderId: order.id,
-      resellerId: reseller?.id || "",
-      whatsapp: cleanWhatsapp,
-    });
-    if (paymentPlan.paymentDue <= 0) {
-      const result = await fulfillPaidOrderAndNotify(db, order.id);
-      return result.order || order;
-    }
-    return order;
-  });
-  res.status(201).json(created);
-});
-
-app.post("/api/orders/smoke-test", requireAuth(["owner"]), async (req, res) => {
-  const created = await updateDb(async (db) => {
-    assertOrderIntakeOpen(db);
-    const product = getProduct(db, req.body.productId) || db.products[0];
-    const variant = product?.variants?.find((item) => item.id === req.body.variantId) || product?.variants?.[0];
-    if (!product || product.isArchived || product.isActive === false || !variant || !isVariantOrderable(product, variant)) {
-      const error = new Error("Produk atau varian tidak aktif untuk smoke test");
-      error.status = 400;
-      throw error;
-    }
-    const lockError = orderLockError(product, variant);
-    if (lockError) throw lockError;
-    const orderDuration = normalizeDurationLabel(req.body.duration || "1 Bulan", variant);
-    if (!durationAllowedForVariant(variant, orderDuration)) {
-      const error = new Error(`Durasi ${orderDuration} sedang tidak aktif untuk ${variant.name}.`);
-      error.status = 400;
-      throw error;
-    }
-    const qty = parseOrderQty(req.body.qty);
-    const requirements = checkoutRequirementsForVariant(db, product, variant, { qty });
-    const customerField = requirements.customerField || "optional";
-    const rawCustomerData = String(req.body.customerData || req.body.customerInfo || req.body.email || req.body.device || "").trim();
-    const customerEmails = customerField === "email" ? splitCustomerEmails(req.body.email || rawCustomerData) : [];
-    const deviceText = customerField === "device" ? String(req.body.device || rawCustomerData).trim() : "";
-    const deviceItems = customerField === "device" ? splitDeviceNames(deviceText) : [];
-    if (customerField === "email" && customerEmails.length < Math.max(qty, Number(requirements.minItems || 1))) {
-      const error = new Error(`${product.name} wajib isi ${Math.max(qty, Number(requirements.minItems || 1))} email customer.`);
-      error.status = 400;
-      throw error;
-    }
-    if (customerField === "device" && requirements.required && !deviceText) {
-      const error = new Error(`${requirements.label || "Device customer"} wajib diisi.`);
-      error.status = 400;
-      throw error;
-    }
-    if (customerField === "device" && deviceItems.length < Number(requirements.minItems || 1)) {
-      const error = new Error(`${requirements.label || "Device customer"} wajib isi minimal ${Number(requirements.minItems || 1)} item. Pisahkan dengan koma atau baris baru.`);
-      error.status = 400;
-      throw error;
-    }
-
-    const ownerProfile = db.settings?.profile || {};
-    const createdAt = nowText();
-    const orderDurationDays = durationDays(orderDuration);
-    const expiresAt = addAccountDaysText(orderDurationDays, createdAt, { keepTime: true });
-    const smokeLabel = String(req.body.smokeLabel || "kya").trim() || "kya";
-    const ownerWhatsapp = normalizeWhatsappNumber(req.body.whatsapp || ownerProfile.whatsapp || "");
-    const quotedTotal = priceForDuration(variant, orderDuration) * qty;
-    const order = {
-      id: makeId("ORD").toUpperCase(),
-      paymentRef: makeId("TEST").toUpperCase(),
-      customer: smokeLabel,
-      whatsapp: ownerWhatsapp,
-      resellerId: "",
-      reseller: "Owner Smoke Test",
-      product: product.name,
-      productId: product.id,
-      variant: variant.name,
-      variantId: variant.id,
-      variantCode: variant.code,
-      customerVariant: variant.name,
-      customerVariantId: variant.id,
-      customerVariantCode: variant.code,
-      stockPoolKey: variantStockGroupKey(product, variant),
-      duration: orderDuration,
-      durationDays: orderDurationDays,
-      qty,
-      total: 0,
-      quotedTotal,
-      smokeTestCatalogTotal: quotedTotal,
-      depositBefore: 0,
-      depositUsed: 0,
-      depositAfter: 0,
-      paymentDue: 0,
-      email: customerField === "email" ? customerEmails.join(", ") : "",
-      customerEmails,
-      device: customerField === "device" ? deviceText : "",
-      customerData: customerField === "optional" ? rawCustomerData : "",
-      checkoutRequirements: requirements,
-      note: String(req.body.note || "").trim(),
-      qrisStatus: "manual",
-      orderStatus: "processing",
-      deliveryStatus: "manual_approved",
-      channel: "Owner Smoke Test",
-      source: "owner_smoke_test",
-      isSmokeTest: true,
-      smokeTestLabel: smokeLabel,
-      stockPolicy: "pay_first",
-      paymentMethod: "Owner Smoke Test",
-      createdAt,
-      expiresAt,
-      paymentExpiresAt: "",
-      deliveredStockIds: [],
-      manualApproved: true,
-      manualApprovedAt: createdAt,
-      manualApprovedBy: req.auth?.name || req.auth?.username || req.auth?.email || "owner",
-      manualApprovalReason: "owner smoke test",
-    };
-    await ensureWebOrderStock(db, order, product, variant, qty);
-    const payment = {
-      ref: order.paymentRef,
-      orderId: order.id,
-      status: "manual",
-      amount: 0,
-      provider: "smoke_test",
-      depositBefore: 0,
-      depositUsed: 0,
-      depositAfter: 0,
-      totalPayment: 0,
-      paymentMethod: order.paymentMethod,
-      createdAt,
-      expiresAt: "",
-      manualApproved: true,
-      manualApprovedAt: createdAt,
-      manualApprovedBy: order.manualApprovedBy,
-      manualApprovalReason: order.manualApprovalReason,
-      providerStatus: "smoke_test",
-      providerWebhookStatus: "smoke_test",
-    };
-    db.payments.unshift(payment);
-    db.orders.unshift(order);
-    db.activities = db.activities || [];
-    db.activities.unshift({
-      id: makeId("act"),
-      type: "order",
-      title: `Smoke test ${order.id} dibuat`,
-      description: `${product.name} ${variant.name} x${qty} untuk akun internal ${smokeLabel}. Stok asli dipakai, metrik penjualan tidak dihitung.`,
-      createdAt: nowText(),
-      orderId: order.id,
-      whatsapp: ownerWhatsapp,
-    });
-    const result = await fulfillPaidOrderAndNotify(db, order.id);
-    return serializeOrderForApi(db, result?.order || order, { viewerRole: "owner", detail: true });
-  });
-  res.status(201).json(created);
-});
-
-app.post("/api/orders/:id/mark-paid", requireAuth(["owner"]), async (req, res) => {
-  const result = await updateDb(async (db) => {
-    expirePendingOrders(db);
-    const order = db.orders.find((item) => item.id === req.params.id || item.paymentRef === req.params.id);
-    if (!order) return null;
-    const payment = db.payments.find((item) => item.orderId === order.id || item.ref === order.paymentRef) || {};
-    const prepared = preparePaidOrderForFulfillment(db, order, payment);
-    if (prepared.reply && prepared.order.deliveryStatus === "late_paid_deposit") return prepared;
-    return fulfillPaidOrderAndNotify(db, order.id);
-  });
-  if (!result) return res.status(404).json({ error: "Order tidak ditemukan" });
-  res.json(result);
-});
-
-app.post("/api/orders/:id/approve-manual", requireAuth(["owner"]), async (req, res) => {
-  const reason = String(req.body?.reason || "").trim();
-  if (!reason) return res.status(400).json({ error: "Alasan approve manual wajib diisi" });
-  const result = await updateDb(async (db) => {
-    expirePendingOrders(db);
-    const order = db.orders.find((item) => item.id === req.params.id || item.paymentRef === req.params.id);
-    if (!order) return null;
-    if (String(order.orderStatus || "").toLowerCase() === "completed" || String(order.deliveryStatus || "").toLowerCase() === "sent") {
-      return { ok: true, order, reply: order.fulfillmentText || "Order sudah selesai." };
-    }
-    const payment = db.payments.find((item) => item.orderId === order.id || item.ref === order.paymentRef) || {};
-    prepareManualApprovedOrderForFulfillment(db, order, payment, {
-      reason,
-      actor: req.auth?.name || req.auth?.username || req.auth?.email || "owner",
-    });
-    return fulfillPaidOrderAndNotify(db, order.id);
-  });
-  if (!result) return res.status(404).json({ error: "Order tidak ditemukan" });
-  res.json(result);
-});
-
-app.post("/api/orders/:id/retry-delivery", requireAuth(["owner"]), async (req, res) => {
-  const result = await updateDb((db) => fulfillPaidOrderAndNotify(db, req.params.id));
-  res.json(result);
-});
-
-app.get("/api/resellers", requireAuth(["owner", "reseller"]), async (req, res) => {
-  const db = await readDb();
-  if (req.auth.role === "reseller") {
-    res.json((db.resellers || []).filter((item) => item.id === req.auth.sub).map(({ password, ...safe }) => safe));
-    return;
-  }
-  res.json((db.resellers || []).map((item) => ({ ...item, allowedAccessTools: resellerAccessTools(item) })));
-});
-
-app.post("/api/resellers", requireAuth(["owner"]), async (req, res) => {
-  const created = await updateDb((db) => {
-    const input = normalizeResellerInput(req.body, { password: Math.random().toString(36).slice(2, 10), joinedAt: todayText() });
-    const duplicate = findDuplicateReseller(db, input);
-    if (duplicate) throwDuplicateResellerError(duplicate);
-    const reseller = {
-      id: makeId("res"),
-      ...input,
-      allowedAccessTools: normalizeResellerAccessTools(input.allowedAccessTools, defaultResellerAccessTools),
-    };
-    db.resellers.unshift(reseller);
-    return reseller;
-  });
-  const dbForSend = await readDb();
-  const delivery = await sendResellerWelcomeWhatsApp(dbForSend, created);
-  const notificationStatus = delivery.sent ? "sent" : "failed";
-  const notificationAt = nowText();
-  await updateDb((db) => {
-    const reseller = (db.resellers || []).find((item) => item.id === created.id);
-    if (reseller) {
-      reseller.whatsappWelcomeStatus = notificationStatus;
-      reseller.whatsappWelcomeSentAt = delivery.sent ? notificationAt : "";
-      reseller.whatsappWelcomeError = delivery.sent ? "" : delivery.reason || "whatsapp_send_failed";
-      reseller.whatsappWelcomeMessageKey = delivery.messageKey || null;
-    }
-    db.activities = db.activities || [];
-    db.activities.unshift({
-      id: makeId("act"),
-      type: "reseller",
-      title: delivery.sent ? "Notif reseller terkirim" : "Notif reseller gagal",
-      description: delivery.sent
-        ? `Akun reseller ${created.name} dibuat dan detail login dikirim ke WhatsApp ${normalizeWhatsappNumber(created.whatsapp)}.`
-        : `Akun reseller ${created.name} dibuat, tapi notif WhatsApp gagal: ${delivery.reason || "whatsapp_send_failed"}.`,
-      resellerId: created.id,
-      whatsapp: normalizeWhatsappNumber(created.whatsapp),
-      createdAt: notificationAt,
-    });
-    return null;
-  });
-  res.status(201).json({
-    ...created,
-    whatsappWelcomeStatus: notificationStatus,
-    whatsappWelcomeSentAt: delivery.sent ? notificationAt : "",
-    whatsappWelcomeError: delivery.sent ? "" : delivery.reason || "whatsapp_send_failed",
-    whatsappWelcomeMessageKey: delivery.messageKey || null,
-  });
-});
-
-app.put("/api/resellers/:id", requireAuth(["owner", "reseller"]), async (req, res) => {
-  if (req.auth.role === "reseller" && req.auth.sub !== req.params.id) {
-    res.status(403).json({ error: "Tidak boleh mengubah reseller lain" });
-    return;
-  }
-  const updated = await updateDb(async (db) => {
-    const index = db.resellers.findIndex((item) => item.id === req.params.id);
-    if (index === -1) return null;
-    const current = db.resellers[index];
-    const before = { ...current };
-    const input = req.auth.role === "reseller" ? normalizeResellerSelfInput(req.body, current) : normalizeResellerInput(req.body, current);
-    const duplicate = findDuplicateReseller(db, input, current.id);
-    if (duplicate) throwDuplicateResellerError(duplicate);
-    const previousDeposit = Number(current.deposit || 0);
-    const reseller = {
-      ...current,
-      ...input,
-      id: current.id,
-      allowedAccessTools: normalizeResellerAccessTools(input.allowedAccessTools, current.allowedAccessTools),
-    };
-    db.resellers[index] = reseller;
-    const nextDeposit = Number(reseller.deposit || 0);
-    if (req.auth.role === "owner" && previousDeposit !== nextDeposit) {
-      const delta = nextDeposit - previousDeposit;
-      db.activities = db.activities || [];
-      db.activities.unshift({
-        id: makeId("act"),
-        type: "reseller",
-        title: delta >= 0 ? "Deposit reseller ditambah" : "Deposit reseller dikurangi",
-        description: `${formatRupiah(Math.abs(delta))} ${delta >= 0 ? "ditambahkan ke" : "dikurangi dari"} ${reseller.name || reseller.username || reseller.whatsapp}. Saldo: ${formatRupiah(previousDeposit)} -> ${formatRupiah(nextDeposit)}.`,
-        resellerId: reseller.id,
-        whatsapp: normalizeWhatsappNumber(reseller.whatsapp || ""),
-        createdAt: nowText(),
-      });
-    }
-    await notifyResellerProfileChanged(db, before, reseller, req.auth.role === "reseller" ? "self" : "owner");
-    return reseller;
-  });
-  if (!updated) return res.status(404).json({ error: "Reseller tidak ditemukan" });
-  res.json(req.auth.role === "reseller" ? safeResellerForSelf(updated) : updated);
-});
-
-app.delete("/api/resellers/:id", requireAuth(["owner"]), async (req, res) => {
-  await updateDb((db) => {
-    db.resellers = db.resellers.filter((item) => item.id !== req.params.id);
-  });
-  res.json({ ok: true });
-});
-
-app.post("/api/resellers/deposit-request", requireAuth(["reseller"]), async (req, res) => {
-  const amount = Math.max(0, Number(req.body?.amount || 0));
-  const method = String(req.body?.method || "").trim().toLowerCase();
-  const note = String(req.body?.note || "").trim();
-  if (!amount) {
-    res.status(400).json({ error: "Nominal deposit wajib diisi" });
-    return;
-  }
-  const allowedMethods = new Set(["qris_auto", "qris", "qris_owner", "dana", "livin", "bca", "gopay", "shopeepay"]);
-  if (!allowedMethods.has(method)) {
-    res.status(400).json({ error: "Metode deposit tidak valid" });
-    return;
-  }
-
-  const db = await readDb();
-  const reseller = authReseller(db, req.auth);
-  if (!reseller || reseller.isActive === false) {
-    res.status(404).json({ error: "Reseller tidak ditemukan atau nonaktif" });
-    return;
-  }
-
-  const settings = ownerIntegrationSettings(db);
-  const pakasirConnected = settings.status.pakasir === "connected";
-  if (method === "qris_auto" && !pakasirConnected) {
-    res.status(409).json({
-      error: "QRIS otomatis tidak tersedia karena Pakasir sedang disconnected. Silakan pilih QRIS owner manual atau metode bank seperti DANA, Livin, BCA, GoPay, atau ShopeePay.",
-    });
-    return;
-  }
-
-  if (method === "qris_auto") {
-    const result = await updateDb(async (draft) => {
-      draft.activities = draft.activities || [];
-      draft.depositRequests = draft.depositRequests || [];
-      draft.orders = draft.orders || [];
-      draft.payments = draft.payments || [];
-
-      const currentReseller = authReseller(draft, req.auth);
-      if (!currentReseller || currentReseller.isActive === false) {
-        const error = new Error("Reseller tidak ditemukan atau nonaktif");
-        error.status = 404;
-        throw error;
-      }
-
-      const { order, payment, ttlMinutes } = createDepositTopupOrder(draft, {
-        reseller: currentReseller,
-        amount,
-        source: "reseller_panel_deposit",
-        channel: "Reseller Panel",
-        whatsapp: normalizeWhatsappNumber(currentReseller.whatsapp || ""),
-      });
-      const requestId = order.id;
-      const createdAt = order.createdAt || nowText();
-
-      const pakasir = await createPakasirQris(draft, order);
-      if (pakasir.providerStatus !== "created") {
-        enableMaintenanceMode(draft, `Pakasir QRIS gagal: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`, "pakasir");
-        const error = new Error(`Pakasir QRIS gagal untuk deposit reseller: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`);
-        error.status = 503;
-        error.maintenance = { reason: `Pakasir QRIS gagal: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`, source: "pakasir" };
-        throw error;
-      }
-
-      Object.assign(payment, pakasir);
-      order.qrisUrl = payment.paymentUrl || order.qrisUrl || "";
-      order.paymentProviderStatus = pakasir.providerStatus || "";
-      order.paymentMethod = payment.paymentMethod || order.paymentMethod || "QRIS top up saldo";
-      order.paymentFee = Number(payment.fee || order.paymentFee || 0);
-      order.totalPaid = Number(payment.totalPayment || payment.amount || order.paymentDue || 0);
-      if (pakasir.providerError) order.paymentError = pakasir.providerError;
-
-      const ownerWhatsapp = ownerWhatsappTarget(draft);
-      const delivery = ownerWhatsapp
-        ? await sendWhatsAppMessage(draft, {
-            to: ownerWhatsapp,
-            text: depositRequestNotificationText({
-              reseller: currentReseller,
-              amount,
-              method,
-              note: note ? `${note}\nRef QRIS: ${payment.ref}` : `Ref QRIS: ${payment.ref}`,
-              requestId,
-              createdAt,
-            }),
-          })
-        : { sent: false, reason: "owner_whatsapp_missing" };
-
-      draft.depositRequests.unshift({
-        id: requestId,
-        resellerId: currentReseller.id,
-        resellerName: currentReseller.name || currentReseller.username || "",
-        whatsapp: normalizeWhatsappNumber(currentReseller.whatsapp || ""),
-        amount,
-        method,
-        note,
-        createdAt,
-        status: "pending_payment",
-        paymentStatus: "pending",
-        orderId: order.id,
-        paymentRef: payment.ref,
-        deliveryStatus: delivery.sent ? "sent" : delivery.reason || "failed",
-        deliveryMessageKey: delivery.messageKey || null,
-      });
-      draft.activities.unshift({
-        id: makeId("act"),
-        type: "reseller",
-        title: delivery.sent ? "QRIS deposit reseller dibuat" : "QRIS deposit reseller dibuat tanpa notif owner",
-        description: delivery.sent
-          ? `${currentReseller.name || currentReseller.username || "Reseller"} membuat QRIS deposit ${formatRupiah(amount)}. Ref ${payment.ref}.`
-          : `${currentReseller.name || currentReseller.username || "Reseller"} membuat QRIS deposit ${formatRupiah(amount)}. Notif owner gagal: ${delivery.reason || "unknown_error"}.`,
-        resellerId: currentReseller.id,
-        whatsapp: normalizeWhatsappNumber(currentReseller.whatsapp || ""),
-        amount,
-        orderId: order.id,
-        createdAt,
-      });
-
-      return {
-        requestId,
-        orderId: order.id,
-        paymentRef: payment.ref,
-        payment: safePublicPayment(payment, order),
-        ttlMinutes,
-        deliveryStatus: delivery.sent ? "sent" : delivery.reason || "failed",
-      };
-    });
-
-    res.status(201).json({
-      ok: true,
-      requestId: result.requestId,
-      orderId: result.orderId,
-      paymentRef: result.paymentRef,
-      payment: result.payment,
-      ttlMinutes: result.ttlMinutes,
-      deliveryStatus: result.deliveryStatus,
-      message: "QRIS deposit berhasil dibuat. Setelah pembayaran sukses, saldo reseller akan bertambah otomatis.",
-    });
-    return;
-  }
-
-  const requestId = makeId("DEP").toUpperCase();
-  const createdAt = nowText();
-  const ownerWhatsapp = ownerWhatsappTarget(db);
-  const delivery = ownerWhatsapp
-    ? await sendWhatsAppMessage(db, {
-        to: ownerWhatsapp,
-        text: depositRequestNotificationText({ reseller, amount, method, note, requestId, createdAt }),
-      })
-    : { sent: false, reason: "owner_whatsapp_missing" };
-
-  await updateDb((draft) => {
-    draft.depositRequests = draft.depositRequests || [];
-    draft.depositRequests.unshift({
-      id: requestId,
-      resellerId: reseller.id,
-      resellerName: reseller.name || reseller.username || "",
-      whatsapp: normalizeWhatsappNumber(reseller.whatsapp || ""),
-      amount,
-      method,
-      note,
-      createdAt,
-      status: "pending",
-      deliveryStatus: delivery.sent ? "sent" : delivery.reason || "failed",
-      deliveryMessageKey: delivery.messageKey || null,
-    });
-    draft.activities = draft.activities || [];
-    draft.activities.unshift({
-      id: makeId("act"),
-      type: "reseller",
-      title: delivery.sent ? "Permintaan deposit terkirim" : "Permintaan deposit tercatat",
-      description: delivery.sent
-        ? `${reseller.name || reseller.username || "Reseller"} meminta deposit ${formatRupiah(amount)} via ${depositRequestMethodLabel(method)}. Notif owner berhasil dikirim.`
-        : `${reseller.name || reseller.username || "Reseller"} meminta deposit ${formatRupiah(amount)} via ${depositRequestMethodLabel(method)}, tetapi notif owner gagal: ${delivery.reason || "unknown_error"}.`,
-      resellerId: reseller.id,
-      whatsapp: normalizeWhatsappNumber(reseller.whatsapp || ""),
-      amount,
-      createdAt,
-    });
-    return null;
-  });
-
-  res.status(201).json({
-    ok: true,
-    requestId,
-    deliveryStatus: delivery.sent ? "sent" : delivery.reason || "failed",
-    message: delivery.sent
-      ? "Permintaan deposit berhasil dikirim ke owner."
-      : "Permintaan deposit tersimpan, tetapi notif owner gagal dikirim.",
-  });
-});
-
-app.get("/api/resellers/deposit-requests", requireAuth(["owner"]), async (req, res) => {
-  const db = await readDb();
-  res.json(Array.isArray(db.depositRequests) ? db.depositRequests : []);
-});
-
-app.post("/api/resellers/deposit-requests/:id/approve", requireAuth(["owner"]), async (req, res) => {
-  const note = String(req.body?.note || "").trim();
-  const db = await readDb();
-  const profile = ownerProfile(db);
-  const reviewedAt = nowText();
-  const result = await updateDb((draft) => {
-    draft.depositRequests = draft.depositRequests || [];
-    const request = draft.depositRequests.find((item) => item.id === req.params.id);
-    if (!request) return null;
-    if (String(request.status || "pending").toLowerCase() === "approved") {
-      const reseller = (draft.resellers || []).find((item) => item.id === request.resellerId) || null;
-      return { request, reseller };
-    }
-    if (String(request.status || "pending").toLowerCase() === "rejected") {
-      const error = new Error("Permintaan deposit ini sudah ditolak.");
-      error.status = 409;
-      throw error;
-    }
-    if (String(request.status || "").toLowerCase() === "pending_payment") {
-      const error = new Error("Deposit ini memakai QRIS otomatis dan masih menunggu pembayaran. Approve manual tidak diperlukan.");
-      error.status = 409;
-      throw error;
-    }
-
-    const reseller = (draft.resellers || []).find((item) => item.id === request.resellerId);
-    if (!reseller) {
-      const error = new Error("Reseller untuk permintaan deposit ini tidak ditemukan.");
-      error.status = 404;
-      throw error;
-    }
-
-    const depositBefore = Math.max(0, Number(reseller.deposit || 0));
-    const depositAfter = depositBefore + Math.max(0, Number(request.amount || 0));
-    reseller.deposit = depositAfter;
-
-    request.status = "approved";
-    request.reviewedAt = reviewedAt;
-    request.reviewedBy = profile.name || profile.username || "owner";
-    request.reviewNote = note;
-
-    draft.activities = draft.activities || [];
-    draft.activities.unshift({
-      id: makeId("act"),
-      type: "reseller",
-      title: "Deposit reseller dikreditkan",
-      description: `${formatRupiah(Number(request.amount || 0))} dari request ${request.id} dimasukkan ke deposit ${reseller.name || reseller.username || reseller.whatsapp}. Saldo: ${formatRupiah(depositBefore)} -> ${formatRupiah(depositAfter)}.`,
-      resellerId: reseller.id,
-      whatsapp: normalizeWhatsappNumber(reseller.whatsapp || ""),
-      amount: Number(request.amount || 0),
-      createdAt: reviewedAt,
-    });
-
-    return { request, reseller };
-  });
-
-  if (!result) {
-    res.status(404).json({ error: "Permintaan deposit tidak ditemukan" });
-    return;
-  }
-
-  res.json({ ok: true, ...result });
-});
-
-app.post("/api/resellers/deposit-requests/:id/reject", requireAuth(["owner"]), async (req, res) => {
-  const note = String(req.body?.note || "").trim();
-  const db = await readDb();
-  const profile = ownerProfile(db);
-  const reviewedAt = nowText();
-  const request = await updateDb((draft) => {
-    draft.depositRequests = draft.depositRequests || [];
-    const current = draft.depositRequests.find((item) => item.id === req.params.id);
-    if (!current) return null;
-    if (String(current.status || "pending").toLowerCase() === "approved") {
-      const error = new Error("Permintaan deposit ini sudah diapprove.");
-      error.status = 409;
-      throw error;
-    }
-
-    current.status = "rejected";
-    current.reviewedAt = reviewedAt;
-    current.reviewedBy = profile.name || profile.username || "owner";
-    current.reviewNote = note;
-
-    draft.activities = draft.activities || [];
-    draft.activities.unshift({
-      id: makeId("act"),
-      type: "reseller",
-      title: "Permintaan deposit ditolak",
-      description: `${current.resellerName || current.whatsapp || "Reseller"} ditolak untuk request ${current.id} sebesar ${formatRupiah(Number(current.amount || 0))}${note ? `. Catatan: ${note}` : "."}`,
-      resellerId: current.resellerId,
-      whatsapp: normalizeWhatsappNumber(current.whatsapp || ""),
-      amount: Number(current.amount || 0),
-      createdAt: reviewedAt,
-    });
-
-    return current;
-  });
-
-  if (!request) {
-    res.status(404).json({ error: "Permintaan deposit tidak ditemukan" });
-    return;
-  }
-
-  res.json({ ok: true, request });
+registerResellerRoutes(app, {
+  authReseller,
+  createDepositTopupOrder,
+  createPakasirQris,
+  defaultResellerAccessTools,
+  depositRequestMethodLabel,
+  depositRequestNotificationText,
+  enableMaintenanceMode,
+  findDuplicateReseller,
+  formatRupiah,
+  hashPassword,
+  makeId,
+  normalizeResellerAccessTools,
+  normalizeResellerInput,
+  normalizeResellerSelfInput,
+  normalizeWhatsappNumber,
+  notifyResellerProfileChanged,
+  nowText,
+  ownerIntegrationSettings,
+  ownerProfile,
+  ownerWhatsappTarget,
+  publicUser,
+  readDb,
+  requireAuth,
+  resellerAccessTools,
+  safePublicPayment,
+  safeResellerForSelf,
+  sendResellerWelcomeWhatsApp,
+  sendWhatsAppMessage,
+  syncDataResellerToGoogleSheetsSafely,
+  throwDuplicateResellerError,
+  todayText,
+  updateDb,
 });
 
 function buildAccountAuditTrail(db, account = {}) {
@@ -10809,442 +8806,51 @@ function buildAccountAuditTrail(db, account = {}) {
     .slice(0, 80);
 }
 
-app.get("/api/accounts/:id/audit", requireAuth(["owner"]), async (req, res) => {
-  const db = await readDbWithExpiredOrders();
-  const account = (db.managedAccounts || []).find((item) => item.id === req.params.id);
-  if (!account) {
-    res.status(404).json({ error: "Akun tidak ditemukan" });
-    return;
-  }
-  const stock = stockForManagedAccount(db, account);
-  const order = orderForManagedAccount(db, account);
-  res.json({
-    accountId: account.id,
-    stockId: account.stockId || "",
-    orderId: order?.id || account.orderId || account.sourceOrderId || "",
-    sheet: { name: account.sheetName || stock?.sheetName || "", row: account.sheetRow || stock?.sheetRow || 0 },
-    timeline: buildAccountAuditTrail(db, account),
-  });
-});
-
-app.get("/api/accounts", requireAuth(["owner", "reseller"]), async (req, res) => {
-  if (req.auth.role === "reseller") {
-    const viewMode = String(req.query.view || "").trim().toLowerCase();
-    if (viewMode === "overview" || viewMode === "light") {
-      const db = await readDbWithExpiredOrders();
-      res.json(visibleManagedAccountsForAuth(db, req.auth));
-      return;
-    }
-    const accounts = await updateDb(async (db) => {
-      await refreshResellerViewFromGoogleSheets(db, req.auth, "reseller_accounts_refresh", { forceRecent: true });
-      backfillManagedAccountsFromCompletedOrders(db);
-      syncManagedAccountCredentialsFromOrders(db);
-      syncNetflixManagedPasswordConsensus(db);
-      refreshManagedAccountStatuses(db);
-      syncManagedAccountWhatsappFromOrders(db);
-      syncSoldStockMetadata(db);
-      syncHistoricalStockConflicts(db);
-      return visibleManagedAccountsForAuth(db, req.auth);
-    });
-    res.json(accounts);
-    return;
-  }
-  const db = await readDbWithExpiredOrders();
-  res.json(visibleManagedAccountsForAuth(db, req.auth));
-});
-
-app.post("/api/accounts", requireAuth(["owner"]), async (req, res) => {
-  const created = await updateDb((db) => {
-    const account = buildManagedAccountInput(db, req.body);
-    db.managedAccounts = db.managedAccounts || [];
-    db.managedAccounts.unshift(account);
-    db.activities = db.activities || [];
-    db.activities.unshift({
-      id: makeId("act"),
-      type: "account",
-      title: `Akun manual ${account.email} ditambahkan`,
-      description: `${account.email} ditambahkan ke manajemen akun ${account.reseller || account.whatsapp || "reseller"}.`,
-      createdAt: nowText(),
-      resellerId: account.resellerId || "",
-      whatsapp: normalizeWhatsappNumber(account.whatsapp || ""),
-      accountId: account.id,
-      accountEmail: account.email,
-    });
-    return account;
-  });
-  res.status(201).json(created);
-});
-
-app.put("/api/accounts/:id", requireAuth(["owner"]), async (req, res) => {
-  const updated = await updateDb(async (db) => {
-    const account = (db.managedAccounts || []).find((item) => item.id === req.params.id);
-    if (!account) return null;
-    const previousResellerId = String(account.resellerId || "").trim();
-    const explicitResellerId = req.body.resellerId === undefined ? null : String(req.body.resellerId || "").trim();
-    const explicitReseller = explicitResellerId ? resellerById(db, explicitResellerId) : null;
-    const previousEmail = String(account.email || "").trim();
-    const nextEmail = req.body.email === undefined ? previousEmail : String(req.body.email || "").trim();
-    if (!nextEmail) {
-      const error = new Error("Email akun wajib diisi");
-      error.status = 400;
-      throw error;
-    }
-    const previousPassword = String(account.password || "").trim();
-    const nextPassword = req.body.password === undefined ? previousPassword : String(req.body.password || "");
-    const beforeNotify = {
-      email: previousEmail,
-      password: previousPassword,
-      profile: String(account.profile || ""),
-      pin: String(account.pin || ""),
-    };
-    Object.assign(account, {
-      product: req.body.product ?? account.product,
-      productId: req.body.productId ?? account.productId,
-      variant: req.body.variant ?? account.variant,
-      variantId: req.body.variantId ?? account.variantId,
-      variantCode: req.body.variantCode ?? account.variantCode,
-      duration: req.body.duration ?? account.duration,
-      durationDays: req.body.durationDays ?? account.durationDays,
-      email: nextEmail,
-      password: nextPassword,
-      resellerId: explicitResellerId ?? account.resellerId,
-      reseller: req.body.reseller ?? (explicitReseller ? canonicalResellerDisplayName(explicitReseller, account.reseller || "") : account.reseller),
-      whatsapp: req.body.whatsapp ?? (explicitReseller ? normalizeWhatsappNumber(primaryResellerWhatsapp(explicitReseller) || account.whatsapp || "") : account.whatsapp),
-      buyer: req.body.buyer ?? account.buyer,
-      profile: req.body.profile ?? account.profile,
-      pin: req.body.pin ?? account.pin,
-      signInCode: req.body.signInCode ?? account.signInCode,
-      verificationCode: req.body.verificationCode ?? account.verificationCode,
-      resetLink: req.body.resetLink ?? account.resetLink,
-      householdLink: req.body.householdLink ?? account.householdLink,
-      startedAt: req.body.startedAt ?? account.startedAt,
-      expiresAt: req.body.expiresAt ?? account.expiresAt,
-      status: req.body.status ?? account.status,
-      hidden: false,
-    });
-    const restoredStatus = String(account.status || "").toLowerCase();
-    if (!["expired", "replaced", "disabled"].includes(restoredStatus)) {
-      account.returnedToStockAt = "";
-      account.sheetClearedAt = "";
-      account.sheetMissingArchivedAt = "";
-      delete account.slotConflictArchived;
-      delete account.duplicateOfAccountId;
-      delete account.duplicateArchivedAt;
-    }
-    if (explicitReseller && (!req.body.buyer || !String(req.body.buyer || "").trim()) && !String(account.buyer || "").trim()) {
-      account.buyer = canonicalResellerDisplayName(explicitReseller, account.buyer || "");
-    }
-    const linkedOrder = orderForManagedAccount(db, account);
-    if (explicitReseller && linkedOrder) {
-      linkedOrder.resellerId = explicitReseller.id;
-      linkedOrder.reseller = canonicalResellerDisplayName(explicitReseller, linkedOrder.reseller || linkedOrder.customer || "");
-      linkedOrder.whatsapp = normalizeWhatsappNumber(primaryResellerWhatsapp(explicitReseller) || linkedOrder.whatsapp || "");
-    }
-    const stock = account.stockId ? (db.stock || []).find((item) => item.id === account.stockId) : null;
-    const nextStatus = accountStatusFromDate(account.expiresAt, account.durationDays);
-    const canSyncStock = stock && nextStatus !== "expired" && account.status !== "expired";
-    if (canSyncStock) {
-      stock.email = account.email;
-      stock.password = account.password;
-      stock.profile = account.profile || "";
-      stock.pin = account.pin || "";
-      stock.signInCode = account.signInCode || "";
-      stock.verificationCode = account.verificationCode || "";
-      stock.resetLink = account.resetLink || "";
-      stock.householdLink = account.householdLink || "";
-      stock.notes = req.body.notes ?? stock.notes;
-    }
-    let passwordSync = null;
-    if (req.body.password !== undefined && previousPassword !== nextPassword && nextStatus !== "expired" && account.status !== "expired") {
-      passwordSync = syncPasswordByEmail(db, nextEmail, nextPassword, { sourceAccountId: account.id, sourceStockId: stock?.id || "" });
-    }
-    if ((previousEmail !== nextEmail || (req.body.password !== undefined && previousPassword !== nextPassword)) && nextStatus !== "expired" && account.status !== "expired") {
-      account.googleSheetsCredentialSync = await syncCredentialsToSheetsSafely(db, {
-        email: nextEmail,
-        password: nextPassword,
-        stockIds: [stock?.id || account.stockId].filter(Boolean),
-        sheetStockKeys: [stock?.sheetStockKey || account.sheetStockKey].filter(Boolean),
-        accountIds: [account.id],
-      });
-    }
-    const notificationDedupe = new Set();
-    const directChanges = accountChangeFields(beforeNotify, {
-      email: account.email || "",
-      password: account.password || "",
-      profile: account.profile || "",
-      pin: account.pin || "",
-    });
-    if (directChanges.length && nextStatus !== "expired" && account.status !== "expired") {
-      await notifyResellerAccountChanged(db, account, directChanges, { dedupeSet: notificationDedupe });
-    }
-    for (const affectedAccount of passwordSync?.affectedAccounts || []) {
-      if (affectedAccount.id === account.id) continue;
-      await notifyResellerAccountChanged(db, affectedAccount, [{ key: "password", label: "Password/Link" }], { dedupeSet: notificationDedupe });
-    }
-    db.activities = db.activities || [];
-    if (previousEmail !== nextEmail) {
-      db.activities.unshift({
-        id: makeId("act"),
-        type: "account",
-        title: `Akun diganti ke email ${nextEmail}`,
-        description: `${previousEmail || account.id} diganti untuk ${account.reseller || account.buyer || "reseller"}.`,
-        createdAt: nowText(),
-        resellerId: account.resellerId || "",
-        whatsapp: normalizeWhatsappNumber(account.whatsapp || ""),
-        accountId: account.id,
-        accountEmail: nextEmail,
-      });
-    } else if (
-      previousPassword !== nextPassword
-      || req.body.profile !== undefined
-      || req.body.pin !== undefined
-      || req.body.status !== undefined
-      || previousResellerId !== String(account.resellerId || "").trim()
-      || req.body.buyer !== undefined
-    ) {
-      db.activities.unshift({
-        id: makeId("act"),
-        type: "account",
-        title: `Akun ${nextEmail} diperbarui`,
-        description: `${account.reseller || account.buyer || "reseller"} data akun diperbarui.`,
-        createdAt: nowText(),
-        resellerId: account.resellerId || "",
-        whatsapp: normalizeWhatsappNumber(account.whatsapp || ""),
-        accountId: account.id,
-        accountEmail: nextEmail,
-      });
-    }
-    return account;
-  });
-  if (!updated) return res.status(404).json({ error: "Akun tidak ditemukan" });
-  res.json(updated);
-});
-
-app.post("/api/accounts/:id/replace", requireAuth(["owner"]), async (req, res) => {
-  const result = await updateDb(async (db) => {
-    const account = (db.managedAccounts || []).find((item) => item.id === req.params.id);
-    if (!account) return null;
-    const wantsReleaseViaSheets = String(req.body?.oldAccountDisposition || "release_via_sheets").trim() !== "keep_sold";
-    if (wantsReleaseViaSheets && !isNetflixManagedAccount(account)) {
-      const error = new Error("Replace akun non-Netflix wajib pakai opsi tahan untuk cek manual.");
-      error.status = 400;
-      throw error;
-    }
-    const replacement = replaceManagedAccountFromStock(db, req.params.id, req.body);
-    if (!replacement) return null;
-    const sheets = {};
-    try {
-      sheets.pushNew = await pushAccountsToGoogleSheets(db, [replacement.newAccount], {
-        id: `RPL-${replacement.oldAccount.id}`,
-        device: replacement.newAccount.device || "",
-        customer: replacement.newAccount.reseller || replacement.newAccount.buyer || "",
-        reseller: replacement.newAccount.reseller || "",
-        whatsapp: replacement.newAccount.whatsapp || "",
-        note: replacement.oldAccount.replacementReason || "Replacement warranty",
-      });
-    } catch (error) {
-      sheets.error = error.message || "google_sheets_replace_sync_failed";
-      db.activities.unshift({
-        id: makeId("act"),
-        type: "stock",
-        title: "Google Sheets replace perlu dicek",
-        description: `Replace ${replacement.oldAccount.email} ke ${replacement.newAccount.email} tersimpan, tapi sync Sheets gagal: ${sheets.error}`,
-        createdAt: nowText(),
-        accountId: replacement.newAccount.id,
-        accountEmail: replacement.newAccount.email,
-      });
-    }
-    return { ...replacement, sheets };
-  });
-  if (!result) return res.status(404).json({ error: "Akun tidak ditemukan" });
-  res.json({ ok: true, ...result });
-});
-
-app.post("/api/account-access/lookup", requireAuth(["reseller"]), async (req, res, next) => {
-  try {
-    const type = String(req.body.type || "signin").trim();
-    const target = String(req.body.target || req.body.email || "").trim();
-    const email = String(req.body.email || req.body.target || "").trim().toLowerCase();
-    const silent = Boolean(req.body.silent);
-    if (!target) {
-      res.status(400).json({ error: type === "disney_otp" ? "Nomor login Disney wajib diisi" : "Email akun wajib diisi" });
-      return;
-    }
-    if (!["signin", "verification", "reset", "household", "disney_otp"].includes(type)) {
-      res.status(400).json({ error: "Tipe lookup tidak valid" });
-      return;
-    }
-
-    const lookupResponse = await updateDb(async (db) => {
-      await refreshResellerViewFromGoogleSheets(db, req.auth, "reseller_lookup_refresh", { forceRecent: true });
-      const reseller = authReseller(db, req.auth);
-      if (!reseller || reseller.isActive === false) {
-        return { statusCode: 404, body: { error: "Reseller tidak ditemukan atau nonaktif" } };
-      }
-      const allowedTools = resellerAccessTools(reseller);
-      const permitted = type === "disney_otp" ? allowedTools.includes("signin") : allowedTools.includes(type);
-      if (!permitted) {
-        return {
-          statusCode: 403,
-          body: { error: `${accessLookupLabel(type)} tidak diizinkan untuk reseller ini` },
-        };
-      }
-      const account = type === "disney_otp"
-        ? findDisneyAccountForLookup(db, req.auth, target)
-        : findAccountForLookup(db, req.auth, email);
-      if (!account) {
-        const historicalAccount = type === "disney_otp"
-          ? historicalDisneyAccountForLookup(db, req.auth, target)
-          : historicalAccountForLookup(db, req.auth, email);
-        if (historicalAccount) {
-          const result = inactiveLookupResult(historicalAccount, type);
-          if (!silent) {
-            appendAccessLookupActivity(db, req.auth, {
-              account: historicalAccount,
-              email: target,
-              type,
-              result,
-              status: result.reason,
-            });
-          }
-          return {
-            statusCode: 200,
-            body: {
-              ok: true,
-              type,
-              account: safeAccountForAccess({
-                ...historicalAccount,
-                status: ["replaced", "disabled"].includes(historicalAccount.status) ? historicalAccount.status : "expired",
-              }),
-              result,
-              refreshedAt: nowText(),
-              expiresInSeconds: null,
-              gmail: gmailConnectionInfo(db),
-            },
-          };
-        }
-        if (!silent) {
-          appendAccessLookupActivity(db, req.auth, {
-            email: target,
-            type,
-            result: { source: "fallback", reason: "account_not_found", value: "" },
-            status: "account_not_found",
-          });
-        }
-        return { statusCode: 404, body: { error: type === "disney_otp" ? "Nomor Disney tidak ditemukan di akun yang dibeli reseller ini" : "Email tidak ditemukan di akun yang dibeli reseller ini" } };
-      }
-      const currentStatus = accountStatusFromDate(account.expiresAt, account.durationDays);
-      if (currentStatus === "expired" || isTerminalManagedAccountStatus(account.status)) {
-        const result = {
-          source: "fallback",
-          kind: ["reset", "household"].includes(type) ? "link" : "code",
-          value: "",
-          reason: account.status === "replaced" ? "account_replaced" : account.status === "disabled" ? "account_disabled" : "account_expired",
-          error: account.status === "replaced" ? "Akun sudah replaced, lookup kode tidak aktif." : account.status === "disabled" ? "Akun sudah nonaktif, lookup kode tidak aktif." : "Akun sudah expired, lookup kode tidak aktif.",
-        };
-        if (!silent) {
-          appendAccessLookupActivity(db, req.auth, { account, email: target, type, result, status: result.reason });
-        }
-        return {
-          statusCode: 200,
-          body: {
-        ok: true,
-        type,
-        account: safeAccountForAccess({ ...account, status: ["replaced", "disabled"].includes(account.status) ? account.status : "expired" }),
-        result,
-        refreshedAt: nowText(),
-        expiresInSeconds: null,
-        gmail: gmailConnectionInfo(db),
-          },
-        };
-      }
-
-      const result = await lookupAccountAccessValue(db, account, type);
-      const gmailInfo = result?.reason === "gmail_error" && isGmailOAuthInvalidError(result?.error) ? { ...gmailConnectionInfo(db), connected: false, needsOAuth: true, error: result.error } : gmailConnectionInfo(db);
-      if (!silent) {
-        appendAccessLookupActivity(db, req.auth, { account, email: target, type, result, status: result?.value ? "success" : result?.reason || result?.error || "not_found" });
-      }
-      return {
-        statusCode: 200,
-        body: {
-      ok: true,
-      type,
-      account: safeAccountForAccess(account),
-      result,
-      refreshedAt: nowText(),
-      expiresInSeconds: ["reset", "household"].includes(type) ? null : 15 * 60,
-      gmail: gmailInfo,
-        },
-      };
-    });
-    res.status(lookupResponse.statusCode || 200).json(lookupResponse.body || lookupResponse);
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.delete("/api/accounts/:id", requireAuth(["owner"]), async (req, res) => {
-  const deleted = await updateDb(async (db) => {
-    const index = (db.managedAccounts || []).findIndex((item) => item.id === req.params.id);
-    if (index === -1) return null;
-    const account = db.managedAccounts[index];
-    if (!isNetflixManagedAccount(account)) {
-      const status = String(account.status || accountStatusFromDate(account.expiresAt, account.durationDays)).toLowerCase();
-      if (!["expired", "replaced", "disabled"].includes(status)) {
-        const error = new Error("Akun non-Netflix yang masih aktif tidak bisa dihapus dari manajemen");
-        error.status = 400;
-        throw error;
-      }
-      const archivedAt = nowText();
-      account.status = status === "replaced" || status === "disabled" ? status : "expired";
-      account.hidden = true;
-      account.archivedAt = archivedAt;
-      db.activities = db.activities || [];
-      db.activities.unshift({
-        id: makeId("act"),
-        type: "account",
-        title: `${account.email || account.id} dihapus dari Manajemen Akun`,
-        description: `${account.product || "Akun"} ${account.variant || ""} diarsipkan. Stok sumber tidak diubah dari web.`,
-        createdAt: archivedAt,
-        resellerId: account.resellerId || "",
-        whatsapp: normalizeWhatsappNumber(account.whatsapp || ""),
-        accountId: account.id,
-        accountEmail: account.email || "",
-        stockId: account.stockId || "",
-      });
-      let sheetsClear = { ok: true, skipped: true };
-      try {
-        sheetsClear = await clearAccountsInGoogleSheets(db, [account]);
-      } catch (error) {
-        sheetsClear = { ok: false, error: error.message || "google_sheets_clear_failed" };
-        db.activities.unshift({
-          id: makeId("act"),
-          type: "error",
-          title: "Gagal mengosongkan row Sheets saat hapus akun",
-          description: `${account.email || account.id}: ${sheetsClear.error}`,
-          createdAt: archivedAt,
-          accountId: account.id,
-          accountEmail: account.email || "",
-          stockId: account.stockId || "",
-        });
-      }
-      return { account, archived: true, accounts: [account], stocks: [], sheetsClear };
-    }
-    const error = new Error("Akun Google Sheets tidak bisa di-release dari web. Kosongkan atau ubah row-nya di Sheets lalu sync.");
-    error.status = 400;
-    throw error;
-  });
-  if (!deleted) return res.status(404).json({ error: "Akun tidak ditemukan" });
-  res.json({
-    ok: true,
-    account: deleted.account,
-    stock: deleted.returnedStock,
-    accounts: deleted.accounts,
-    stocks: deleted.stocks,
-    returned: deleted.accounts?.length || 0,
-    sheets: deleted.sheetsClear,
-    credentialSync: deleted.credentialSync,
-  });
+registerAccountRoutes(app, {
+  accessLookupLabel,
+  accountChangeFields,
+  accountStatusFromDate,
+  appendAccessLookupActivity,
+  authReseller,
+  backfillManagedAccountsFromCompletedOrders,
+  buildAccountAuditTrail,
+  buildManagedAccountInput,
+  canonicalResellerDisplayName,
+  clearAccountsInGoogleSheets,
+  findAccountForLookup,
+  findDisneyAccountForLookup,
+  gmailConnectionInfo,
+  historicalAccountForLookup,
+  historicalDisneyAccountForLookup,
+  inactiveLookupResult,
+  isGmailOAuthInvalidError,
+  isNetflixManagedAccount,
+  isTerminalManagedAccountStatus,
+  lookupAccountAccessValue,
+  makeId,
+  normalizeWhatsappNumber,
+  notifyResellerAccountChanged,
+  nowText,
+  orderForManagedAccount,
+  primaryResellerWhatsapp,
+  pushAccountsToGoogleSheets,
+  readDbSnapshot,
+  refreshManagedAccountStatuses,
+  refreshResellerViewFromGoogleSheets,
+  requireAuth,
+  resellerAccessTools,
+  resellerById,
+  safeAccountForAccess,
+  stockForManagedAccount,
+  syncCredentialsToSheetsSafely,
+  syncHistoricalStockConflicts,
+  syncManagedAccountCredentialsFromOrders,
+  syncManagedAccountWhatsappFromOrders,
+  syncNetflixManagedPasswordConsensus,
+  syncPasswordByEmail,
+  syncSoldStockMetadata,
+  updateDb,
+  visibleManagedAccountsForAuth,
 });
 
 function archiveOldActivities(db, keepDays = 5) {
@@ -11264,516 +8870,99 @@ function archiveOldActivities(db, keepDays = 5) {
   return true;
 }
 
-app.get("/api/activities", requireAuth(["owner", "reseller"]), async (req, res) => {
-  let db = await readDbWithExpiredOrders();
-  if (archiveOldActivities(db, Number(process.env.ACTIVITY_LOG_ACTIVE_DAYS || 5))) {
-    db = await writeDb(db, { notify: true, reason: "activities:archive" });
-  }
-  if (req.auth.role === "reseller") {
-    res.json((db.activities || []).filter((activity) => activityBelongsToReseller(db, req.auth, activity)));
-    return;
-  }
-  res.json(db.activities);
+const readMaintenanceService = createReadMaintenanceService({
+  archiveOldActivities,
+  expirePendingOrders,
+  hasExpiredPendingOrders,
+  readDbSnapshot,
+  updateDb,
 });
 
-app.get("/api/operations/center", requireAuth(["owner"]), async (_req, res, next) => {
-  try {
-    res.json(await buildOperationsCenter(await readDbWithExpiredOrders()));
-  } catch (error) {
-    next(error);
-  }
+const operationsRepairService = createOperationsRepairService({
+  makeId,
+  nowText,
+  reconcileGoogleSheetsStockOrderLinks,
+  refreshManagedAccountStatuses,
+  repairHistoricalStockReuse,
+  repairManagedAccountOwnership,
+  snapshotVersion,
+  syncGoogleSheetsStockSafely,
+  syncHistoricalStockConflicts,
+  syncManagedAccountWhatsappFromOrders,
+  syncSoldStockMetadata,
 });
 
-app.get("/api/owner-search", requireAuth(["owner"]), async (req, res) => {
-  const db = await readDbWithExpiredOrders();
-  res.json(buildOwnerSearch(db, req.query.q || ""));
+registerOperationsRoutes(app, {
+  activityBelongsToReseller,
+  applyOperationsAction: operationsRepairService.apply,
+  buildOperationsAudit,
+  buildOwnerSearch,
+  buildSystemStatus,
+  previewOperationsAction: operationsRepairService.preview,
+  readDb,
+  readDbSnapshot,
+  requireAuth,
+  scheduleKavyaRestart,
+  snapshotVersion,
+  updateDb,
 });
 
-app.post("/api/operations/reseller/repair", requireAuth(["owner"]), async (req, res, next) => {
-  try {
-    const result = await updateDb(async (db) => {
-      const syncSheets = Boolean(req.body?.syncSheets);
-      const scope = {
-        accountId: String(req.body?.accountId || "").trim(),
-        orderId: String(req.body?.orderId || "").trim(),
-        resellerId: String(req.body?.resellerId || "").trim(),
-      };
-      let sheets = { ok: true, skipped: true, reason: "not_requested" };
-      if (syncSheets) {
-        sheets = await syncGoogleSheetsStockSafely(db, { silent: true, reason: "owner_reseller_repair", force: true });
-      }
-      const sheetOrderLinksUpdated = reconcileGoogleSheetsStockOrderLinks(db);
-      const statusUpdated = refreshManagedAccountStatuses(db);
-      const ownership = repairManagedAccountOwnership(db, scope);
-      const postSyncUpdated = syncManagedAccountWhatsappFromOrders(db);
-      const conflictUpdated = syncHistoricalStockConflicts(db);
-      const stockAuditUpdated = repairHistoricalStockReuse(db);
-      const stockMetaUpdated = syncSoldStockMetadata(db);
-      const changedTotal = Number(sheetOrderLinksUpdated || 0) + Number(statusUpdated ? 1 : 0) + Number(postSyncUpdated || 0) + Number(ownership.repaired || 0) + Number(ownership.rebuilt || 0) + Number(conflictUpdated || 0) + Number(stockAuditUpdated || 0) + Number(stockMetaUpdated || 0);
-
-      db.activities = db.activities || [];
-      db.activities.unshift({
-        id: makeId("act"),
-        type: "reseller",
-        title: "Repair reseller dijalankan",
-        description: `Repair owner menyentuh ${ownership.matched} akun, update field ${ownership.repaired}, rebuild akun ${ownership.rebuilt}, sync tambahan ${postSyncUpdated || 0}.`,
-        createdAt: nowText(),
-        resellerId: scope.resellerId || "",
-        orderId: scope.orderId || "",
-        accountId: scope.accountId || "",
-      });
-
-      return {
-        ok: true,
-        changedTotal,
-        statusUpdated: Boolean(statusUpdated),
-        ownershipUpdated: ownership.repaired,
-        rebuiltAccounts: ownership.rebuilt,
-        conflictUpdated,
-        stockAuditUpdated,
-        stockMetaUpdated,
-        rebuildResults: ownership.rebuildResults,
-        matchedAccounts: ownership.matched,
-        changedAccountIds: ownership.changedAccountIds,
-        changedOrderIds: ownership.changedOrderIds,
-        postSyncUpdated,
-        sheets,
-      };
-    });
-    res.json(result);
-  } catch (error) {
-    next(error);
-  }
+registerWhatsAppRoutes(app, {
+  applyWaPriceSync,
+  assertInboundToken,
+  buildDepositCreatedReply,
+  buildOrderCreatedReply,
+  cleanInviteLink,
+  createPakasirQris,
+  enableMaintenanceMode,
+  expirationFromDays,
+  extractInviteCode,
+  findWaPriceSource,
+  formatDateFromDays,
+  getWhatsAppBotStatus,
+  handleInboundMessage,
+  joinGroupThroughBot,
+  legacyRootDir,
+  legacyTodayText,
+  makeId,
+  markRentalJoinedNotice,
+  mergedWhatsappRentals,
+  normalizeRentalPatch,
+  normalizeRentalRuntimeDays,
+  notifyOwnerRentalChanged,
+  notifyOwnerRentalJoined,
+  nowText,
+  paymentTtlMinutes,
+  previewWaPriceSync,
+  pushFulfilledOrderToGoogleSheets,
+  readActiveLegacyGroupLists,
+  readDb,
+  readLegacyRentals,
+  requireAuth,
+  resolveRentalGroupJid,
+  sendRentalJoinedNotifications,
+  syncWhatsappGroups,
+  todayText,
+  updateDb,
+  upsertLegacyRental,
 });
 
-app.get("/api/system/status", requireAuth(["owner"]), async (_req, res, next) => {
-  try {
-    res.json(await buildSystemStatus(await readDb()));
-  } catch (error) {
-    next(error);
-  }
+registerPaymentRoutes(app, {
+  assertPakasirSecret,
+  expirePendingOrders,
+  findOrderForPublicTracking,
+  nowText,
+  orderBelongsToReseller,
+  readDb,
+  readDbSnapshot,
+  reconcilePakasirPaymentInDb,
+  requireAuth,
+  safePublicPayment,
+  safeTrackingPayment,
+  updateDb,
 });
 
-app.post("/api/system/restart", requireAuth(["owner"]), async (_req, res, next) => {
-  try {
-    res.json({ ok: true, message: "Restart Kavya dijadwalkan." });
-    scheduleKavyaRestart();
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get("/api/whatsapp/status", requireAuth(["owner"]), async (_req, res) => {
-  const db = await readDb();
-  res.json(await getWhatsAppBotStatus(db));
-});
-
-app.get("/api/whatsapp/rentals", requireAuth(["owner"]), async (_req, res) => {
-  const db = await readDb();
-  res.json(await mergedWhatsappRentals(db));
-});
-
-app.get("/api/whatsapp/rentals/:id/price-sync/preview", requireAuth(["owner"]), async (req, res, next) => {
-  try {
-    const db = await readDb();
-    const rentals = await mergedWhatsappRentals(db);
-    const rental = rentals.find((item) => item.id === req.params.id || item.groupJid === req.params.id);
-    const groupJid = String(req.query.groupJid || rental?.groupJid || req.params.id || "").trim();
-    const groupName = String(req.query.groupName || rental?.name || "").trim();
-    const linkGrub = String(req.query.linkGrub || rental?.linkGrub || "").trim();
-    const source = await findWaPriceSource(legacyRootDir, { groupJid, groupName, linkGrub });
-    if (!source) {
-      res.status(404).json({ error: `Pricelist harga tidak ditemukan di grup ini${groupName ? ` (${groupName})` : ""}` });
-      return;
-    }
-    const preview = previewWaPriceSync(db, source.text);
-    res.json({
-      ok: true,
-      source: {
-        keyword: source.keyword,
-        groupJid: source.groupJid,
-        groupName: groupName || rental?.name || source.groupJid,
-        filePath: source.filePath,
-        score: source.score,
-        entryCount: source.entryCount,
-      },
-      ...preview,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/whatsapp/rentals/:id/price-sync/apply", requireAuth(["owner"]), async (req, res, next) => {
-  try {
-    const currentDb = await readDb();
-    const rentals = await mergedWhatsappRentals(currentDb);
-    const rental = rentals.find((item) => item.id === req.params.id || item.groupJid === req.params.id);
-    const groupJid = String(req.body.groupJid || rental?.groupJid || req.params.id || "").trim();
-    const groupName = String(req.body.groupName || rental?.name || "").trim();
-    const linkGrub = String(req.body.linkGrub || rental?.linkGrub || "").trim();
-    const source = await findWaPriceSource(legacyRootDir, { groupJid, groupName, linkGrub });
-    if (!source) {
-      const error = new Error(`Pricelist harga tidak ditemukan di grup ini${groupName ? ` (${groupName})` : ""}`);
-      error.status = 404;
-      throw error;
-    }
-    const result = await updateDb((db) => {
-      const preview = previewWaPriceSync(db, source.text);
-      const updated = applyWaPriceSync(db, preview);
-      db.activities = db.activities || [];
-      db.activities.unshift({
-        id: makeId("act"),
-        type: "stock",
-        title: "Harga produk disinkronkan dari grup WhatsApp",
-        description: `${updated} harga produk diperbarui dari ${groupName || rental?.name || source.groupJid}.`,
-        createdAt: nowText(),
-      });
-      return {
-        ok: true,
-        updated,
-        source: {
-          keyword: source.keyword,
-          groupJid: source.groupJid,
-          groupName: groupName || rental?.name || source.groupJid,
-          filePath: source.filePath,
-          score: source.score,
-          entryCount: source.entryCount,
-        },
-        ...preview,
-      };
-    });
-    res.json(result);
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get("/api/whatsapp/group-lists", requireAuth(["owner"]), async (_req, res, next) => {
-  try {
-    res.json(await readActiveLegacyGroupLists());
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/whatsapp/groups/sync", async (req, res, next) => {
-  try {
-    assertInboundToken(req, await readDb());
-    const result = await updateDb((db) => syncWhatsappGroups(db, req.body.groups, req.body.source || "bot"));
-    const joinedNotifications = await sendRentalJoinedNotifications(result.joinedRentals || []);
-    res.json({ success: true, result: { ...result, joinedNotifications } });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/whatsapp/rentals", requireAuth(["owner"]), async (req, res) => {
-  const linkGrub = cleanInviteLink(req.body.linkGrub || req.body.link || "");
-  const daysLeft = Number(req.body.daysLeft || req.body.days || 30);
-  const inviteCode = extractInviteCode(linkGrub);
-  if (!inviteCode) return res.status(400).json({ error: "Link grup WhatsApp tidak valid" });
-  if (!Number.isFinite(daysLeft) || daysLeft <= 0) return res.status(400).json({ error: "Sisa hari tidak valid" });
-
-  const legacyRentals = await readLegacyRentals();
-  const matchedEntry = Object.entries(legacyRentals).find(([, rental]) => cleanInviteLink(rental?.linkGrub) === linkGrub);
-  const joinResult = matchedEntry ? { joinStatus: "joined", groupJid: matchedEntry[0], groupName: "" } : await joinGroupThroughBot(linkGrub);
-
-  const created = await updateDb((db) => {
-    const resolved = resolveRentalGroupJid(db, {
-      id: req.body.id,
-      groupJid: req.body.groupJid,
-      joinGroupJid: joinResult.groupJid,
-      matchedGroupJid: matchedEntry?.[0],
-      name: req.body.name,
-      groupName: joinResult.groupName,
-      fallbackName: matchedEntry?.[0],
-    });
-    const id = String(resolved.groupJid || req.body.id || req.body.groupJid || joinResult.groupJid || matchedEntry?.[0] || `pending-${inviteCode}`).trim();
-    const groupJid = resolved.groupJid || "";
-    const effectiveJoinStatus = groupJid ? "joined" : joinResult.joinStatus;
-    const effectiveJoinError = groupJid ? "" : joinResult.joinError || "";
-    const rental = {
-      id,
-      groupJid: groupJid || (id.endsWith("@g.us") ? id : ""),
-      ...normalizeRentalPatch(req.body, {
-        name: resolved.directory?.name || req.body.name || joinResult.groupName || id,
-        owner: "",
-        contact: req.body.contact || joinResult.ownerNumber || resolved.directory?.contact || "",
-        startedAt: todayText(),
-        endsAt: formatDateFromDays(daysLeft),
-        daysLeft,
-        monthlyPrice: 0,
-        status: "active",
-        linkGrub,
-      }),
-      name: req.body.name || resolved.directory?.name || joinResult.groupName || matchedEntry?.[0] || `Menunggu join ${inviteCode}`,
-      linkGrub,
-      joinStatus: effectiveJoinStatus,
-      joinError: effectiveJoinError,
-    };
-    const existingIndex = db.whatsappRentals.findIndex((item) => item.id === id);
-    if (existingIndex >= 0) db.whatsappRentals[existingIndex] = rental;
-    else db.whatsappRentals.unshift(rental);
-    return rental;
-  });
-  await upsertLegacyRental(created.groupJid || created.id, {
-    linkGrub,
-    start: created.startedAt || legacyTodayText(),
-    daysLeft: created.daysLeft,
-    expired: expirationFromDays(created.daysLeft),
-  });
-  if (created.joinStatus === "joined") {
-    const delivery = await notifyOwnerRentalJoined(await readDb(), {
-      rental: created,
-      addedDays: created.daysLeft,
-      previousDays: 0,
-      totalDays: created.daysLeft,
-      source: "Dashboard",
-    });
-    await markRentalJoinedNotice(created, delivery);
-  } else {
-    await notifyOwnerRentalChanged(await readDb(), {
-      rental: created,
-      action: "created",
-      addedDays: created.daysLeft,
-      previousDays: 0,
-      totalDays: created.daysLeft,
-      source: "Dashboard",
-    });
-  }
-  res.status(201).json(created);
-});
-
-app.put("/api/whatsapp/rentals/:id", requireAuth(["owner"]), async (req, res) => {
-  const legacyRows = await mergedWhatsappRentals(await readDb());
-  const fallback = legacyRows.find((rental) => rental.id === req.params.id) || { id: req.params.id, name: req.params.id };
-  let previousDays = Number(fallback.daysLeft || 0);
-  const updated = await updateDb((db) => {
-    const index = db.whatsappRentals.findIndex((rental) => rental.id === req.params.id);
-    const current = index >= 0 ? db.whatsappRentals[index] : fallback;
-    previousDays = Number(normalizeRentalRuntimeDays({ ...fallback, ...current }, fallback.daysLeft).daysLeft || 0);
-    const resolved = resolveRentalGroupJid(db, {
-      id: req.params.id,
-      groupJid: req.body.groupJid,
-      fallbackGroupJid: fallback.groupJid || current.groupJid,
-      name: req.body.name,
-      fallbackName: fallback.name || current.name,
-    });
-    const groupJid = resolved.groupJid || fallback.groupJid || current.groupJid || req.params.id;
-    const rental = normalizeRentalRuntimeDays({
-      ...fallback,
-      ...current,
-      ...normalizeRentalPatch(req.body, index >= 0 ? db.whatsappRentals[index] : fallback),
-      id: req.params.id,
-      groupJid,
-      name: String(req.body.name || current.name || fallback.name || resolved.directory?.name || groupJid).trim(),
-      contact: String(req.body.contact || current.contact || fallback.contact || resolved.directory?.contact || "").trim(),
-      joinStatus: groupJid.endsWith("@g.us") ? "joined" : current.joinStatus || fallback.joinStatus || "pending",
-      joinError: groupJid.endsWith("@g.us") ? "" : current.joinError || fallback.joinError || "",
-    }, previousDays);
-    if (index >= 0) db.whatsappRentals[index] = rental;
-    else db.whatsappRentals.unshift(rental);
-    return rental;
-  });
-  await upsertLegacyRental(updated.groupJid || updated.id, {
-    linkGrub: updated.linkGrub,
-    start: updated.startedAt,
-    daysLeft: updated.daysLeft,
-    expired: expirationFromDays(updated.status === "expired" ? 0 : updated.daysLeft),
-  });
-  const totalDays = Number(updated.daysLeft || 0);
-  if (totalDays !== previousDays) {
-    await notifyOwnerRentalChanged(await readDb(), {
-      rental: updated,
-      action: totalDays < previousDays ? "reduced" : "added",
-      addedDays: totalDays - previousDays,
-      previousDays,
-      totalDays,
-      source: "Dashboard",
-    });
-  }
-  res.json(updated);
-});
-
-app.post("/api/whatsapp/rentals/:id/adjust", requireAuth(["owner"]), async (req, res) => {
-  const days = Number(req.body.days || 0);
-  if (!Number.isFinite(days) || days === 0) return res.status(400).json({ error: "Jumlah hari tidak valid" });
-  const legacyRows = await mergedWhatsappRentals(await readDb());
-  const fallback = legacyRows.find((rental) => rental.id === req.params.id) || { id: req.params.id, name: req.params.id, daysLeft: 0 };
-  let previousDays = Number(fallback.daysLeft || 0);
-  const updated = await updateDb((db) => {
-    const index = db.whatsappRentals.findIndex((rental) => rental.id === req.params.id);
-    const current = index >= 0 ? db.whatsappRentals[index] : fallback;
-    previousDays = Number(normalizeRentalRuntimeDays({ ...fallback, ...current }, fallback.daysLeft).daysLeft || 0);
-    const nextDaysLeft = Math.max(0, previousDays + days);
-    const rental = {
-      ...fallback,
-      ...current,
-      daysLeft: nextDaysLeft,
-      endsAt: formatDateFromDays(nextDaysLeft),
-      status: nextDaysLeft > 0 ? "active" : "expired",
-      id: req.params.id,
-      groupJid: fallback.groupJid || req.params.id,
-    };
-    if (index >= 0) db.whatsappRentals[index] = rental;
-    else db.whatsappRentals.unshift(rental);
-    return rental;
-  });
-  await upsertLegacyRental(updated.groupJid || updated.id, {
-    linkGrub: updated.linkGrub,
-    start: updated.startedAt,
-    daysLeft: updated.daysLeft,
-    expired: expirationFromDays(updated.daysLeft),
-  });
-  await notifyOwnerRentalChanged(await readDb(), {
-    rental: updated,
-    action: days < 0 ? "reduced" : "added",
-    addedDays: days,
-    previousDays,
-    totalDays: updated.daysLeft,
-    source: "Dashboard",
-  });
-  res.json(updated);
-});
-
-app.post("/api/whatsapp/inbound", async (req, res, next) => {
-  try {
-    assertInboundToken(req, await readDb());
-    const result = await updateDb(async (db) => {
-      const inboundResult = await handleInboundMessage(db, req.body);
-      if (inboundResult?.order?.deliveryStatus === "sent" && inboundResult.order.deliveredStockIds?.length) {
-        await pushFulfilledOrderToGoogleSheets(db, { ok: true, order: inboundResult.order, reply: inboundResult.reply });
-      }
-      if (inboundResult?.order?.source === "whatsapp" && inboundResult.order.qrisStatus === "pending") {
-        const payment = (db.payments || []).find((item) => item.ref === inboundResult.order.paymentRef || item.orderId === inboundResult.order.id);
-        const dashboardPaymentUrl = inboundResult.order.qrisUrl;
-        const pakasir = await createPakasirQris(db, inboundResult.order);
-        if (pakasir.providerStatus !== "created") {
-          enableMaintenanceMode(db, `Pakasir QRIS gagal: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`, "pakasir");
-          const error = new Error(`Pakasir QRIS gagal untuk order WhatsApp: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`);
-          error.status = 503;
-          error.maintenance = { reason: `Pakasir QRIS gagal: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`, source: "pakasir" };
-          throw error;
-        }
-        if (payment) {
-          Object.assign(payment, pakasir);
-          payment.paymentUrl = payment.paymentUrl || dashboardPaymentUrl;
-        }
-        inboundResult.order.qrisUrl = dashboardPaymentUrl || pakasir.paymentUrl || "";
-        inboundResult.order.paymentProviderStatus = pakasir.providerStatus || "";
-        if (pakasir.providerError) inboundResult.order.paymentError = pakasir.providerError;
-        const replyOptions = {
-          order: inboundResult.order,
-          fee: pakasir.fee || payment?.fee || 0,
-          totalPayment: pakasir.totalPayment || payment?.totalPayment || inboundResult.order.paymentDue,
-          ttlMinutes: paymentTtlMinutes,
-        };
-        inboundResult.reply =
-          inboundResult.order.type === "deposit_topup" || inboundResult.order.orderType === "deposit_topup"
-            ? buildDepositCreatedReply(replyOptions)
-            : buildOrderCreatedReply({
-                ...replyOptions,
-                productName: inboundResult.order.product,
-                variantName: inboundResult.order.variant,
-                qty: inboundResult.order.qty,
-                price: Number(inboundResult.order.total || 0) / Math.max(1, Number(inboundResult.order.qty || 1)),
-              });
-        return {
-          ...inboundResult,
-          paymentUrl: inboundResult.order.qrisUrl,
-          qrisText: pakasir.qrisText || pakasir.qrString || pakasir.paymentNumber || pakasir.paymentUrl || inboundResult.order.qrisUrl,
-          qrText: pakasir.qrisText || pakasir.qrString || pakasir.paymentNumber || pakasir.paymentUrl || inboundResult.order.qrisUrl,
-          qrImageUrl: pakasir.qrImageUrl || "",
-          orderId: inboundResult.order.id,
-          paymentRef: inboundResult.order.paymentRef,
-          providerStatus: pakasir.providerStatus || "pending",
-          providerError: pakasir.providerError || "",
-        };
-      }
-      return inboundResult;
-    });
-    res.json(result);
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/whatsapp/orders/:id/payment-message", async (req, res, next) => {
-  try {
-    assertInboundToken(req, await readDb());
-    const saved = await updateDb((db) => {
-      const order = (db.orders || []).find((item) => item.id === req.params.id || item.paymentRef === req.params.id);
-      if (!order) return null;
-      order.whatsappPaymentMessageKey = req.body.messageKey || req.body.message_key || null;
-      order.whatsappPaymentMessageChatJid = String(req.body.chatJid || req.body.chat_jid || "").trim();
-      order.whatsappPaymentMessageSavedAt = nowText();
-      return order;
-    });
-    if (!saved) return res.status(404).json({ error: "Order tidak ditemukan" });
-    res.json({ ok: true });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/pakasir/webhook", async (req, res, next) => {
-  try {
-    assertPakasirSecret(req, await readDb());
-    const ref = req.body.paymentRef || req.body.reference || req.body.ref || req.body.order_id;
-    const status = String(req.body.status || req.body.payment_status || "").toLowerCase();
-    const result = await updateDb(async (db) => {
-      expirePendingOrders(db);
-      const payment = db.payments.find((item) => item.ref === ref || item.orderId === ref);
-      const order = db.orders.find((item) => item.paymentRef === ref || item.id === ref);
-      if (!payment || !order) return null;
-      payment.providerWebhookStatus = status || "";
-      payment.providerWebhookAt = nowText();
-      payment.status = pakasirStatusIsPaid(status) ? "paid" : status || "pending";
-      if (payment.status === "paid") {
-        const prepared = preparePaidOrderForFulfillment(db, order, payment);
-        if (prepared.reply && prepared.order.deliveryStatus === "late_paid_deposit") return prepared;
-        return fulfillPaidOrderAndNotify(db, order.id);
-      }
-      return { ok: true, order };
-    });
-    if (!result) return res.status(404).json({ error: "Payment/order tidak ditemukan" });
-    res.json(result);
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get("/api/payments/:ref", requireAuth(["owner", "reseller"]), async (req, res) => {
-  const result = await updateDb(async (db) => {
-    await reconcilePakasirPaymentInDb(db, req.params.ref, { throttleMs: 8_000, source: "payment_view" });
-    expirePendingOrders(db);
-    const payment = db.payments.find((item) => item.ref === req.params.ref);
-    if (!payment) return null;
-    const order = db.orders.find((item) => item.paymentRef === payment.ref || item.id === payment.orderId);
-    if (req.auth.role === "reseller" && order && !orderBelongsToReseller(db, req.auth, order)) {
-      return null;
-    }
-    return safePublicPayment(payment, order);
-  });
-  if (!result) return res.status(404).json({ error: "Payment tidak ditemukan" });
-  res.json(result);
-});
-
-app.get("/api/public/payments/:ref", async (req, res) => {
-  const result = await updateDb(async (db) => {
-    await reconcilePakasirPaymentInDb(db, req.params.ref, { throttleMs: 8_000, source: "payment_public_view" });
-    expirePendingOrders(db);
-    const payment = db.payments.find((item) => item.ref === req.params.ref);
-    if (!payment) return null;
-    const order = db.orders.find((item) => item.paymentRef === payment.ref || item.id === payment.orderId);
-    return safePublicPayment(payment, order);
-  });
-  if (!result) return res.status(404).json({ error: "Payment tidak ditemukan" });
-  res.json(result);
-});
-
-app.use("/whatsapp-bot", proxyWhatsAppBotRequest);
+app.use("/whatsapp-bot", requireAuth(["owner"]), proxyWhatsAppBotRequest);
 
 app.use("/api", (_req, res) => {
   res.status(404).json({ error: "Endpoint tidak ditemukan" });
@@ -11782,6 +8971,7 @@ app.use("/api", (_req, res) => {
 app.use(express.static(distDir));
 app.use((req, res, next) => {
   if (req.method !== "GET") return next();
+  if (req.path === "/order-tracking") res.setHeader("X-Robots-Tag", "noindex, nofollow");
   res.sendFile(path.join(distDir, "index.html"), (error) => {
     if (error) next();
   });
@@ -11801,6 +8991,7 @@ app.use(async (error, _req, res, _next) => {
 
 await ensureDb();
 await ensureRuntimeSettings();
+authSecret();
 app.listen(port, host, () => {
   console.log(`Kavya API running at http://${host}:${port}`);
   console.log(`Database: ${databasePath}`);
@@ -11852,16 +9043,27 @@ async function runPakasirPaymentSyncJob() {
       for (const payment of db.payments || []) {
         if (payment.provider !== "pakasir") continue;
         const order = ordersByRef.get(payment.ref);
-        if (!order || order.deliveryStatus === "sent") continue;
+        if (!order) continue;
+        const orderStatus = String(order.orderStatus || "").toLowerCase();
+        const deliveryStatus = String(order.deliveryStatus || "").toLowerCase();
+        if (
+          deliveryStatus === "sent"
+          || ["completed", "fulfilled", "cancelled", "expired", "refunded", "failed", "failed_permanent"].includes(orderStatus)
+        ) continue;
         const status = String(payment.status || order.qrisStatus || "").toLowerCase();
-        if (!["pending", "expired", "created", "waiting_payment", ""].includes(status)) continue;
+        if (!["pending", "created", "waiting_payment", ""].includes(status)) continue;
+        const nextCheckAt = toDateTime(payment.nextPaymentCheckAt || order.nextPaymentCheckAt || "");
+        if (nextCheckAt && nextCheckAt.getTime() > Date.now()) continue;
         refs.push(payment.ref);
         if (refs.length >= 8) break;
       }
       for (const ref of refs) {
-        await reconcilePakasirPaymentInDb(db, ref, { throttleMs: 25_000, source: "scheduled_pakasir_sync" });
+        await reconcilePakasirPaymentInDb(db, ref, {
+          throttleMs: 15_000,
+          source: "scheduled_pakasir_sync",
+          allowLatePaymentRecovery: false,
+        });
       }
-      expirePendingOrders(db);
       return { checked: refs.length };
     });
   } catch (error) {
@@ -11873,6 +9075,27 @@ async function runPakasirPaymentSyncJob() {
 
 setTimeout(runPakasirPaymentSyncJob, 15_000);
 setInterval(runPakasirPaymentSyncJob, 30_000);
+
+async function runExpiredOrderMaintenanceJob() {
+  try {
+    await readMaintenanceService.runExpiredOrders();
+  } catch (error) {
+    console.warn(`[OrderExpiry] maintenance skipped: ${error.message || error}`);
+  }
+}
+
+async function runActivityArchiveJob() {
+  try {
+    await readMaintenanceService.runActivityArchive({ keepDays: 5 });
+  } catch (error) {
+    console.warn(`[ActivityArchive] maintenance skipped: ${error.message || error}`);
+  }
+}
+
+setTimeout(runExpiredOrderMaintenanceJob, 5_000);
+setInterval(runExpiredOrderMaintenanceJob, 30_000);
+setTimeout(runActivityArchiveJob, 60_000);
+setInterval(runActivityArchiveJob, 60 * 60 * 1000);
 
 let fulfillmentRepairRunning = false;
 

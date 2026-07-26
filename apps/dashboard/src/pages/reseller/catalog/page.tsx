@@ -74,9 +74,10 @@ export default function ResellerCatalogPage() {
   async function loadCatalog() {
     try {
       setError("");
-      const [catalogRows, resellerRows] = await Promise.all([api.catalog(), api.resellers()]);
-      setProducts(catalogRows);
-      setReseller(resellerRows[0] || null);
+      await Promise.all([
+        api.catalog().then(setProducts),
+        api.resellers().then((rows) => setReseller(rows[0] || null)),
+      ]);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Katalog produk gagal dimuat.");
     } finally {
@@ -186,7 +187,7 @@ export default function ResellerCatalogPage() {
           <ResellerStatCard label="Total Slot Stok" value={totalStock} icon="ri-database-2-line" tone="emerald" hint="Akumulasi stok aktif di katalog" />
         </div>
 
-        <div className="sticky top-16 z-30 isolate -mx-4 border-b border-white/60 bg-[#f2ece2] px-4 py-3 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.45)] md:-mx-6 md:px-6">
+        <div className="sticky top-16 z-30 isolate -mx-4 border-b border-white/10 bg-[#070708] px-4 py-3 md:-mx-6 md:px-6">
           <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm shadow-slate-950/5">
             <ResellerSearch value={query} onChange={setQuery} placeholder="Cari produk ready..." />
           </div>
@@ -315,33 +316,31 @@ export default function ResellerCatalogPage() {
                           return (
                             <>
                               {showModeSwitcher ? (
-                                <div className="mt-4 grid grid-cols-2 gap-2 rounded-xl border border-slate-100 bg-[#fbf7f0] p-1">
+                                <div className="reseller-catalog-duration-switch">
                                   {(["monthly", "daily"] as CatalogDurationMode[]).map((mode) => (
                                     <button
                                       key={mode}
                                       type="button"
                                       onClick={() => chooseDurationMode(mode)}
-                                      className={`h-9 rounded-lg text-xs font-semibold transition-colors ${
-                                        activeMode === mode ? "bg-white text-red-600 shadow-sm shadow-slate-950/5" : "text-slate-500 hover:text-slate-900"
-                                      }`}
+                                      className={`reseller-catalog-duration-mode ${activeMode === mode ? "is-active" : ""}`}
                                     >
                                       {mode === "monthly" ? "Bulanan" : "Harian"}
                                     </button>
                                   ))}
                                 </div>
                               ) : null}
-                              <div className="mt-4 grid grid-cols-3 gap-2">
+                              <div className="reseller-catalog-duration-grid">
                                 {durationEntries.map(([duration, price]) => (
                                   <button
                                     key={duration}
                                     type="button"
                                     onClick={() => chooseDuration(duration)}
-                                    className={`rounded-md border px-2 py-2 text-left text-[11px] transition-colors ${
-                                      selectedForProduct.duration === duration ? "border-red-200 bg-red-50 text-red-700" : "border-gray-100 bg-[#fbf7f0] hover:border-red-100 hover:bg-red-50"
+                                    className={`reseller-catalog-duration-option ${
+                                      selectedForProduct.duration === duration ? "is-selected" : ""
                                     }`}
                                   >
-                                    <span className="block text-slate-500">{duration}</span>
-                                    <span className="font-semibold">{money(Number(price || 0))}</span>
+                                    <span className="reseller-catalog-duration-label">{duration}</span>
+                                    <span className="reseller-catalog-duration-price">{money(Number(price || 0))}</span>
                                   </button>
                                 ))}
                               </div>
@@ -397,4 +396,3 @@ export default function ResellerCatalogPage() {
     </DashboardLayout>
   );
 }
-

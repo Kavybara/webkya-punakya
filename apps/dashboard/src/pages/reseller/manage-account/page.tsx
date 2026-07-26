@@ -40,16 +40,11 @@ function remainingPercent(account: ManagedAccount) {
   return Math.max(0, Math.min(100, (remaining / duration) * 100));
 }
 
-function wait(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
 function sessionFingerprint() {
   const session = readSession() as Record<string, unknown> | null;
   const user = session && typeof session.user === "object" && session.user ? session.user as Record<string, unknown> : null;
   return JSON.stringify({
     role: session?.role || "",
-    token: session?.token || "",
     id: user?.id || "",
     email: user?.email || "",
     username: user?.username || "",
@@ -75,25 +70,26 @@ export default function ResellerManageAccountPage() {
       setError("");
     }
 
-    let lastError: unknown;
-    const maxAttempts = options.silent ? 1 : 2;
-    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      try {
-        const rows = await api.accounts(options.silent ? { view: "light" } : { view: "full" });
-        if (!mounted.current || seq !== loadSeq.current) return;
-        setAccounts(rows);
-        setError("");
-        setLoading(false);
-        return;
-      } catch (loadError) {
-        lastError = loadError;
-        if (attempt < maxAttempts - 1) await wait(350 * (attempt + 1));
-      }
-    }
+    try {
+      const cachedRows = await api.accounts({ view: "light" });
+      if (!mounted.current || seq !== loadSeq.current) return;
+      setAccounts(cachedRows);
+      setError("");
+      setLoading(false);
 
-    if (!mounted.current || seq !== loadSeq.current) return;
-    setError(lastError instanceof Error ? lastError.message : "Gagal memuat akun reseller.");
-    setLoading(false);
+      if (options.silent) return;
+      try {
+        const refreshedRows = await api.accounts({ view: "full" });
+        if (!mounted.current || seq !== loadSeq.current) return;
+        setAccounts(refreshedRows);
+      } catch (refreshError) {
+        console.warn("Background account refresh failed", refreshError);
+      }
+    } catch (loadError) {
+      if (!mounted.current || seq !== loadSeq.current) return;
+      setError(loadError instanceof Error ? loadError.message : "Gagal memuat akun reseller.");
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -138,15 +134,15 @@ export default function ResellerManageAccountPage() {
   }
 
   const activeAccounts = accounts.filter((account) => accountStatus(account) === "Aktif");
-  const expiringAccounts = accounts.filter((account) => accountStatus(account) === "Expiring");
-  const expiredAccounts = accounts.filter((account) => accountStatus(account) === "Expired");
+  const expiringAccounts = accounts.filter((account) => accountStatus(account) === "Hampir Berakhir");
+  const expiredAccounts = accounts.filter((account) => accountStatus(account) === "Kedaluwarsa");
   const rows = useMemo(
     () =>
       accounts
         .filter((account) => {
           if (filter === "active") return accountStatus(account) === "Aktif";
-          if (filter === "expiring") return accountStatus(account) === "Expiring";
-          return accountStatus(account) === "Expired";
+          if (filter === "expiring") return accountStatus(account) === "Hampir Berakhir";
+          return accountStatus(account) === "Kedaluwarsa";
         })
         .filter((account) =>
           [account.email, account.loginPhone, account.product, account.variant, account.profile, account.stockId]
@@ -195,7 +191,7 @@ export default function ResellerManageAccountPage() {
           {rows.map((account) => {
             const copyFullId = `${account.id}-full-mobile`;
             const status = accountStatus(account);
-            const barColor = status === "Expired" || status === "Replaced" || status === "Disabled" ? "bg-red-500" : status === "Expiring" ? "bg-amber-500" : "bg-emerald-500";
+            const barColor = status === "Kedaluwarsa" || status === "Tidak Aktif" ? "bg-red-500" : status === "Hampir Berakhir" ? "bg-amber-500" : "bg-emerald-500";
             const code = account.id.replace("acc", "ACC");
             const detailText = [
               productLabel(account),
@@ -246,7 +242,7 @@ export default function ResellerManageAccountPage() {
                   <div>
                     <div className="flex items-center justify-between gap-3">
                       <span className="font-medium text-slate-700">{durationLabel(account)}</span>
-                      <span className={status === "Expired" ? "font-semibold text-red-600" : status === "Expiring" ? "font-semibold text-amber-600" : "font-semibold text-emerald-600"}>{remainingShort(account)}</span>
+                      <span className={status === "Kedaluwarsa" ? "font-semibold text-red-600" : status === "Hampir Berakhir" ? "font-semibold text-amber-600" : "font-semibold text-emerald-600"}>{remainingShort(account)}</span>
                     </div>
                     <span className="mt-2 block h-1.5 overflow-hidden rounded-full bg-white">
                       <span className={`block h-full rounded-full ${barColor}`} style={{ width: `${remainingPercent(account)}%` }} />
@@ -292,7 +288,7 @@ export default function ResellerManageAccountPage() {
                 {rows.map((account) => {
                   const copyFullId = `${account.id}-full`;
                   const status = accountStatus(account);
-                  const barColor = status === "Expired" || status === "Replaced" || status === "Disabled" ? "bg-red-500" : status === "Expiring" ? "bg-amber-500" : "bg-emerald-500";
+                  const barColor = status === "Kedaluwarsa" || status === "Tidak Aktif" ? "bg-red-500" : status === "Hampir Berakhir" ? "bg-amber-500" : "bg-emerald-500";
                   const code = account.id.replace("acc", "ACC");
                   return (
                     <tr key={account.id} className="border-t border-slate-50 text-slate-700">
@@ -335,7 +331,7 @@ export default function ResellerManageAccountPage() {
                           <span className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-100">
                             <span className={`block h-full rounded-full ${barColor}`} style={{ width: `${remainingPercent(account)}%` }} />
                           </span>
-                          <span className={status === "Expired" ? "font-semibold text-red-600" : status === "Expiring" ? "font-semibold text-amber-600" : "font-semibold text-emerald-600"}>{remainingShort(account)}</span>
+                          <span className={status === "Kedaluwarsa" ? "font-semibold text-red-600" : status === "Hampir Berakhir" ? "font-semibold text-amber-600" : "font-semibold text-emerald-600"}>{remainingShort(account)}</span>
                         </div>
                       </td>
                       <td className="px-4 py-4">
@@ -383,4 +379,3 @@ export default function ResellerManageAccountPage() {
     </DashboardLayout>
   );
 }
-

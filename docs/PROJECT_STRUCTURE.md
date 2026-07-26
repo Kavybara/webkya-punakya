@@ -1,6 +1,6 @@
 # Kavya Project Structure
 
-Dokumen ini menjelaskan struktur folder Kavya saat ini. Jangan paksa balik ke struktur zip lama karena project sekarang sudah gabungan dashboard, bot WhatsApp, plugin, script deploy, dan runtime Pterodactyl.
+Dokumen ini menjelaskan struktur folder Kavya saat ini. Project menggabungkan dashboard, bot WhatsApp, plugin, script deploy, dan runtime server.
 
 ## Folder utama
 
@@ -14,10 +14,9 @@ project-root/
 |-- database/             # Data legacy/reference autoresbot lama
 |-- lib/                  # Library legacy autoresbot lama
 |-- scripts/
+|   |-- startup/          # Launcher utama VPS/Linux
 |   |-- deploy/           # Script import/deploy
 |   `-- maintenance/      # Backup, cleanup, repair auth
-|-- pterodactyl/
-|   `-- startup/          # Launcher utama untuk VPS/Pterodactyl
 |-- docs/                 # Dokumentasi teknis
 |-- release/
 |   `-- backups/          # Arsip dan patch lama, bukan runtime aktif
@@ -44,7 +43,7 @@ apps/bot/plugins/legacy-handlers.js  # Loader plugin legacy yang masih diperluka
 
 plugins/kavya/                       # Plugin autoresbot lama yang masih dibaca loader legacy
 packages/                            # Helper/shared module lintas dashboard dan bot
-pterodactyl/startup/ptero-start.mjs  # Launcher production/VPS
+scripts/startup/kavya-start.mjs       # Launcher production/VPS
 ```
 
 ## Alur web ke bot
@@ -59,8 +58,6 @@ Pesan WhatsApp masuk ke `apps/bot/handle/messages.js` dulu. Di sini pesan dicek 
 
 - `package.json` dan `package-lock.json`: perintah build/start utama.
 - `.env` dan `.env.example`: konfigurasi lokal dan contoh konfigurasi.
-- `ptero-start.mjs`: wrapper kompatibilitas yang import launcher di `pterodactyl/startup/ptero-start.mjs`.
-- `kavya-pterodactyl-linux-latest.tar.gz`: arsip terbaru yang biasa diupload ke VPS.
 - `README.md`: ringkasan cepat project.
 
 ## File legacy yang belum dipindah
@@ -72,4 +69,4 @@ File `autoresbot.js`, `index.js`, `config.js`, `strings.js`, `database/`, dan `l
 - Arsip lama masuk ke `release/backups/`.
 - Screenshot audit masuk ke `outputs/audit/`.
 - Log sementara masuk ke `tmp/logs/`.
-- Jangan pindahkan `apps/`, `plugins/`, `packages/`, `scripts/`, `pterodactyl/`, `.env`, atau database runtime tanpa update path dan test.
+- Jangan pindahkan `apps/`, `plugins/`, `packages/`, `scripts/`, `.env`, atau database runtime tanpa update path dan test.

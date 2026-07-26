@@ -1,5 +1,42 @@
 import crypto from "node:crypto";
 import {
+  CANVA_POOL_HEADERS,
+  CANVA_SHEET_NAME,
+  CANVA_USAGE_HEADERS,
+  DISNEY_HEADERS,
+  LINK_POOL_HEADERS,
+  LINK_USAGE_HEADERS,
+  ORDER_HISTORY_HEADERS,
+  ORDER_HISTORY_SHEET_NAME,
+  SHEET_HEADERS,
+  SIMPLE_ACCOUNT_HEADERS,
+  UNIVERSAL_ACCOUNT_HEADERS,
+  VIDIO_SHEET_NAME,
+  VIU_SHEET_NAME,
+} from "./google-sheets/schema.js";
+import {
+  classifySheetPushResult,
+  findLinkedSheetStock,
+  isDeliverableManagedAccount,
+  isSheetBackedRecord,
+} from "./services/sheet-sync-status-service.js";
+import { createGoogleSheetsTemplateService } from "./google-sheets/template-service.js";
+import {
+  accountConditionAvailability,
+  findStockMetadataColumns,
+  normalizeAccountCondition,
+} from "./google-sheets/account-condition.js";
+import { checkoutFieldsFromHeaders } from "./services/checkout-fields-service.js";
+import { planResellerSheetSync } from "./services/reseller-sheet-sync-service.js";
+
+export {
+  CANVA_USAGE_HEADERS,
+  DISNEY_HEADERS,
+  SHEET_HEADERS,
+  SIMPLE_ACCOUNT_HEADERS,
+  UNIVERSAL_ACCOUNT_HEADERS,
+} from "./google-sheets/schema.js";
+import {
   canvaPool,
   canvaUsedCount,
   isCanvaProduct,
@@ -17,7 +54,7 @@ import {
 export const NETFLIX_SHEETS_SNK = `⋆°࿔ ៸ NETFLIX 1P1U 1 BULAN 𝜗𝜚⋆
 ⚠︎ JIKA ADA NOTIF HARGA BARU NETFLIX, TOLONG DI ACCEPT DAN JANGAN DITOLAK ⚠
 
-𝙨𝙮𝙖𝙧𝙖𝙩 & 𝙠𝙚𝙩𝙚𝙣𝙩𝙪𝙖𝙣 : 
+𝙨𝙮𝙖𝙧𝙖𝙩 & 𝙠𝙚𝙩𝙚𝙣𝙩𝙪𝙖𝙣 :
 യ WAJIB SETOR FORM DAN SS LOGIN MAX 1X24 JAM
 യ 25-30 Hari terhitung 1 bulan
 യ Hanya boleh login dalam 1 device.
@@ -29,8 +66,8 @@ export const NETFLIX_SHEETS_SNK = `⋆°࿔ ៸ NETFLIX 1P1U 1 BULAN 𝜗𝜚⋆
 ➝ Bersihkan data/memori/chace aplikasi netflix
 ➝ Ganti jaringan wifi/data/hotspot
 ➝ Hapus data aplikasi Netflix lalu reinstall
-➝ Gunakan netflix.com/clearcookies 
-➝ Coba login di device lain 
+➝ Gunakan netflix.com/clearcookies
+➝ Coba login di device lain
 
 email ::
 pass ::
@@ -40,30 +77,6 @@ profile ::
 
 — thank u and have a great day(◍^ᴗ^◍)♡`;
 
-const SHEET_HEADERS = ["ACCOUNT", "Nama profil", "TANGGAL", "DURASI", "EXPIRED", "DEVICE", "SELLER", "NOMOR WA", "PIN", "", "CATATAN", ""];
-const SIMPLE_ACCOUNT_HEADERS = ["ACCOUNT", "PASSWORD", "TANGGAL", "DURASI", "EXPIRED", "SELLER", "NOMOR WA", "", "CATATAN", ""];
-const UNIVERSAL_ACCOUNT_HEADERS = ["ACCOUNT", "TANGGAL", "DURASI", "EXPIRED", "SELLER", "NOMOR WA", "", "CATATAN", ""];
-const DISNEY_HEADERS = ["Number", "OTP Email", "Nama profil", "TANGGAL", "DURASI", "EXPIRED", "DEVICE", "SELLER", "NOMOR WA", "ORDER ID", "CATATAN", "STOCK ID"];
-const CANVA_SHEET_NAME = "Canva";
-const VIU_SHEET_NAME = "Viu";
-const VIDIO_SHEET_NAME = "Vidio";
-const ORDER_HISTORY_SHEET_NAME = "Order History";
-const ORDER_HISTORY_HEADERS = [
-  "WAKTU ORDER",
-  "RESELLER",
-  "CUSTOMER",
-  "PRODUK",
-  "VARIAN",
-  "DURASI",
-  "ACCOUNT",
-  "PROFIL",
-  "EXPIRED",
-  "SHEET",
-  "ROW",
-  "ORDER ID",
-  "STOCK ID",
-  "CATATAN",
-];
 
 function isSmokeTestOrder(order = {}) {
   return Boolean(order.isSmokeTest || String(order.source || "").toLowerCase() === "owner_smoke_test");
@@ -97,10 +110,6 @@ function isDisneySheetStock(stock = {}, account = {}) {
   ].map(normalizePoolMarker).join(" ");
   return text.includes("DISNEY");
 }
-const CANVA_POOL_HEADERS = ["CANVA LINK", "KUOTA", "TERPAKAI", "SISA", "STATUS", "CATATAN"];
-const CANVA_USAGE_HEADERS = ["EMAIL CUSTOMER", "RESELLER", "NOMOR WA", "TANGGAL", "DURASI", "EXPIRED", "STATUS", "ORDER ID"];
-const LINK_POOL_HEADERS = ["LINK", "KUOTA", "TERPAKAI", "SISA", "STATUS", "CATATAN", "STOCK ID"];
-const LINK_USAGE_HEADERS = ["EMAIL CUSTOMER", "RESELLER", "NOMOR WA", "TANGGAL BELI", "DURASI", "EXPIRED", "ORDER ID", "STOCK ID"];
 const DATA_RESELLER_SHEET_NAMES = ["data reseller", "reseller data", "resellers", "reseller"];
 const CHECKOUT_EMAIL_HEADERS = ["EMAIL CUSTOMER", "EMAIL CUST", "CUSTOMER EMAIL", "EMAIL BUYER", "EMAIL CUSTOMER CANVA"];
 const CHECKOUT_DEVICE_HEADERS = ["DEVICE", "PERANGKAT", "DEVICE CUSTOMER", "CUSTOMER DEVICE"];
@@ -428,8 +437,8 @@ function resellerForSheetRow(db, row) {
 
 function canonicalSheetResellerName(identity = {}, fallback = "") {
   return String(
-    identity?.reseller?.name
-    || identity?.reseller?.username
+    identity?.reseller?.username
+    || identity?.reseller?.name
     || identity?.name
     || fallback
     || "",
@@ -475,6 +484,115 @@ async function ensureSheetResellerLookup(db, options = {}) {
     db.settings = db.settings || {};
     db.settings.googleSheetsResellerSync = { ok: false, rows: 0, aliases: 0, warnings: [warning], syncedAt: new Date().toISOString() };
     return { ok: false, rows: 0, aliases: 0, warnings: [warning] };
+  }
+}
+
+export async function syncDataResellersToGoogleSheets(db, options = {}) {
+  if (!googleSheetsConfigured(db)) {
+    return { ok: false, skipped: true, reason: "google_sheets_not_configured", checked: 0, added: 0, updated: 0, skippedCount: 0, conflicts: 0 };
+  }
+  const meta = await getSpreadsheetMeta(db);
+  const sheetName = (meta.sheets || [])
+    .map((item) => normalize(item.properties?.title))
+    .find((name) => dataResellerSheetNameMatches(name));
+  if (!sheetName) {
+    return { ok: false, skipped: true, reason: "data_reseller_sheet_not_found", checked: 0, added: 0, updated: 0, skippedCount: 0, conflicts: 0 };
+  }
+
+  const values = await readSheetValuesByName(db, sheetName);
+  const headerIndex = values.findIndex((row) => {
+    const columns = dataResellerColumns(row || []);
+    return columns.seller >= 0 && columns.whatsapp >= 0;
+  });
+  if (headerIndex < 0) {
+    return { ok: false, skipped: true, reason: "data_reseller_header_not_found", checked: 0, added: 0, updated: 0, skippedCount: 0, conflicts: 0 };
+  }
+  const columns = dataResellerColumns(values[headerIndex] || []);
+  if (columns.seller !== 0 || columns.whatsapp !== 1) {
+    return { ok: false, skipped: true, reason: "data_reseller_columns_must_be_a_b", checked: 0, added: 0, updated: 0, skippedCount: 0, conflicts: 1 };
+  }
+
+  const rows = [];
+  for (let rowIndex = headerIndex + 1; rowIndex < values.length; rowIndex += 1) {
+    const row = values[rowIndex] || [];
+    const seller = readColumn(row, columns.seller);
+    const whatsapp = readColumn(row, columns.whatsapp);
+    if (!seller && !whatsapp) continue;
+    rows.push({ rowNumber: rowIndex + 1, seller, whatsapp });
+  }
+  const requestedIds = new Set((options.resellerIds || []).map((value) => String(value || "").trim()).filter(Boolean));
+  const resellers = (db.resellers || []).filter((reseller) => !requestedIds.size || requestedIds.has(String(reseller.id || "").trim()));
+  const plan = planResellerSheetSync(resellers, rows);
+  const data = [];
+  for (const item of plan.updated) {
+    data.push({ range: cellRange(sheetName, item.rowNumber, columns.whatsapp), values: [[item.whatsapp]] });
+  }
+  let appendRow = Math.max(values.length + 1, headerIndex + 2);
+  for (const item of plan.added) {
+    data.push({
+      range: `${quoteSheetName(sheetName)}!A${appendRow}:B${appendRow}`,
+      values: [[item.username, item.whatsapp]],
+    });
+    item.rowNumber = appendRow;
+    appendRow += 1;
+  }
+  if (data.length) await updateRawValues(db, data);
+
+  const syncedIds = new Set([...plan.added, ...plan.updated, ...plan.skipped.filter((item) => item.type === "unchanged")].map((item) => item.resellerId));
+  const conflictIds = new Set(plan.conflicts.map((item) => item.resellerId).filter(Boolean));
+  const attemptedIds = new Set(resellers.map((item) => item.id));
+  const syncedAt = new Date().toISOString();
+  for (const reseller of db.resellers || []) {
+    if (!attemptedIds.has(reseller.id)) continue;
+    reseller.googleSheetsResellerSyncStatus = syncedIds.has(reseller.id) ? "synced" : conflictIds.has(reseller.id) ? "conflict" : "pending";
+    reseller.googleSheetsResellerSyncedAt = syncedIds.has(reseller.id) ? syncedAt : reseller.googleSheetsResellerSyncedAt || "";
+    reseller.googleSheetsResellerSyncError = syncedIds.has(reseller.id) ? "" : conflictIds.has(reseller.id) ? "Konflik data reseller perlu diperiksa owner." : "Data reseller belum dapat disinkronkan.";
+  }
+  await syncSheetResellerLookup(db, {});
+  const result = {
+    ok: plan.conflicts.length === 0,
+    sheetName,
+    checked: plan.checked,
+    added: plan.added.length,
+    updated: plan.updated.length,
+    skippedCount: plan.skipped.length,
+    conflicts: plan.conflicts.length,
+    duplicateRows: plan.conflicts.filter((item) => item.type === "duplicate_sheet_username").length,
+    details: {
+      added: plan.added.map(({ username, rowNumber }) => ({ username, rowNumber })),
+      updated: plan.updated.map(({ username, rowNumber }) => ({ username, rowNumber })),
+      skipped: plan.skipped.map(({ username, type, rowNumber }) => ({ username, type, rowNumber })),
+      conflicts: plan.conflicts.map(({ whatsapp, ...item }) => item),
+    },
+    syncedAt,
+  };
+  db.settings = db.settings || {};
+  db.settings.googleSheetsResellerBackfill = result;
+  return result;
+}
+
+export async function syncDataResellerToGoogleSheetsSafely(db, resellerId) {
+  try {
+    const result = await syncDataResellersToGoogleSheets(db, { resellerIds: [resellerId] });
+    if (!result.ok) {
+      const reseller = (db.resellers || []).find((item) => item.id === resellerId);
+      if (reseller) {
+        reseller.googleSheetsResellerSyncStatus = result.conflicts ? "conflict" : "pending";
+        reseller.googleSheetsResellerSyncError = result.conflicts
+          ? "Konflik data reseller perlu diperiksa owner."
+          : "Sinkronisasi Google Sheets tertunda.";
+        reseller.googleSheetsResellerSyncAttemptedAt = new Date().toISOString();
+      }
+    }
+    return result;
+  } catch {
+    const reseller = (db.resellers || []).find((item) => item.id === resellerId);
+    if (reseller) {
+      reseller.googleSheetsResellerSyncStatus = "pending";
+      reseller.googleSheetsResellerSyncError = "Sinkronisasi Google Sheets tertunda.";
+      reseller.googleSheetsResellerSyncAttemptedAt = new Date().toISOString();
+    }
+    return { ok: false, pending: true, reason: "google_sheets_write_failed" };
   }
 }
 
@@ -930,6 +1048,18 @@ async function updateValues(db, data) {
     method: "POST",
     body: JSON.stringify({
       valueInputOption: "USER_ENTERED",
+      data,
+    }),
+  });
+}
+
+async function updateRawValues(db, data) {
+  const { spreadsheetId } = googleSheetsSettings(db);
+  await ensureValueRangesFit(db, data);
+  return sheetsFetch(db, `${spreadsheetId}/values:batchUpdate`, {
+    method: "POST",
+    body: JSON.stringify({
+      valueInputOption: "RAW",
       data,
     }),
   });
@@ -1539,8 +1669,9 @@ function inferDynamicPoolSchema(header = [], startColumn = 0, endColumn = header
 }
 
 function dynamicPoolColumns(header = [], startColumn = 0, endColumn = header.length, schema = "universal") {
+  const metadata = findStockMetadataColumns(header, startColumn, endColumn);
   return {
-    account: dynamicHeaderIndex(header, startColumn, endColumn, ["ACCOUNT", "AKUN", "EMAIL", "EMAIL AKUN"]),
+    account: dynamicHeaderIndex(header, startColumn, endColumn, ["ACCOUNT", "ACCOUNT & PASSWORD", "ACCOUNT PASSWORD", "AKUN", "EMAIL", "EMAIL AKUN"]),
     loginPhone: dynamicHeaderIndex(header, startColumn, endColumn, ["NUMBER", "NOMOR", "NOMOR LOGIN", "NO HP", "NOMOR HP", "PHONE", "PHONE NUMBER"]),
     otpEmail: dynamicHeaderIndex(header, startColumn, endColumn, ["OTP EMAIL", "EMAIL OTP", "EMAIL LOGIN", "EMAIL"]),
     password: schema === "split" ? dynamicHeaderIndex(header, startColumn, endColumn, ["PASSWORD", "PASS", "PW"]) : -1,
@@ -1549,11 +1680,14 @@ function dynamicPoolColumns(header = [], startColumn = 0, endColumn = header.len
     duration: dynamicHeaderIndex(header, startColumn, endColumn, ["DURASI", "DURATION"]),
     expiresAt: dynamicHeaderIndex(header, startColumn, endColumn, ["EXPIRED", "EXPIRY", "EXPIRES", "BERAKHIR"]),
     device: dynamicHeaderIndex(header, startColumn, endColumn, CHECKOUT_DEVICE_HEADERS),
+    customerEmail: dynamicHeaderIndex(header, startColumn, endColumn, CHECKOUT_EMAIL_HEADERS),
+    customerPlan: dynamicHeaderIndex(header, startColumn, endColumn, ["PLAN", "PAKET CUSTOMER", "CUSTOMER PLAN"]),
     seller: dynamicHeaderIndex(header, startColumn, endColumn, ["SELLER", "RESELLER", "RESS"]),
     whatsapp: dynamicHeaderIndex(header, startColumn, endColumn, ["NOMOR WA", "NO WA", "WHATSAPP", "WA"]),
     pin: schema === "profile" ? dynamicHeaderIndex(header, startColumn, endColumn, ["PIN", "PROFILE PIN"]) : -1,
-    orderId: dynamicHeaderIndex(header, startColumn, endColumn, ["ORDER ID", "ORDER", "ID ORDER"]),
-    notes: dynamicHeaderIndex(header, startColumn, endColumn, ["CATATAN", "NOTE", "NOTES"]),
+    orderId: metadata.orderId,
+    accountCondition: metadata.accountCondition,
+    notes: metadata.notes,
     stockId: dynamicHeaderIndex(header, startColumn, endColumn, ["STOCK ID", "ID STOK", "STOK ID"]),
   };
 }
@@ -1586,6 +1720,10 @@ function checkoutRequirementsFromSheetHeader(header = [], startColumn = 0, endCo
   return null;
 }
 
+function checkoutFieldsFromSheetHeader(header = [], startColumn = 0, endColumn = header.length) {
+  return checkoutFieldsFromHeaders(header.slice(startColumn, endColumn));
+}
+
 function checkoutRequirementsForSheetPool(values = [], pool = {}, allMarkers = [], pools = Object.values(POOLS)) {
   const marker = pool.rowIndex !== undefined
     ? { rowIndex: pool.rowIndex, columnIndex: Number(pool.markerColumn ?? pool.startColumn ?? 0) }
@@ -1601,12 +1739,31 @@ function checkoutRequirementsForSheetPool(values = [], pool = {}, allMarkers = [
   return checkoutRequirementsFromSheetHeader(header, marker.columnIndex, nextStart);
 }
 
-function applySheetCheckoutRequirements(target = {}, requirements = null) {
+function checkoutFieldsForSheetPool(values = [], pool = {}, allMarkers = [], pools = Object.values(POOLS)) {
+  const marker = pool.rowIndex !== undefined
+    ? { rowIndex: pool.rowIndex, columnIndex: Number(pool.markerColumn ?? pool.startColumn ?? 0) }
+    : (findPoolMarkers(values, pools)[pool.key] || { rowIndex: 10, columnIndex: pool.startColumn });
+  const headerRowIndex = marker.rowIndex + 1;
+  const header = values[headerRowIndex] || [];
+  const markers = allMarkers.length ? allMarkers : Object.values(findPoolMarkers(values, pools));
+  const nextStart = markers
+    .filter((item) => item.rowIndex === marker.rowIndex && item.columnIndex > marker.columnIndex)
+    .map((item) => item.columnIndex)
+    .sort((a, b) => a - b)[0] || header.length;
+  return checkoutFieldsFromSheetHeader(header, marker.columnIndex, nextStart);
+}
+
+function applySheetCheckoutRequirements(target = {}, requirements = null, fields = null) {
   if (requirements) {
     target.sheetCheckoutRequirements = requirements;
-    return;
+  } else {
+    delete target.sheetCheckoutRequirements;
   }
-  delete target.sheetCheckoutRequirements;
+  if (Array.isArray(fields) && fields.length) {
+    target.sheetCheckoutFields = fields;
+  } else {
+    delete target.sheetCheckoutFields;
+  }
 }
 
 function readColumn(row = [], index = -1) {
@@ -1649,25 +1806,52 @@ function parsePoolRows(values, pool, sheetName = "", pools = Object.values(POOLS
     .map((item) => item.columnIndex)
     .sort((a, b) => a - b)[0] || header.length || marker.columnIndex + poolHeaders(pool).length;
   const requireProfile = options.requireProfile !== false;
-  const splitPassword = poolUsesSplitPassword(pool);
+  const inferredSchema = inferDynamicPoolSchema(header, marker.columnIndex, nextStart);
+  const splitPassword = inferredSchema === "split" || poolUsesSplitPassword(pool);
+  const schema = splitPassword ? "split" : requireProfile ? "profile" : inferredSchema;
+  const detectedColumns = dynamicPoolColumns(header, marker.columnIndex, nextStart, schema);
+  const fallbackColumn = (key, offset) => (
+    Number.isInteger(detectedColumns[key]) && detectedColumns[key] >= marker.columnIndex
+      ? detectedColumns[key]
+      : marker.columnIndex + offset
+  );
+  const columns = {
+    ...detectedColumns,
+    account: fallbackColumn("account", 0),
+    password: splitPassword ? fallbackColumn("password", 1) : -1,
+    profile: requireProfile ? fallbackColumn("profile", 1) : detectedColumns.profile,
+    date: fallbackColumn("date", 2),
+    duration: fallbackColumn("duration", 3),
+    expiresAt: fallbackColumn("expiresAt", 4),
+    device: splitPassword ? detectedColumns.device : fallbackColumn("device", 5),
+    seller: fallbackColumn("seller", splitPassword ? 5 : 6),
+    whatsapp: fallbackColumn("whatsapp", splitPassword ? 6 : 7),
+    pin: requireProfile ? fallbackColumn("pin", 8) : detectedColumns.pin,
+    orderId: fallbackColumn("orderId", splitPassword ? 7 : 9),
+    notes: fallbackColumn("notes", splitPassword ? 8 : 10),
+    stockId: Number.isInteger(detectedColumns.stockId) && detectedColumns.stockId >= marker.columnIndex
+      ? detectedColumns.stockId
+      : -1,
+  };
   const checkoutRequirements = checkoutRequirementsFromSheetHeader(header, marker.columnIndex, nextStart);
+  const checkoutFields = checkoutFieldsFromSheetHeader(header, marker.columnIndex, nextStart);
   const rows = [];
   for (let rowIndex = dataStartIndex; rowIndex < values.length; rowIndex += 1) {
     const row = values[rowIndex] || [];
-    const accountCell = readCellBounded(row, marker.columnIndex, 0, nextStart);
-    const profile = splitPassword ? "" : readCellBounded(row, marker.columnIndex, 1, nextStart);
-    const pin = splitPassword ? "" : readCellBounded(row, marker.columnIndex, 8, nextStart);
-    const passwordCell = splitPassword ? readCellBounded(row, marker.columnIndex, 1, nextStart) : "";
+    const accountCell = readColumn(row, columns.account);
+    const profile = splitPassword ? "" : readColumn(row, columns.profile);
+    const pin = splitPassword ? "" : readColumn(row, columns.pin);
+    const passwordCell = splitPassword ? readColumn(row, columns.password) : "";
     if (!accountCell && !passwordCell && !profile && !pin) continue;
     const parsed = parseAccountCell(accountCell);
     const email = parsed.email;
     const password = splitPassword ? passwordCell || parsed.password : parsed.password;
     if (!email || (requireProfile && !profile)) continue;
-    const dateText = readCellBounded(row, marker.columnIndex, 2, nextStart);
-    const durationText = readCellBounded(row, marker.columnIndex, 3, nextStart);
+    const dateText = readColumn(row, columns.date);
+    const durationText = readColumn(row, columns.duration);
     const durationDays = parseDurationDays(durationText, dateText);
     const purchasedAt = parseDateText(dateText);
-    const sheetExpiresAt = readCellBounded(row, marker.columnIndex, 4, nextStart);
+    const sheetExpiresAt = readColumn(row, columns.expiresAt);
     const expiresAt = preferredExpiryText(purchasedAt, durationText, durationDays, sheetExpiresAt);
     const sheetStockKey = `${pool.key}:${rowIndex + 1}:${email.toLowerCase()}:${profile.toLowerCase()}`;
     rows.push({
@@ -1676,7 +1860,7 @@ function parsePoolRows(values, pool, sheetName = "", pools = Object.values(POOLS
       rowNumber: rowIndex + 1,
       startColumn: marker.columnIndex,
       sheetStockKey,
-      stockId: readCellBounded(row, marker.columnIndex, splitPassword ? 9 : 11, nextStart) || `stk-sheet-${hashKey(sheetStockKey)}`,
+      stockId: readColumn(row, columns.stockId) || `stk-sheet-${hashKey(sheetStockKey)}`,
       email,
       password,
       profile,
@@ -1686,12 +1870,14 @@ function parsePoolRows(values, pool, sheetName = "", pools = Object.values(POOLS
       durationText,
       durationDays,
       expiresAt,
-      device: splitPassword ? "" : readCellBounded(row, marker.columnIndex, 5, nextStart),
-      seller: readCellBounded(row, marker.columnIndex, splitPassword ? 5 : 6, nextStart),
-      whatsapp: normalizeWhatsapp(readCellBounded(row, marker.columnIndex, splitPassword ? 6 : 7, nextStart)),
-      orderId: readCellBounded(row, marker.columnIndex, splitPassword ? 7 : 9, nextStart),
-      notes: readCellBounded(row, marker.columnIndex, splitPassword ? 8 : 10, nextStart),
+      device: readColumn(row, columns.device),
+      seller: readColumn(row, columns.seller),
+      whatsapp: normalizeWhatsapp(readColumn(row, columns.whatsapp)),
+      orderId: readColumn(row, columns.orderId),
+      accountCondition: readColumn(row, columns.accountCondition),
+      notes: readColumn(row, columns.notes),
       checkoutRequirements,
+      checkoutFields,
     });
   }
   return rows;
@@ -1712,6 +1898,7 @@ function parseDynamicPoolRows(values, pool, allMarkers = []) {
   const schema = poolSchema(pool);
   const columns = dynamicPoolColumns(header, marker.columnIndex, nextStart, schema);
   const checkoutRequirements = checkoutRequirementsFromSheetHeader(header, marker.columnIndex, nextStart);
+  const checkoutFields = checkoutFieldsFromSheetHeader(header, marker.columnIndex, nextStart);
   const rows = [];
   if (columns.account < 0 && columns.loginPhone < 0 && columns.otpEmail < 0) return rows;
   for (let rowIndex = dataStartIndex; rowIndex < values.length; rowIndex += 1) {
@@ -1760,8 +1947,10 @@ function parseDynamicPoolRows(values, pool, allMarkers = []) {
       seller: readColumn(row, columns.seller),
       whatsapp: normalizeWhatsapp(readColumn(row, columns.whatsapp)),
       orderId: readColumn(row, columns.orderId),
+      accountCondition: readColumn(row, columns.accountCondition),
       notes: readColumn(row, columns.notes),
       checkoutRequirements,
+      checkoutFields,
     });
   }
   return rows;
@@ -1882,6 +2071,9 @@ function upsertManagedFromSheet(db, product, variant, stock, row) {
     sheetResellerConflict: Boolean(identity.conflict),
     profile: row.profile,
     pin: row.pin,
+    accountCondition: stock.accountCondition || normalizeAccountCondition(row.accountCondition).value,
+    accountConditionRaw: stock.accountConditionRaw || "",
+    accountConditionKnown: stock.accountConditionKnown !== false,
     device: row.device || account.device || "",
     sheetSource: "google_sheets",
     sheetStockKey: row.sheetStockKey,
@@ -2247,19 +2439,102 @@ function stockMatchesSheetRowIdentity(stock = {}, row = {}) {
 
 function isLocalSheetStockLocked(db, stock = null) {
   if (!stock || !["sold", "reserved"].includes(stock.status)) return false;
+  if (stock.status === "sold") {
+    const stockId = String(stock.id || "").trim();
+    if (!stockId) return false;
+    const order = (db.orders || []).find((item) => (
+      (item.deliveredStockIds || []).some((id) => String(id || "").trim() === stockId)
+      && !["cancelled", "expired"].includes(normalizeLower(item.orderStatus || item.qrisStatus || ""))
+    ));
+    if (!order) return false;
+    // A fulfilled assignment remains locked until its Sheet commit succeeds.
+    // Otherwise a temporary Sheets error can reopen the same stock and allow
+    // another order to receive it.
+    return normalizeLower(order.googleSheetsSyncStatus || "") !== "synced";
+  }
   if (stock.reservedFor) {
     const order = (db.orders || []).find((item) => item.id === stock.reservedFor || item.paymentRef === stock.reservedFor);
     if (!order || ["expired", "cancelled", "completed"].includes(String(order.orderStatus || "").toLowerCase())) return false;
-    if (["paid", "success", "settlement", "expired", "cancelled"].includes(String(order.qrisStatus || "").toLowerCase())) return false;
+    const qrisStatus = String(order.qrisStatus || "").toLowerCase();
+    if (["expired", "cancelled"].includes(qrisStatus)) return false;
+    if (["paid", "success", "settlement", "manual"].includes(qrisStatus)) return true;
     const expiresAt = parseDateText(order.paymentExpiresAt || "");
     return Boolean(expiresAt && expiresAt.getTime() > Date.now());
   }
   return false;
 }
 
+export function shouldPreserveSheetStockReservation(db, stock = null, sheetSold = false) {
+  return !sheetSold && isLocalSheetStockLocked(db, stock);
+}
+
+function sheetAssignmentFingerprint(row = {}) {
+  if (String(row.orderId || "").trim()) return "";
+  const parts = [
+    row.seller,
+    row.profile,
+    row.pin,
+    row.purchasedAt || row.dateText,
+    row.durationText || row.durationDays,
+    row.expiresAt,
+    row.device,
+  ].map((value) => normalizeLower(value));
+  if (parts.some((value) => !value)) return "";
+  return parts.join("::");
+}
+
+export function isCopiedSheetAssignment(row = {}, original = {}) {
+  const rowEmail = normalizeLower(row.email || row.loginPhone || "");
+  const originalEmail = normalizeLower(original.email || original.loginPhone || "");
+  if (!rowEmail || !originalEmail || rowEmail === originalEmail) return false;
+  const fingerprint = sheetAssignmentFingerprint(row);
+  return Boolean(fingerprint && fingerprint === sheetAssignmentFingerprint(original));
+}
+
+function availableSheetRow(row = {}) {
+  return {
+    ...row,
+    purchasedAt: null,
+    dateText: "",
+    durationText: "",
+    durationDays: 0,
+    expiresAt: "",
+    device: "",
+    seller: "",
+    whatsapp: "",
+    orderId: "",
+  };
+}
+
+export function syncManagedAccountCondition(db, stock = {}, condition = {}) {
+  let updated = 0;
+  for (const account of db.managedAccounts || []) {
+    const linked = String(account.stockId || "").trim() === String(stock.id || "").trim()
+      || (
+        stock.sheetStockKey
+        && String(account.sheetStockKey || "").trim() === String(stock.sheetStockKey || "").trim()
+      );
+    if (!linked || account.hidden || account.returnedToStockAt) continue;
+    const nextCondition = condition.value || "NORMAL";
+    const nextRaw = condition.empty ? "" : condition.raw || nextCondition;
+    const nextKnown = condition.known !== false;
+    if (
+      account.accountCondition === nextCondition
+      && account.accountConditionRaw === nextRaw
+      && account.accountConditionKnown === nextKnown
+    ) continue;
+    account.accountCondition = nextCondition;
+    account.accountConditionRaw = nextRaw;
+    account.accountConditionKnown = nextKnown;
+    account.googleSheetsSyncedAt = stock.sheetLastSyncedAt || account.googleSheetsSyncedAt || "";
+    updated += 1;
+  }
+  return updated;
+}
+
 function upsertSheetStock(db, product, variant, row, config = {}) {
   db.stock = db.stock || [];
-  applySheetCheckoutRequirements(variant, row.checkoutRequirements || null);
+  applySheetCheckoutRequirements(variant, row.checkoutRequirements || null, row.checkoutFields || null);
   const identity = sheetResellerIdentity(db, row);
   const canonicalReseller = canonicalSheetResellerName(identity, row.seller || row.whatsapp || "");
   const canonicalWhatsapp = identity.whatsapp || "";
@@ -2269,21 +2544,42 @@ function upsertSheetStock(db, product, variant, row, config = {}) {
     || db.stock.find((item) => item.id === row.stockId)
     || legacySheetRowMatch(db.stock, row);
   const stock = existing || { id: row.stockId };
-  // SELLER is the authoritative assignment switch. Dates and phone numbers are
-  // details of an assignment, not proof that one still exists.
-  const sheetSold = Boolean(String(row.seller || "").trim());
-  const sheetCleared = !sheetSold;
-  const localLocked = !sheetSold && !sheetCleared && isLocalSheetStockLocked(db, existing);
-  const effectiveNotes = localLocked ? (existing?.notes || "") : (sheetSold ? (row.notes || "") : "");
-  const effectiveDevice = localLocked ? (existing?.device || "") : (sheetSold ? (row.device || "") : "");
-  const effectiveResellerId = localLocked ? (existing?.resellerId || "") : (sheetSold ? (identity.reseller?.id || "") : "");
-  const effectiveReseller = localLocked ? (existing?.reseller || "") : (sheetSold ? canonicalReseller : "");
-  const effectiveBuyer = localLocked ? (existing?.buyer || "") : (sheetSold ? (row.seller || identity.whatsapp || "") : "");
-  const effectiveWhatsapp = localLocked ? (existing?.whatsapp || "") : (sheetSold ? canonicalWhatsapp : "");
-  const effectiveExpiresAt = localLocked ? (existing?.expiresAt || "") : (sheetSold ? (row.expiresAt || "") : "");
+  // SELLER remains the assignment switch. KONDISI AKUN can block an unassigned
+  // row without inventing an assignment or changing its Sheet-owned value.
+  const condition = normalizeAccountCondition(row.accountCondition);
+  const availability = accountConditionAvailability({ seller: row.seller, condition });
+  const sheetSold = availability.sold;
+  const localLocked = availability.available && shouldPreserveSheetStockReservation(db, existing, sheetSold);
+  const preserveAssignment = sheetSold || availability.blocked;
+  const effectiveNotes = localLocked
+    ? (existing?.notes || "")
+    : preserveAssignment ? (row.notes || existing?.notes || "") : "";
+  const effectiveDevice = localLocked
+    ? (existing?.device || "")
+    : preserveAssignment ? (row.device || existing?.device || "") : "";
+  const effectiveResellerId = localLocked
+    ? (existing?.resellerId || "")
+    : sheetSold ? (identity.reseller?.id || "") : (existing?.resellerId || "");
+  const effectiveReseller = localLocked
+    ? (existing?.reseller || "")
+    : sheetSold ? canonicalReseller : (existing?.reseller || "");
+  const effectiveBuyer = localLocked
+    ? (existing?.buyer || "")
+    : sheetSold ? (row.seller || identity.whatsapp || "") : (existing?.buyer || "");
+  const effectiveWhatsapp = localLocked
+    ? (existing?.whatsapp || "")
+    : sheetSold ? canonicalWhatsapp : (existing?.whatsapp || "");
+  const effectiveExpiresAt = localLocked
+    ? (existing?.expiresAt || "")
+    : preserveAssignment ? (row.expiresAt || existing?.expiresAt || "") : "";
   const effectiveSheetOrderId = localLocked
     ? (existing?.sheetOrderId || "")
-    : (sheetSold ? (row.orderId || existing?.sheetOrderId || "") : "");
+    : sheetSold
+      ? (row.orderId || existing?.sheetOrderId || "")
+      : availability.blocked
+        ? (row.orderId || existing?.sheetOrderId || "")
+        : "";
+  const preserveSaleMetadata = localLocked || availability.blocked;
   Object.assign(stock, {
     productId: product.id,
     variantId: variant.id,
@@ -2292,7 +2588,11 @@ function upsertSheetStock(db, product, variant, row, config = {}) {
     profile: row.profile,
     pin: row.pin,
     notes: effectiveNotes,
-    status: localLocked ? existing.status : sheetSold ? "sold" : "available",
+    status: sheetSold ? "sold" : availability.blocked ? "blocked" : localLocked ? existing.status : "available",
+    accountCondition: condition.value,
+    accountConditionRaw: condition.empty ? "" : condition.raw || condition.value,
+    accountConditionKnown: condition.known,
+    accountConditionBlocked: availability.blocked,
     sheetSource: "google_sheets",
     sheetStockKey: row.sheetStockKey,
     sheetPool: row.pool,
@@ -2303,12 +2603,12 @@ function upsertSheetStock(db, product, variant, row, config = {}) {
     device: effectiveDevice,
     loginPhone: row.loginPhone || stock.loginPhone || "",
     otpEmail: row.otpEmail || stock.otpEmail || "",
-    soldAt: sheetSold ? row.purchasedAt : localLocked ? existing.soldAt : "",
-    soldDuration: sheetSold ? row.durationText || `${row.durationDays || 30} Hari` : localLocked ? existing.soldDuration : "",
-    soldDurationDays: sheetSold ? row.durationDays || 30 : localLocked ? existing.soldDurationDays : 0,
-    soldExpiresAt: sheetSold ? row.expiresAt : localLocked ? existing.soldExpiresAt : "",
-    soldVariant: sheetSold ? stock.soldVariant || variant.name : localLocked ? existing.soldVariant : "",
-    soldVariantId: sheetSold ? stock.soldVariantId || variant.id : localLocked ? existing.soldVariantId : "",
+    soldAt: sheetSold ? row.purchasedAt : preserveSaleMetadata ? (existing?.soldAt || row.purchasedAt || "") : "",
+    soldDuration: sheetSold ? row.durationText || `${row.durationDays || 30} Hari` : preserveSaleMetadata ? (existing?.soldDuration || row.durationText || "") : "",
+    soldDurationDays: sheetSold ? row.durationDays || 30 : preserveSaleMetadata ? Number(existing?.soldDurationDays || row.durationDays || 0) : 0,
+    soldExpiresAt: sheetSold ? row.expiresAt : preserveSaleMetadata ? (existing?.soldExpiresAt || row.expiresAt || "") : "",
+    soldVariant: sheetSold ? stock.soldVariant || variant.name : preserveSaleMetadata ? (existing?.soldVariant || "") : "",
+    soldVariantId: sheetSold ? stock.soldVariantId || variant.id : preserveSaleMetadata ? (existing?.soldVariantId || "") : "",
     productName: product.name,
     variantName: variant.name,
     variantCode: variant.code,
@@ -2329,18 +2629,20 @@ function upsertSheetStock(db, product, variant, row, config = {}) {
   // A row that is present in Sheets is authoritative. Local conflict and
   // reservation flags from an older snapshot must not keep a cleared row out
   // of the catalog after the owner has made it available again in Sheets.
-  if (!localLocked) {
+  if (!localLocked && availability.available) {
     delete stock.historyConflict;
     delete stock.historyConflictAt;
     delete stock.historyConflictOrderIds;
     delete stock.autoBackfillBlocked;
     delete stock.autoBackfillBlockedAt;
+  }
+  if (!localLocked) {
     delete stock.reservedFor;
     delete stock.reservedAccountId;
     delete stock.reservedUntil;
     delete stock.reservedAt;
   }
-  if (!sheetSold && !localLocked) {
+  if (availability.available && !localLocked) {
     stock.soldAt = "";
     stock.soldDuration = "";
     stock.soldDurationDays = 0;
@@ -2352,8 +2654,18 @@ function upsertSheetStock(db, product, variant, row, config = {}) {
   }
   if (!existing) db.stock.unshift(stock);
   if (sheetSold) upsertManagedFromSheet(db, product, variant, stock, row);
-  const returned = !sheetSold && !localLocked ? clearManagedIfReturned(db, row, stock, { force: true }) : 0;
-  return { stock, sheetSold, localLocked, returned, created: !existing };
+  if (sheetSold || availability.blocked) {
+    syncManagedAccountCondition(db, stock, condition);
+  }
+  const returned = availability.available && !localLocked ? clearManagedIfReturned(db, row, stock, { force: true }) : 0;
+  return {
+    stock,
+    sheetSold,
+    localLocked,
+    returned,
+    created: !existing,
+    conditionAnomaly: condition.known ? "" : condition.raw,
+  };
 }
 
 function dedupeSheetStockRows(db, config, sheetName, seenSheetKeys, syncedAt) {
@@ -2452,17 +2764,35 @@ async function syncSheetConfigStock(db, config, options = {}) {
   const values = await readSheetValuesByName(db, sheetName);
   const summary = { imported: 0, available: 0, sold: 0, locked: 0, managed: 0, returned: 0, removed: 0, warnings: [...(resellerLookup.warnings || [])], resellerAliases: resellerLookup.aliases || 0 };
   const seenSheetKeys = new Set();
+  const assignmentRows = new Map();
   for (const pool of config.pools) {
     const variant = poolVariant(product, pool);
     if (!variant) {
       summary.warnings.push(`${pool.key}: varian ${config.summaryName} tidak ditemukan`);
       continue;
     }
-    applySheetCheckoutRequirements(variant, checkoutRequirementsForSheetPool(values, pool, [], config.pools));
+    applySheetCheckoutRequirements(
+      variant,
+      checkoutRequirementsForSheetPool(values, pool, [], config.pools),
+      checkoutFieldsForSheetPool(values, pool, [], config.pools),
+    );
     for (const row of parsePoolRows(values, pool, sheetName, config.pools, { requireProfile: config.requireProfile })) {
       seenSheetKeys.add(row.sheetStockKey);
-      const result = upsertSheetStock(db, product, variant, row, config);
+      const fingerprint = sheetAssignmentFingerprint(row);
+      const original = fingerprint ? assignmentRows.get(fingerprint) : null;
+      const copiedAssignment = Boolean(original && isCopiedSheetAssignment(row, original));
+      const effectiveRow = copiedAssignment ? availableSheetRow(row) : row;
+      if (fingerprint && !original) assignmentRows.set(fingerprint, row);
+      if (copiedAssignment) {
+        summary.warnings.push(
+          `${pool.key} row ${row.rowNumber}: assignment identik dengan row ${original.rowNumber} diabaikan karena tidak memiliki Order ID.`,
+        );
+      }
+      const result = upsertSheetStock(db, product, variant, effectiveRow, config);
       summary.imported += 1;
+      if (result.conditionAnomaly) {
+        summary.warnings.push(`${sheetName}!${row.rowNumber}: KONDISI AKUN '${result.conditionAnomaly}' tidak dikenal; stok diblokir.`);
+      }
       if (result.stock.status === "available") summary.available += 1;
       if (result.sheetSold) {
         summary.sold += 1;
@@ -2581,7 +2911,11 @@ export async function syncDynamicSheetsStock(db, options = {}) {
       }
       const variantResult = ensureDynamicVariant(product, found.productKey, found.variantKey);
       if (variantResult.created) summary.variantsCreated += 1;
-      applySheetCheckoutRequirements(variantResult.variant, checkoutRequirementsForSheetPool(values, pool, markers));
+      applySheetCheckoutRequirements(
+        variantResult.variant,
+        checkoutRequirementsForSheetPool(values, pool, markers),
+        checkoutFieldsForSheetPool(values, pool, markers),
+      );
       const config = {
         key: "dynamic",
         summaryName: "Dynamic",
@@ -2592,6 +2926,9 @@ export async function syncDynamicSheetsStock(db, options = {}) {
         seenSheetKeys.add(row.sheetStockKey);
         const result = upsertSheetStock(db, product, variantResult.variant, row, config);
         summary.imported += 1;
+        if (result.conditionAnomaly) {
+          summary.warnings.push(`${sheetName}!${row.rowNumber}: KONDISI AKUN '${result.conditionAnomaly}' tidak dikenal; stok diblokir.`);
+        }
         if (result.stock.status === "available") summary.available += 1;
         if (result.sheetSold) {
           summary.sold += 1;
@@ -3110,8 +3447,8 @@ function canvaUsageRow(account = {}, order = {}) {
     account.startedAt || order.paidAt || order.createdAt || formatDateTime(new Date()),
     account.duration || order.duration || "",
     account.expiresAt || order.expiresAt || "",
-    account.status || "active",
     order.id || account.orderId || account.sourceOrderId || "",
+    account.plan || account.variant || order.variant || "",
   ];
 }
 
@@ -3142,6 +3479,7 @@ function canvaUsageRowByColumns(account = {}, order = {}, columns = canvaUsageCo
   setRowValue(row, columns.duration, durationLabel);
   setRowValue(row, columns.status, account.status || "active");
   setRowValue(row, columns.orderId, order.id || account.orderId || account.sourceOrderId || "");
+  setRowValue(row, columns.plan, account.plan || account.variant || order.variant || "");
   return row;
 }
 
@@ -3157,6 +3495,7 @@ function canvaUsageCellsByColumns(account = {}, order = {}, columns = canvaUsage
   setCellValue(cells, columns.duration, durationLabel, skipIndexes);
   setCellValue(cells, columns.status, account.status || "active", skipIndexes);
   setCellValue(cells, columns.orderId, order.id || account.orderId || account.sourceOrderId || "", skipIndexes);
+  setCellValue(cells, columns.plan, account.plan || account.variant || order.variant || "", skipIndexes);
   return [...cells.entries()].sort((a, b) => a[0] - b[0]);
 }
 
@@ -3201,6 +3540,7 @@ function canvaUsageColumns(header = []) {
     expiresAt: fallbackHeaderIndex(header, ["expired", "expiry", "berakhir"], 5),
     status: statusIndex,
     orderId: orderIndex,
+    plan: findHeaderIndex(header, ["plan", "paket", "variant", "varian"]),
   };
 }
 
@@ -3271,6 +3611,7 @@ function parseCanvaUsageRows(values = []) {
       expiresAt,
       status: columns.status >= 0 ? normalize(row[columns.status]) || accountStatus(expiresAt) : accountStatus(expiresAt),
       orderId: columns.orderId >= 0 ? normalize(row[columns.orderId]) : "",
+      plan: columns.plan >= 0 ? normalize(row[columns.plan]) : "",
     });
   }
   return rows;
@@ -3603,7 +3944,9 @@ export async function syncCanvaSheetsStock(db, options = {}) {
 export async function syncGoogleSheetsStock(db, options = {}) {
   const resellerLookup = await ensureSheetResellerLookup(db, options);
   const syncOptions = { ...options, resellerLookup, silent: true };
-  const disneyFormat = await ensureDisneySheetFormat(db).catch((error) => ({ ok: false, error: error.message || "disney_format_failed" }));
+  const disneyFormat = options.readOnly
+    ? { ok: true, skipped: true, reason: "read_only_preview" }
+    : await ensureDisneySheetFormat(db).catch((error) => ({ ok: false, error: error.message || "disney_format_failed" }));
   const netflix = await syncNetflixSheetsStock(db, syncOptions).catch((error) => ({ ok: false, error: error.message || "netflix_sync_failed" }));
   const viu = await syncViuSheetsStock(db, syncOptions).catch((error) => ({ ok: false, error: error.message || "viu_sync_failed" }));
   const vidio = await syncVidioSheetsStock(db, syncOptions).catch((error) => ({ ok: false, error: error.message || "vidio_sync_failed" }));
@@ -3634,7 +3977,8 @@ export async function syncGoogleSheetsStock(db, options = {}) {
       createdAt: formatDateTime(new Date()),
     });
   }
-  return { ok: true, netflix, viu, vidio, canva, linkPools, dynamic, disneyFormat, resellers: resellerLookup };
+  const sections = [netflix, viu, vidio, canva, linkPools, dynamic, disneyFormat, resellerLookup];
+  return { ok: sections.every((item) => item?.ok !== false), netflix, viu, vidio, canva, linkPools, dynamic, disneyFormat, resellers: resellerLookup };
 }
 
 export async function ensureDisneySheetFormat(db) {
@@ -3814,7 +4158,7 @@ function sheetHeaderSections(header = []) {
   const starts = header
     .map((value, index) => {
       const token = headerToken(value);
-      return ["ACCOUNT", "AKUN", "EMAILAKUN", "NUMBER", "NOMOR", "NOMORLOGIN", "NOHP", "NOMORHP", "PHONE", "PHONENUMBER"].includes(token)
+      return ["ACCOUNT", "ACCOUNTANDPASSWORD", "ACCOUNTPASSWORD", "AKUN", "EMAIL", "EMAILAKUN", "NUMBER", "NOMOR", "NOMORLOGIN", "NOHP", "NOMORHP", "PHONE", "PHONENUMBER"].includes(token)
         ? index
         : -1;
     })
@@ -3833,7 +4177,10 @@ function actualSheetLayout(rows = [], stock = {}, pool = {}) {
   const expectedStart = Number(stock.sheetStartColumn ?? pool.startColumn ?? 0);
   const disney = isDisneyPool(pool) || isDisneySheetStock(stock);
   const layouts = [];
-  for (let rowIndex = sheetRowIndex - 1; rowIndex >= Math.max(0, sheetRowIndex - 40); rowIndex -= 1) {
+  // Pool headers can be far above the selected stock row. Searching only a
+  // fixed window makes fulfillment fall back to legacy offsets and can shift
+  // PIN, DEVICE, SELLER, ORDER ID, and KONDISI AKUN into the wrong columns.
+  for (let rowIndex = sheetRowIndex - 1; rowIndex >= 0; rowIndex -= 1) {
     const header = rows[rowIndex] || [];
     for (const section of sheetHeaderSections(header)) {
       const schema = inferDynamicPoolSchema(header, section.startColumn, section.endColumn);
@@ -3855,7 +4202,7 @@ function actualSheetLayout(rows = [], stock = {}, pool = {}) {
   return layouts.sort((a, b) => a.distance - b.distance)[0] || null;
 }
 
-function actualSheetRowUpdates(sheetName, rowNumber, rows, stock = {}, account = {}, order = {}) {
+export function actualSheetRowUpdates(sheetName, rowNumber, rows, stock = {}, account = {}, order = {}) {
   const pool = stockPool(stock);
   const layout = actualSheetLayout(rows, stock, pool);
   if (!layout) return null;
@@ -3884,7 +4231,9 @@ function actualSheetRowUpdates(sheetName, rowNumber, rows, stock = {}, account =
   put(columns.date, formatSheetPurchaseDate(purchaseDate));
   put(columns.duration, durationLabel);
   put(columns.device, order.device || account.device || stock.device || "");
-  put(columns.seller, account.reseller || order.reseller || sheetOrderCustomer(order, account) || "");
+  put(columns.customerEmail, order.email || order.checkoutData?.customerEmail || "");
+  put(columns.customerPlan, order.customerPlan || order.checkoutData?.customerPlan || "");
+  put(columns.seller, order.reseller || account.reseller || sheetOrderCustomer(order, account) || "");
   // EXPIRED and NOMOR WA are owned by Sheet formulas derived from date,
   // duration, and seller. Never write them from the dashboard.
   put(columns.pin, stock.pin || account.pin || "");
@@ -3916,7 +4265,7 @@ export async function pushAccountsToGoogleSheets(db, accounts = [], order = {}) 
     return formulaIndexesFromRow((rowsBySheet.get(sheetName) || [])[Number(rowNumber) - 1] || []);
   }
   for (const account of accounts) {
-    const stock = (db.stock || []).find((item) => item.id === account.stockId || item.sheetStockKey === account.sheetStockKey);
+    const stock = findLinkedSheetStock(db.stock, account);
     if (!stock?.sheetStockKey || !stock.sheetRow) continue;
     const pool = stockPool(stock);
     const sheetName = stockSheetName(db, stock);
@@ -3976,7 +4325,7 @@ export async function previewAccountSheetMapping(db, options = {}) {
     return { ok: false, reason: "target_not_found" };
   }
 
-  const resolvedStock = stock || (account ? (db.stock || []).find((item) => item.id === account.stockId || item.sheetStockKey === account.sheetStockKey) : null) || target;
+  const resolvedStock = stock || (account ? findLinkedSheetStock(db.stock, account) : null) || target;
   const pool = stockPool(resolvedStock);
   const sheetName = stockSheetName(db, resolvedStock);
   let headers = poolHeaders(pool);
@@ -4105,7 +4454,7 @@ export async function syncAccountCredentialsToGoogleSheets(db, options = {}) {
       || accountIds.has(normalize(account.id))
     );
     if (!matchesAccount) continue;
-    const stock = (db.stock || []).find((item) => item.id === account.stockId || item.sheetStockKey === account.sheetStockKey);
+    const stock = findLinkedSheetStock(db.stock, account);
     await addRow(stock || account, account);
   }
 
@@ -4130,11 +4479,13 @@ export async function pushFulfilledOrderToGoogleSheets(db, result = {}) {
   const stockIds = new Set(order.deliveredStockIds || []);
   const orderId = String(order.id || "").trim();
   const directAccounts = (db.managedAccounts || []).filter((account) => (
+    isDeliverableManagedAccount(account)
+    &&
     String(account.orderId || account.sourceOrderId || "").trim() === orderId
   ));
   const accounts = directAccounts.length
     ? directAccounts
-    : (db.managedAccounts || []).filter((account) => stockIds.has(account.stockId));
+    : (db.managedAccounts || []).filter((account) => isDeliverableManagedAccount(account) && stockIds.has(account.stockId));
   try {
     let pushed;
     if (accounts.some((account) => ["canva_link", "link_pool"].includes(String(account.accountType || "")) || ["canva_order", "link_pool_order"].includes(String(account.source || "")))) {
@@ -4143,13 +4494,18 @@ export async function pushFulfilledOrderToGoogleSheets(db, result = {}) {
       pushed = await pushAccountsToGoogleSheets(db, accounts, order);
     }
     const history = await pushOrderHistoryToGoogleSheets(db, accounts, order);
-    order.googleSheetsSyncStatus = pushed.ok ? "synced" : pushed.skipped ? "skipped" : "failed";
-    order.googleSheetsSyncAt = pushed.ok ? formatDateTime(new Date()) : order.googleSheetsSyncAt || "";
-    order.googleSheetsSyncError = pushed.ok || pushed.skipped ? "" : pushed.reason || "google_sheets_sync_failed";
+    const sheetCommitRequired = accounts.some((account) => {
+      const stock = findLinkedSheetStock(db.stock, account);
+      return isSheetBackedRecord(stock || account) || isSheetBackedRecord(account);
+    });
+    const syncOutcome = classifySheetPushResult(pushed, { required: sheetCommitRequired });
+    order.googleSheetsSyncStatus = syncOutcome.status;
+    order.googleSheetsSyncAt = syncOutcome.status === "synced" ? formatDateTime(new Date()) : order.googleSheetsSyncAt || "";
+    order.googleSheetsSyncError = syncOutcome.error;
     order.googleSheetsHistorySyncStatus = history.ok ? "synced" : history.skipped ? "skipped" : "failed";
     order.googleSheetsHistorySyncAt = history.ok ? formatDateTime(new Date()) : order.googleSheetsHistorySyncAt || "";
     order.googleSheetsHistorySyncError = history.ok || history.skipped ? "" : history.reason || history.error || "google_sheets_history_sync_failed";
-    return { ...pushed, history };
+    return { ...pushed, history, sheetCommitRequired };
   } catch (error) {
     order.googleSheetsSyncStatus = "failed";
     order.googleSheetsSyncError = error.message || "google_sheets_sync_failed";
@@ -4282,7 +4638,7 @@ export async function pushOrderHistoryToGoogleSheets(db, accounts = [], order = 
   let nextRow = nextWritableRow(values, 2);
   let updated = 0;
   for (const account of accounts) {
-    const stock = (db.stock || []).find((item) => item.id === account.stockId || item.sheetStockKey === account.sheetStockKey) || {};
+    const stock = findLinkedSheetStock(db.stock, account) || {};
     const key = orderHistoryKey(account, order, stock);
     if (existingKeys.has(key)) continue;
     const rowValues = orderHistoryAccountCells(account, order, stock);
@@ -4329,7 +4685,7 @@ export async function backfillOrderHistorySheet(db, options = {}) {
     ));
     let orderUpdated = 0;
     for (const account of accounts) {
-      const stock = (db.stock || []).find((item) => item.id === account.stockId || item.sheetStockKey === account.sheetStockKey) || {};
+      const stock = findLinkedSheetStock(db.stock, account) || {};
       const key = orderHistoryKey(account, order, stock);
       if (existingKeys.has(key)) continue;
       data.push({
@@ -4665,7 +5021,7 @@ export async function clearAccountsInGoogleSheets(db, accounts = []) {
     return formulaIndexesFromRow((rowsBySheet.get(sheetName) || [])[Number(rowNumber) - 1] || []);
   }
   for (const account of accounts) {
-    const stock = (db.stock || []).find((item) => item.id === account.stockId || item.sheetStockKey === account.sheetStockKey);
+    const stock = findLinkedSheetStock(db.stock, account);
     if (["canva_link", "link_pool"].includes(String(account.accountType || "")) || ["canva_sheet", "link_pool_sheet", "canva_order", "link_pool_order"].includes(String(account.source || ""))) {
       const sheetName = normalize(account.sheetName);
       const sheetRow = Number(account.sheetRow || 0);
@@ -4722,204 +5078,29 @@ export async function clearAccountsInGoogleSheets(db, accounts = []) {
   return { ok: true, updated };
 }
 
-export async function ensureNetflixSheetsTemplate(db) {
-  if (!googleSheetsConfigured(db)) {
-    const error = new Error("Google Sheets belum dikonfigurasi");
-    error.status = 400;
-    throw error;
-  }
-  const { sheetName } = googleSheetsSettings(db);
-  await ensureSheetExists(db, sheetName);
-  await updateValues(db, [
-    { range: `${quoteSheetName(sheetName)}!A1`, values: [[NETFLIX_SHEETS_SNK]] },
-    { range: `${quoteSheetName(sheetName)}!A11:L12`, values: [[POOLS.NETFLIX_SHARED.label, "", "", "", "", "", "", "", "", "", "", ""], SHEET_HEADERS] },
-    { range: `${quoteSheetName(sheetName)}!N11:Y12`, values: [[POOLS.NETFLIX_2U.label, "", "", "", "", "", "", "", "", "", "", ""], SHEET_HEADERS] },
-  ]);
-  const sheetId = await getSheetId(db, sheetName);
-  if (sheetId !== null) {
-    await batchUpdate(db, [
-      {
-        updateSheetProperties: {
-          properties: { sheetId, gridProperties: { frozenRowCount: 12 } },
-          fields: "gridProperties.frozenRowCount",
-        },
-      },
-      {
-        repeatCell: {
-          range: { sheetId, startRowIndex: 0, endRowIndex: 12 },
-          cell: { userEnteredFormat: { wrapStrategy: "WRAP" } },
-          fields: "userEnteredFormat.wrapStrategy",
-        },
-      },
-      {
-        repeatCell: {
-          range: { sheetId, startRowIndex: 10, endRowIndex: 12 },
-          cell: { userEnteredFormat: { textFormat: { bold: true }, horizontalAlignment: "CENTER" } },
-          fields: "userEnteredFormat.textFormat.bold,userEnteredFormat.horizontalAlignment",
-        },
-      },
-    ]);
-  }
-  return { ok: true, sheetName, frozenRowCount: 12 };
-}
+const googleSheetsTemplateService = createGoogleSheetsTemplateService({
+  a1Column,
+  batchUpdate,
+  canvaPool,
+  ensureOrderHistorySheet,
+  ensureSheetExists,
+  findCanvaPoolLocation,
+  getSheetId,
+  getSheetProperties,
+  googleSheetsConfigured,
+  googleSheetsSettings,
+  normalize,
+  normalizeLower,
+  poolHeaders,
+  POOLS,
+  quoteSheetName,
+  readSheetValuesByName,
+  SHEET_CONFIGS,
+  updateValues,
+});
 
-async function ensurePoolSheetsTemplate(db, config, title) {
-  if (!googleSheetsConfigured(db)) {
-    const error = new Error("Google Sheets belum dikonfigurasi");
-    error.status = 400;
-    throw error;
-  }
-  const sheetName = config.sheetName(db);
-  const sheetId = await ensureSheetExists(db, sheetName);
-  const requiredColumns = Math.max(...config.pools.map((pool) => pool.startColumn + poolHeaders(pool).length), SHEET_HEADERS.length);
-  if (sheetId !== null) {
-    const currentColumns = Number((await getSheetProperties(db, sheetName))?.gridProperties?.columnCount || 0);
-    if (currentColumns < requiredColumns) {
-      await batchUpdate(db, [
-        {
-          updateSheetProperties: {
-            properties: { sheetId, gridProperties: { columnCount: requiredColumns } },
-            fields: "gridProperties.columnCount",
-          },
-        },
-      ]).catch(() => null);
-    }
-  }
-  const data = [
-    { range: `${quoteSheetName(sheetName)}!A1`, values: [[title || `${config.summaryName.toUpperCase()} STOCK POOL`]] },
-  ];
-  for (const pool of config.pools) {
-    const headers = poolHeaders(pool);
-    const start = a1Column(pool.startColumn);
-    const end = a1Column(pool.startColumn + headers.length - 1);
-    data.push({
-      range: `${quoteSheetName(sheetName)}!${start}11:${end}12`,
-      values: [[pool.label, ...Array(headers.length - 1).fill("")], headers],
-    });
-  }
-  await updateValues(db, data);
-  if (sheetId !== null) {
-    await batchUpdate(db, [
-      {
-        updateSheetProperties: {
-          properties: { sheetId, gridProperties: { frozenRowCount: 12 } },
-          fields: "gridProperties.frozenRowCount",
-        },
-      },
-      {
-        repeatCell: {
-          range: { sheetId, startRowIndex: 0, endRowIndex: 12 },
-          cell: { userEnteredFormat: { wrapStrategy: "WRAP" } },
-          fields: "userEnteredFormat.wrapStrategy",
-        },
-      },
-      {
-        repeatCell: {
-          range: { sheetId, startRowIndex: 10, endRowIndex: 12 },
-          cell: { userEnteredFormat: { textFormat: { bold: true }, horizontalAlignment: "CENTER" } },
-          fields: "userEnteredFormat.textFormat.bold,userEnteredFormat.horizontalAlignment",
-        },
-      },
-    ]);
-  }
-  return { ok: true, sheetName, frozenRowCount: 12, pools: config.pools.map((pool) => pool.key) };
-}
-
-export async function ensureViuSheetsTemplate(db) {
-  return ensurePoolSheetsTemplate(db, SHEET_CONFIGS.viu, "VIU STOCK POOL");
-}
-
-export async function ensureVidioSheetsTemplate(db) {
-  return ensurePoolSheetsTemplate(db, SHEET_CONFIGS.vidio, "VIDIO PLATINUM STOCK POOL");
-}
-
-export async function ensureCanvaSheetsTemplate(db) {
-  if (!googleSheetsConfigured(db)) {
-    const error = new Error("Google Sheets belum dikonfigurasi");
-    error.status = 400;
-    throw error;
-  }
-  const sheetId = await ensureSheetExists(db, CANVA_SHEET_NAME);
-  const pool = canvaPool(db);
-  const values = await readSheetValuesByName(db, CANVA_SHEET_NAME).catch(() => []);
-  const isBlankRow = (row = []) => !row.some((cell) => normalize(cell));
-  const hasCanvaPoolMarker = values.some((row) => (row || []).some((cell) => {
-    const text = normalizeLower(cell);
-    return text === "canva pool" || (text.includes("pool") && text.includes("canva"));
-  }));
-  const hasCanvaUsageMarker = values.some((row) => (row || []).some((cell) => {
-    const text = normalizeLower(cell);
-    return text === "canva usage" || (text.includes("usage") && text.includes("canva"));
-  }));
-  const poolLocation = findCanvaPoolLocation(values);
-  const poolHeader = values[poolLocation.headerIndex] || [];
-  const poolData = values[poolLocation.dataIndex] || [];
-  const canvaUsageMarkerIndex = values.findIndex((row) => (row || []).some((cell) => {
-    const text = normalizeLower(cell);
-    return text === "canva usage" || (text.includes("usage") && text.includes("canva"));
-  }));
-  const usageHeaderIndex = canvaUsageMarkerIndex >= 0 ? canvaUsageMarkerIndex + 1 : 7;
-  const usageHeader = values[usageHeaderIndex] || [];
-  const writes = [];
-
-  if (!hasCanvaPoolMarker && !normalize(values[0]?.[0])) {
-    writes.push({ range: `${quoteSheetName(CANVA_SHEET_NAME)}!A1`, values: [["CANVA POOL"]] });
-  }
-  if (isBlankRow(poolHeader)) {
-    writes.push({ range: `${quoteSheetName(CANVA_SHEET_NAME)}!A${poolLocation.headerIndex + 1}:F${poolLocation.headerIndex + 1}`, values: [CANVA_POOL_HEADERS] });
-  }
-  if (isBlankRow(poolData)) {
-    writes.push({
-      range: `${quoteSheetName(CANVA_SHEET_NAME)}!A${poolLocation.dataIndex + 1}:F${poolLocation.dataIndex + 1}`,
-      values: [[pool.link || "", pool.quota || 0, "", "", pool.status || "active", pool.notes || ""]],
-    });
-  }
-  if (!hasCanvaUsageMarker && !normalize(values[6]?.[0])) {
-    writes.push({ range: `${quoteSheetName(CANVA_SHEET_NAME)}!A7`, values: [["CANVA USAGE"]] });
-  }
-  if (isBlankRow(usageHeader)) {
-    writes.push({ range: `${quoteSheetName(CANVA_SHEET_NAME)}!A${usageHeaderIndex + 1}:H${usageHeaderIndex + 1}`, values: [CANVA_USAGE_HEADERS] });
-  }
-  if (writes.length) await updateValues(db, writes);
-  if (sheetId !== null) {
-    await batchUpdate(db, [
-      {
-        updateSheetProperties: {
-          properties: { sheetId, gridProperties: { frozenRowCount: 8 } },
-          fields: "gridProperties.frozenRowCount",
-        },
-      },
-      {
-        repeatCell: {
-          range: { sheetId, startRowIndex: 0, endRowIndex: 8 },
-          cell: { userEnteredFormat: { wrapStrategy: "WRAP" } },
-          fields: "userEnteredFormat.wrapStrategy",
-        },
-      },
-      {
-        repeatCell: {
-          range: { sheetId, startRowIndex: 2, endRowIndex: 4 },
-          cell: { userEnteredFormat: { textFormat: { bold: true }, horizontalAlignment: "CENTER" } },
-          fields: "userEnteredFormat.textFormat.bold,userEnteredFormat.horizontalAlignment",
-        },
-      },
-      {
-        repeatCell: {
-          range: { sheetId, startRowIndex: 6, endRowIndex: 8 },
-          cell: { userEnteredFormat: { textFormat: { bold: true }, horizontalAlignment: "CENTER" } },
-          fields: "userEnteredFormat.textFormat.bold,userEnteredFormat.horizontalAlignment",
-        },
-      },
-    ]);
-  }
-  return { ok: true, sheetName: CANVA_SHEET_NAME, frozenRowCount: 8 };
-}
-
-export async function ensureGoogleSheetsTemplate(db) {
-  const netflix = await ensureNetflixSheetsTemplate(db);
-  const viu = await ensureViuSheetsTemplate(db);
-  const vidio = await ensureVidioSheetsTemplate(db);
-  const canva = await ensureCanvaSheetsTemplate(db);
-  const orderHistory = await ensureOrderHistorySheet(db);
-  return { ok: true, netflix, viu, vidio, canva, orderHistory };
-}
+export const ensureCanvaSheetsTemplate = googleSheetsTemplateService.ensureCanvaSheetsTemplate;
+export const ensureGoogleSheetsTemplate = googleSheetsTemplateService.ensureGoogleSheetsTemplate;
+export const ensureNetflixSheetsTemplate = googleSheetsTemplateService.ensureNetflixSheetsTemplate;
+export const ensureVidioSheetsTemplate = googleSheetsTemplateService.ensureVidioSheetsTemplate;
+export const ensureViuSheetsTemplate = googleSheetsTemplateService.ensureViuSheetsTemplate;

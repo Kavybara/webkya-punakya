@@ -914,10 +914,7 @@ export function createWhatsAppConnection({ config, logger, store, plugins }) {
       qr_available: Boolean(qrDataUrl),
       pairing_available: Boolean(pairingCode),
       pairing_code: pairingCode,
-      public_qr_url:
-        config.publicUrl && config.token
-          ? `${config.publicUrl.replace(/\/$/, "")}/session/qr?token=${encodeURIComponent(config.token)}`
-          : "",
+      public_qr_url: config.publicUrl ? `${config.publicUrl.replace(/\/$/, "")}/session/qr` : "",
       last_error: lastError || "",
       runtime_dir: config.paths.runtimeDir,
       tmp_dir: config.paths.tmpDir,

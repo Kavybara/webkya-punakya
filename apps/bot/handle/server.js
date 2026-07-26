@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { getQueryValue, html, json, readJsonBody } from "../lib/http.js";
+import { html, json, readJsonBody } from "../lib/http.js";
 
 function isAuthorized(config, req) {
   if (!config.token) {
@@ -7,11 +7,7 @@ function isAuthorized(config, req) {
   }
 
   const header = String(req.headers.authorization || "").trim();
-  if (header === `Bearer ${config.token}`) {
-    return true;
-  }
-
-  return getQueryValue(req.url || "/", "token") === config.token;
+  return header === `Bearer ${config.token}`;
 }
 
 export function createHttpServer({ config, connection }) {

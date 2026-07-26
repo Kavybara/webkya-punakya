@@ -252,14 +252,15 @@ export default function ResellerSettings() {
   }
 
   function logoutCurrentSession() {
+    api.logout().catch(() => undefined);
     clearSession();
     navigate("/login", { replace: true });
   }
 
   return (
-    <DashboardLayout role="reseller" title="Settings">
+    <DashboardLayout role="reseller" title="Pengaturan">
       <div className="space-y-5">
-        <ResellerPageTitle title="Settings" subtitle="Kelola identitas panel reseller, keamanan login, dan sesi aktif." />
+        <ResellerPageTitle title="Pengaturan" subtitle="Kelola identitas panel reseller, keamanan login, dan sesi aktif." />
 
         <div className="grid gap-4 md:grid-cols-3">
           <ResellerStatCard label="Username Panel" value={reseller?.username || "-"} icon="ri-at-line" tone="blue" hint="Dipakai untuk identitas panel" />

@@ -1,5 +1,8 @@
 import { makeId, nowText, todayText } from "./store.js";
 import { syncGoogleSheetsStock } from "./google-sheets.js";
+import { deriveProviderTotalPayment } from "./services/payment-total-service.js";
+import { createDeliveryTemplateSnapshot } from "./services/delivery-template-service.js";
+import { stockStatusAfterReservationRelease } from "./google-sheets/account-condition.js";
 import {
   durationAllowedForVariant,
   isCanvaProduct,
@@ -243,7 +246,7 @@ function orderLockReply(product = {}, variant = null) {
 }
 
 function clearReservedStockState(stock) {
-  stock.status = "available";
+  stock.status = stockStatusAfterReservationRelease(stock);
   delete stock.reservedFor;
   delete stock.reservedAccountId;
   delete stock.reservedUntil;
@@ -624,11 +627,7 @@ function accountDetailLines(items = [], { linkLabel = "Link" } = {}) {
 }
 
 function derivePaymentTotal(amount = 0, fee = 0, providerTotal = 0) {
-  const nominal = Math.max(0, Number(amount || 0));
-  const adminFee = Math.max(0, Number(fee || 0));
-  const reportedTotal = Math.max(0, Number(providerTotal || 0));
-  const computedTotal = nominal > 0 ? nominal + adminFee : 0;
-  return Math.max(reportedTotal, computedTotal);
+  return deriveProviderTotalPayment(amount, fee, providerTotal);
 }
 
 function renderDeliveryWithTemplate({ defaultText, order, product, variant, payment, accounts = [], stocks = [], snkText = "" }) {
@@ -679,6 +678,87 @@ function renderDeliveryWithTemplate({ defaultText, order, product, variant, paym
 
   const rendered = renderTemplateText(template, context);
   return rendered || defaultText;
+}
+
+export function refreshOrderDeliveryTemplateSnapshot(db, {
+  order,
+  product,
+  variant,
+  accounts = [],
+  fallbackText = "",
+  force = false,
+}) {
+  if (!force && order.deliveryTemplateSnapshot?.status === "ready") {
+    return order.deliveryTemplateSnapshot.renderedText || fallbackText;
+  }
+  const renderedAt = nowText();
+  const items = accounts.filter(Boolean);
+  const snapshots = items.map((account) => ({
+    accountId: account.id || "",
+    stockId: account.stockId || account.id || "",
+    ...createDeliveryTemplateSnapshot({
+      order,
+      product,
+      variant,
+      account,
+      renderedAt,
+    }),
+  }));
+  const ready = snapshots.length > 0 && snapshots.every((snapshot) => snapshot.status === "ready");
+  const configured = snapshots.some((snapshot) => snapshot.status !== "not_configured");
+  const renderedText = ready
+    ? snapshots.map((snapshot) => snapshot.renderedText).filter(Boolean).join("\n\n")
+    : "";
+  const status = ready
+    ? "ready"
+    : snapshots.some((snapshot) => snapshot.status === "incomplete")
+      ? "incomplete"
+      : configured
+        ? "invalid"
+        : "not_configured";
+  const missingFields = [...new Set(snapshots.flatMap((snapshot) => snapshot.missingFields || []))];
+  const errors = [...new Set(snapshots.flatMap((snapshot) => snapshot.errors || []))];
+  const first = snapshots[0] || {};
+  order.deliveryTemplateSnapshots = snapshots;
+  order.deliveryTemplateSnapshot = {
+    status,
+    scope: first.scope || "none",
+    variantId: variant.id || order.variantId || "",
+    sku: variant.sku || variant.code || order.variantCode || "",
+    templateSource: first.templateSource || "",
+    renderedText,
+    templateVersion: Number(first.templateVersion || 0),
+    renderedAt,
+    usedFields: [...new Set(snapshots.flatMap((snapshot) => snapshot.usedFields || []))],
+    missingFields,
+    errors,
+  };
+  for (const account of items) {
+    const snapshot = snapshots.find((candidate) => (
+      (candidate.accountId && candidate.accountId === account.id)
+      || (candidate.stockId && candidate.stockId === (account.stockId || account.id))
+    ));
+    if (!snapshot) continue;
+    account.deliveryTemplateSnapshot = snapshot;
+    if (snapshot.status === "ready" && (force || !account.deliveryTemplateOpenedAt)) {
+      if (force) delete account.deliveryTemplateOpenedAt;
+      account.deliveryTemplateUnreadAt = renderedAt;
+    }
+  }
+  db.activities = db.activities || [];
+  db.activities.unshift({
+    id: makeId("act"),
+    type: status === "ready" ? "order" : "error",
+    title: status === "ready"
+      ? `Template pengiriman order ${order.id} dirender`
+      : `Template pengiriman order ${order.id} belum siap`,
+    description: `Varian ${variant.id || "-"}; SKU ${variant.sku || variant.code || "-"}; versi ${Number(first.templateVersion || 0)}; status ${status}${missingFields.length ? `; field kurang ${missingFields.join(", ")}` : ""}.`,
+    createdAt: renderedAt,
+    orderId: order.id,
+    variantId: variant.id || "",
+    templateVersion: Number(first.templateVersion || 0),
+  });
+  return renderedText || fallbackText;
 }
 
 function snkTemplateContext({ order, product, variant, items = [] }) {
@@ -1091,6 +1171,13 @@ export function fulfillPaidOrder(db, orderId) {
       payment,
       accounts: existingAccounts,
     });
+    order.fulfillmentText = refreshOrderDeliveryTemplateSnapshot(db, {
+      order,
+      product,
+      variant,
+      accounts: existingAccounts,
+      fallbackText: order.fulfillmentText,
+    });
     db.activities = db.activities || [];
     db.activities.unshift({
       id: makeId("act"),
@@ -1141,7 +1228,7 @@ export function fulfillPaidOrder(db, orderId) {
       password: allocatedPools[index].link,
       canvaLink: isCanvaProduct(product) ? allocatedPools[index].link : "",
       buyer: order.customer,
-      reseller: reseller?.name || order.whatsapp || "",
+      reseller: reseller?.username || reseller?.name || order.whatsapp || "",
       whatsapp: normalizeWhatsappNumber(order.whatsapp || reseller?.whatsapp || ""),
       profile: "",
       pin: "",
@@ -1200,6 +1287,13 @@ export function fulfillPaidOrder(db, orderId) {
       payment,
       snkText: order.snkText,
     });
+    order.fulfillmentText = refreshOrderDeliveryTemplateSnapshot(db, {
+      order,
+      product,
+      variant,
+      accounts,
+      fallbackText: order.fulfillmentText,
+    });
     db.activities.unshift({
       id: makeId("act"),
       type: "order",
@@ -1218,10 +1312,48 @@ export function fulfillPaidOrder(db, orderId) {
     .filter((item) => !stockHasActiveManagedLink(db, item, order.id));
   const fallbackStock = stockForVariant(db, product, variant, "available")
     .filter((item) => !stockHasActiveManagedLink(db, item, order.id));
-  const reservedStockIds = new Set(Array.isArray(order.reservedStockIds) ? order.reservedStockIds : []);
-  const stocks = (reservedStockIds.size ? reservedStock : [...reservedStock, ...fallbackStock]).slice(0, qty);
+  const requestedReservedStockIds = new Set(Array.isArray(order.reservedStockIds) ? order.reservedStockIds : []);
+  const selectedStockIds = new Set(reservedStock.map((item) => String(item.id || "").trim()).filter(Boolean));
+  const stocks = [
+    ...reservedStock,
+    ...fallbackStock.filter((item) => !selectedStockIds.has(String(item.id || "").trim())),
+  ].slice(0, qty);
   if (!stocks.length || stocks.length < qty) {
+    if (order.holdOnStockUnavailable) {
+      order.orderStatus = "processing";
+      order.deliveryStatus = "stock_conflict";
+      order.deliveryError = "";
+      order.fulfillmentBlockedReason = "reserved_sheet_stock_changed";
+      db.activities = db.activities || [];
+      db.activities.unshift({
+        id: makeId("act"),
+        type: "order",
+        title: `Order ${order.id} menunggu pemeriksaan stok`,
+        description: "Stok yang direservasi berubah di Google Sheets dan tidak ada fallback aman. Delivery ditahan untuk Owner.",
+        createdAt: nowText(),
+        orderId: order.id,
+        resellerId: order.resellerId || "",
+      });
+      return {
+        ok: false,
+        reply: "Pembayaran berhasil, tetapi stok sedang diperiksa oleh Owner.",
+        order,
+      };
+    }
     return convertUnavailablePaidOrderToDeposit(db, order);
+  }
+  if (order.holdOnStockUnavailable) {
+    order.stockConflictResolvedAt = nowText();
+    order.stockConflictFallbackStockIds = stocks.map((stock) => stock.id);
+    delete order.holdOnStockUnavailable;
+  }
+  const fallbackUsed = requestedReservedStockIds.size > 0
+    && stocks.some((stock) => !requestedReservedStockIds.has(stock.id));
+  if (fallbackUsed) {
+    order.reservationFallbackUsed = true;
+    order.reservationFallbackAt = nowText();
+    order.reservationFallbackFromStockIds = [...requestedReservedStockIds];
+    order.reservationFallbackToStockIds = stocks.map((stock) => stock.id);
   }
   archiveLinkedAccountsForStockReuse(db, stocks, order.id, fulfilledAt);
 
@@ -1274,8 +1406,8 @@ export function fulfillPaidOrder(db, orderId) {
     snkText: order.snkText,
   });
   db.managedAccounts = db.managedAccounts || [];
-  stocks.forEach((stock) => {
-    upsertManagedAccount(db, {
+  const deliveredAccounts = stocks.map((stock) => {
+    return upsertManagedAccount(db, {
       id: makeId("acc"),
       stockId: stock.id,
       orderId: order.id,
@@ -1294,7 +1426,7 @@ export function fulfillPaidOrder(db, orderId) {
       otpEmail: stock.otpEmail || "",
       password: stock.password,
       buyer: order.customer,
-      reseller: reseller?.name || order.whatsapp || "",
+      reseller: reseller?.username || reseller?.name || order.whatsapp || "",
       whatsapp: normalizeWhatsappNumber(order.whatsapp || reseller?.whatsapp || ""),
       profile: stock.profile,
       pin: stock.pin,
@@ -1313,6 +1445,13 @@ export function fulfillPaidOrder(db, orderId) {
       expiresAt: order.expiresAt || addDaysText(durationDays(order.duration), order.createdAt || new Date()),
       status: "active",
     });
+  });
+  order.fulfillmentText = refreshOrderDeliveryTemplateSnapshot(db, {
+    order,
+    product,
+    variant,
+    accounts: deliveredAccounts,
+    fallbackText: order.fulfillmentText,
   });
   db.activities.unshift({
     id: makeId("act"),

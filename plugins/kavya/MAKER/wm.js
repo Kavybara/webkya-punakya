@@ -1,7 +1,6 @@
 import fs from 'fs';
 import { downloadQuotedMedia, downloadMedia } from '../../../lib/utils.js';
-
-import { Sticker, StickerTypes } from 'wa-sticker-formatter';
+import { sendImageAsSticker } from '../../../lib/exif.js';
 
 async function sendError(sock, remoteJid, message, errorMessage) {
   await sock.sendMessage(remoteJid, { text: errorMessage }, { quoted: message });
@@ -47,15 +46,11 @@ _Contoh 2: wm youtube | creative_`,
     }
 
     // Buat stiker dengan watermark
-    const sticker = new Sticker(mediaPath, {
-      pack: packname,
+    const media = fs.readFileSync(mediaPath);
+    await sendImageAsSticker(sock, remoteJid, media, {
+      packname,
       author: author,
-      type: StickerTypes.FULL,
-      quality: 50,
-    });
-
-    const buffer = await sticker.toBuffer();
-    await sock.sendMessage(remoteJid, { sticker: buffer });
+    }, message);
   } catch (error) {
     await sendError(
       sock,

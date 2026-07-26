@@ -443,6 +443,13 @@ export function stockForVariant(db, product, variant, status) {
   if (canvaRows) return canvaRows;
   return (db.stock || []).filter((stock) => {
     if (status && stock.status !== status) return false;
+    if (status === "available") {
+      const condition = String(stock.accountCondition || "NORMAL").trim().toUpperCase();
+      const conditionBlocked = stock.accountConditionKnown === false
+        || stock.accountConditionBlocked === true
+        || ["BERMASALAH", "DIPERIKSA", "REPLACED", "DISABLED", "UNKNOWN"].includes(condition);
+      if (conditionBlocked) return false;
+    }
     const sheetAuthoritative = String(stock.sheetSource || "").toLowerCase() === "google_sheets"
       && !stock.sheetRemovedAt;
     if (status === "available" && !sheetAuthoritative && (stock.historyConflict || stock.autoBackfillBlocked)) return false;

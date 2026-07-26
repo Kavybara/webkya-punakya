@@ -13,8 +13,10 @@ export type ApiDeliveredAccount = Pick<
   ManagedAccount,
   "id" | "stockId" | "orderId" | "product" | "variant" | "email" | "profile" | "startedAt" | "expiresAt" | "status" | "reseller" | "buyer" | "device" | "source"
 > & {
+  loginPhone?: string;
   password?: string;
   pin?: string;
+  canvaLink?: string;
   sheetName?: string;
   sheetRow?: number;
   sheetPool?: string;
@@ -30,6 +32,7 @@ export type ApiOrderTraceEvent = {
 export type ApiOrder = Order & {
   customer?: string;
   whatsapp?: string;
+  paidAt?: string;
   reseller?: string;
   resellerId?: string;
   resellerName?: string;
@@ -45,6 +48,54 @@ export type ApiOrder = Order & {
   deliveredAccounts?: ApiDeliveredAccount[];
   deliveredAccountCount?: number;
   traceEvents?: ApiOrderTraceEvent[];
+  trackingToken?: string;
+};
+export type DeliveryTemplateConfig = {
+  productId: string;
+  variantId: string;
+  sku: string;
+  source: string;
+  version: number;
+  requiredFields: Array<string | string[]>;
+  updatedAt: string;
+  updatedBy: string;
+  placeholders: string[];
+};
+export type DeliveryTemplatePreview = {
+  previewData: true;
+  validation: { ok: boolean; errors: string[]; warnings: string[]; usedFields: string[] };
+  rendered: { ok: boolean; text: string; errors: string[]; warnings: string[]; missingFields: string[]; usedFields: string[] };
+};
+export type AccountDeliveryDetail = {
+  account: {
+    id: string;
+    orderId: string;
+    product: string;
+    variant: string;
+    email?: string;
+    loginPhone?: string;
+    password?: string;
+    canvaLink?: string;
+    profile?: string;
+    pin?: string;
+    duration?: string;
+    startedAt?: string;
+    expiresAt?: string;
+    status?: string;
+  };
+  deliveryTemplateSnapshot: ManagedAccount["deliveryTemplateSnapshot"];
+};
+export type PublicTrackingOrder = {
+  orderId: string;
+  product: string;
+  variant: string;
+  paymentStatus: string;
+  orderStatus: string;
+  processStatus: string;
+  createdAt: string;
+  paidAt?: string;
+  customerContact?: string;
+  helpAvailable: boolean;
 };
 export type ApiReseller = Reseller;
 export type ApiAccount = ManagedAccount;
@@ -186,6 +237,10 @@ export type WhatsappSilentGroup = {
 };
 
 export type OperationsCenterResult = {
+  generatedAt?: string;
+  readOnly?: boolean;
+  snapshotVersion?: string;
+  findings?: OperationIssue[];
   checkedAt: string;
   deliveryAudit: {
     summary: { total: number; high: number; missingAccounts: number; duplicateDrops: number; sheetPending: number; whatsappFailed: number };
@@ -641,6 +696,22 @@ export type ResellerRepairResult = {
   sheets?: Record<string, unknown>;
 };
 
+export type OperationsRepairPreview = {
+  ok: boolean;
+  action: string;
+  scope: { accountId: string; orderId: string; resellerId: string };
+  previewToken: string;
+  generatedAt: string;
+  readOnly: true;
+  syncSheetsRequested: boolean;
+  reason: string;
+  risk: string;
+  affectedObjects: number;
+  before: Record<string, Array<Record<string, unknown>>>;
+  after: Record<string, Array<Record<string, unknown>>>;
+  result: Partial<ResellerRepairResult>;
+};
+
 function apiOrigin() {
   const configured = String(import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
   if (configured) return configured.replace(/\/api$/, "");
@@ -652,12 +723,6 @@ function apiOrigin() {
 
 function apiUrl(path: string) {
   return `${apiOrigin()}/api${path.startsWith("/") ? path : `/${path}`}`;
-}
-
-function authHeader() {
-  const session = readSession();
-  if (session?.token) return { Authorization: `Bearer ${session.token}` };
-  return {};
 }
 
 async function parseResponse(response: Response) {
@@ -677,13 +742,12 @@ async function request<T>(path: string, options: { method?: string; body?: JsonB
     Pragma: "no-cache",
   };
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
-  if (options.auth !== false) Object.assign(headers, authHeader());
-
   const response = await fetch(apiUrl(path), {
     method: options.method || "GET",
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
     cache: "no-store",
+    credentials: "include",
   });
   const data = await parseResponse(response);
   if (!response.ok) {
@@ -701,10 +765,20 @@ async function request<T>(path: string, options: { method?: string; body?: JsonB
 
 export function subscribeRealtime(callback: () => void) {
   if (typeof EventSource === "undefined") return () => undefined;
-  const events = new EventSource(apiUrl("/events"));
-  events.addEventListener("db-change", callback);
-  events.addEventListener("connected", callback);
-  return () => events.close();
+  const events = new EventSource(apiUrl("/events"), { withCredentials: true });
+  let refreshTimer: ReturnType<typeof window.setTimeout> | null = null;
+  const scheduleRefresh = () => {
+    if (refreshTimer) window.clearTimeout(refreshTimer);
+    refreshTimer = window.setTimeout(() => {
+      refreshTimer = null;
+      callback();
+    }, 150);
+  };
+  events.addEventListener("db-change", scheduleRefresh);
+  return () => {
+    if (refreshTimer) window.clearTimeout(refreshTimer);
+    events.close();
+  };
 }
 
 export const api = {
@@ -712,11 +786,34 @@ export const api = {
     return request<HealthResult>("/health", { auth: false });
   },
   login(payload: { email: string; password: string; remember?: boolean; role?: "owner" | "reseller" | "auto" }) {
-    return request<{ ok: boolean; role: "owner" | "reseller"; user: Record<string, unknown>; token: string }>("/auth/login", {
+    return request<{ ok: boolean; role: "owner" | "reseller"; user: Record<string, unknown>; token?: string }>("/auth/login", {
       method: "POST",
       auth: false,
       body: payload,
     });
+  },
+  authSession() {
+    return request<{ ok: boolean; role: "owner" | "reseller"; user: Record<string, unknown> }>("/auth/session");
+  },
+  registrationConfig() {
+    return request<{ enabled: boolean }>("/auth/register/config", { auth: false });
+  },
+  requestRegistration(payload: { name: string; username: string; email: string; whatsapp: string; password: string; confirmPassword: string }) {
+    return request<{ ok: boolean; registrationId: string; expiresInSeconds: number; message: string }>("/auth/register/request", {
+      method: "POST",
+      auth: false,
+      body: payload,
+    });
+  },
+  verifyRegistration(payload: { registrationId: string; code: string }) {
+    return request<{ ok: boolean; role: "reseller"; user: Record<string, unknown>; token?: string }>("/auth/register/verify", {
+      method: "POST",
+      auth: false,
+      body: payload,
+    });
+  },
+  logout() {
+    return request<{ ok: boolean }>("/auth/logout", { method: "POST" });
   },
   requestPasswordReset(payload: { identifier: string }) {
     return request<PasswordResetRequestResult>("/auth/password-reset/request", { method: "POST", auth: false, body: payload });
@@ -763,6 +860,16 @@ export const api = {
   syncGoogleSheets() {
     return request<Record<string, unknown>>("/google-sheets/sync", { method: "POST" });
   },
+  syncGoogleSheetsResellers() {
+    return request<{
+      ok: boolean;
+      checked: number;
+      added: number;
+      updated: number;
+      skippedCount: number;
+      conflicts: number;
+    }>("/google-sheets/resellers/sync", { method: "POST" });
+  },
   maintenance() {
     return request<{ ok: boolean; maintenance: MaintenanceState }>("/maintenance");
   },
@@ -789,6 +896,18 @@ export const api = {
   },
   setVariantOrderLock(productId: string, variantId: string, payload: { enabled: boolean; reason?: string }) {
     return request<ApiProduct>(`/products/${encodeURIComponent(productId)}/variants/${encodeURIComponent(variantId)}/lock`, { method: "POST", body: payload });
+  },
+  deliveryTemplate(productId: string, variantId: string) {
+    return request<DeliveryTemplateConfig>(`/products/${encodeURIComponent(productId)}/variants/${encodeURIComponent(variantId)}/delivery-template`);
+  },
+  previewDeliveryTemplate(productId: string, variantId: string, payload: { source: string; requiredFields: Array<string | string[]> }) {
+    return request<DeliveryTemplatePreview>(`/products/${encodeURIComponent(productId)}/variants/${encodeURIComponent(variantId)}/delivery-template/preview`, { method: "POST", body: payload });
+  },
+  saveDeliveryTemplate(productId: string, variantId: string, payload: { source: string; requiredFields: Array<string | string[]> }) {
+    return request<{ product: ApiProduct; variant: ApiProduct["variants"][number]; validation: DeliveryTemplatePreview["validation"] }>(`/products/${encodeURIComponent(productId)}/variants/${encodeURIComponent(variantId)}/delivery-template`, { method: "PUT", body: payload });
+  },
+  copyDeliveryTemplate(productId: string, variantId: string, payload: { sourceProductId: string; sourceVariantId: string }) {
+    return request<{ product: ApiProduct; variant: ApiProduct["variants"][number] }>(`/products/${encodeURIComponent(productId)}/variants/${encodeURIComponent(variantId)}/delivery-template/copy`, { method: "POST", body: payload });
   },
   archiveProduct(id: string, archived = true) {
     return request<ApiProduct>(`/products/${encodeURIComponent(id)}/${archived ? "archive" : "unarchive"}`, { method: "POST" });
@@ -829,8 +948,12 @@ export const api = {
   order(id: string) {
     return request<ApiOrder>(`/orders/${encodeURIComponent(id)}`);
   },
-  trackOrder(id: string) {
-    return request<ApiOrder>(`/public/orders/${encodeURIComponent(id)}`, { auth: false });
+  trackOrder(payload: { trackingToken?: string; orderId?: string; verification?: string }) {
+    return request<PublicTrackingOrder>("/public/order-tracking", {
+      method: "POST",
+      auth: false,
+      body: payload,
+    });
   },
   createOrder(payload: Record<string, unknown>) {
     return request<ApiOrder>("/orders", { method: "POST", body: payload });
@@ -847,14 +970,30 @@ export const api = {
   retryDelivery(id: string) {
     return request<{ ok: boolean; order?: ApiOrder; reply?: string }>(`/orders/${encodeURIComponent(id)}/retry-delivery`, { method: "POST" });
   },
+  rerenderDeliveryTemplate(id: string) {
+    return request<ApiOrder>(`/orders/${encodeURIComponent(id)}/delivery-template/rerender`, { method: "POST" });
+  },
+  repairOrderSheets(id: string) {
+    return request<{ ok: boolean; order: ApiOrder; restored: number; rebuilt: number; sheetResult?: Record<string, unknown> }>(
+      `/orders/${encodeURIComponent(id)}/repair-sheets`,
+      { method: "POST" },
+    );
+  },
   releaseStockReservation(id: string) {
     return request<{ ok: boolean; stock: ApiStockItem }>(`/stock/${encodeURIComponent(id)}/release-reservation`, { method: "POST" });
   },
   payment(ref: string) {
     return request<ApiPayment>(`/payments/${encodeURIComponent(ref)}`);
   },
-  trackPayment(ref: string) {
-    return request<ApiPayment>(`/public/payments/${encodeURIComponent(ref)}`, { auth: false });
+  reconcilePayment(orderId: string) {
+    return request<{
+      ok: boolean;
+      checked: boolean;
+      paid: boolean;
+      skipped: boolean;
+      reason: string;
+      payment: ApiPayment;
+    }>(`/operations/payments/${encodeURIComponent(orderId)}/reconcile`, { method: "POST" });
   },
   resellers() {
     return request<ApiReseller[]>("/resellers");
@@ -880,6 +1019,12 @@ export const api = {
   depositRequests() {
     return request<ApiDepositRequest[]>("/resellers/deposit-requests");
   },
+  archiveDepositRequests(ids: string[]) {
+    return request<{ ok: boolean; archived: number; ids: string[] }>("/resellers/deposit-requests/archive", {
+      method: "POST",
+      body: { ids },
+    });
+  },
   approveDepositRequest(id: string, payload?: { note?: string }) {
     return request<{ ok: boolean; request: ApiDepositRequest; reseller: ApiReseller }>(`/resellers/deposit-requests/${encodeURIComponent(id)}/approve`, {
       method: "POST",
@@ -896,6 +1041,18 @@ export const api = {
     const view = options?.view && options.view !== "full" ? `?view=${encodeURIComponent(options.view)}` : "";
     return request<ApiAccount[]>(`/accounts${view}`);
   },
+  unreadDeliveryCount() {
+    return request<{ count: number }>("/accounts/unread-delivery-count");
+  },
+  accountDelivery(id: string) {
+    return request<AccountDeliveryDetail>(`/accounts/${encodeURIComponent(id)}/delivery`);
+  },
+  markAccountDeliveryOpened(id: string) {
+    return request<{ ok: boolean }>(`/accounts/${encodeURIComponent(id)}/delivery/opened`, { method: "POST" });
+  },
+  recordDeliveryTemplateCopied(id: string) {
+    return request<{ ok: boolean }>(`/accounts/${encodeURIComponent(id)}/delivery/copied`, { method: "POST" });
+  },
   createAccount(payload: Partial<ApiAccount>) {
     return request<ApiAccount>("/accounts", { method: "POST", body: payload as Record<string, unknown> });
   },
@@ -910,18 +1067,6 @@ export const api = {
   },
   reassignAccount(id: string, payload: { resellerId: string; buyer?: string; whatsapp?: string; reseller?: string }) {
     return request<ApiAccount>(`/accounts/${encodeURIComponent(id)}`, { method: "PUT", body: payload });
-  },
-  replaceAccount(
-    id: string,
-    payload: { replacementStockId: string; oldAccountDisposition: "release_via_sheets" | "keep_sold"; reason?: string },
-  ) {
-    return request<{
-      ok: boolean;
-      oldAccount: ApiAccount;
-      newAccount: ApiAccount;
-      warrantyCompleteText: string;
-      sheets?: Record<string, unknown>;
-    }>(`/accounts/${encodeURIComponent(id)}/replace`, { method: "POST", body: payload });
   },
   deleteAccount(id: string, payload?: { password?: string }) {
     return request<{ ok: boolean; returned?: number; archived?: boolean; accounts?: ApiAccount[]; stocks?: ApiStockItem[]; sheets?: Record<string, unknown>; credentialSync?: Record<string, unknown> }>(
@@ -938,8 +1083,39 @@ export const api = {
   ownerSearch(query: string) {
     return request<OwnerSearchResult>(`/owner-search?q=${encodeURIComponent(query)}`);
   },
+  previewOperationsRepair(payload: { accountId?: string; orderId?: string; resellerId?: string; syncSheets?: boolean } = {}) {
+    return request<OperationsRepairPreview>("/operations/actions/preview", {
+      method: "POST",
+      body: { action: "reseller_repair", ...payload },
+    });
+  },
+  applyOperationsRepair(
+    previewToken: string,
+    payload: { accountId?: string; orderId?: string; resellerId?: string; syncSheets?: boolean } = {},
+  ) {
+    return request<ResellerRepairResult>("/operations/actions/apply", {
+      method: "POST",
+      body: {
+        action: "reseller_repair",
+        ...payload,
+        previewToken,
+        confirmed: true,
+      },
+    });
+  },
   repairResellerData(payload: { accountId?: string; orderId?: string; resellerId?: string; syncSheets?: boolean } = {}) {
-    return request<ResellerRepairResult>("/operations/reseller/repair", { method: "POST", body: payload });
+    return request<OperationsRepairPreview>("/operations/actions/preview", {
+      method: "POST",
+      body: { action: "reseller_repair", ...payload },
+    }).then((preview) => request<ResellerRepairResult>("/operations/actions/apply", {
+      method: "POST",
+      body: {
+        action: "reseller_repair",
+        ...payload,
+        previewToken: preview.previewToken,
+        confirmed: true,
+      },
+    }));
   },
   systemStatus() {
     return request<SystemStatus>("/system/status");

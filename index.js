@@ -69,7 +69,6 @@ if (major < 20 || major >= 21) {
       'follow-redirects',
       'jimp@1.6.0',
       'qrcode-reader',
-      'wa-sticker-formatter',
     ];
 
     if (config.hasApiKey) {

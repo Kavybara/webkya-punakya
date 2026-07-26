@@ -23,7 +23,13 @@ export type ProductVariant = {
   isActive?: boolean;
   orderLock?: ManualOrderLock;
   checkoutRequirements?: CheckoutRequirements;
+  checkoutFields?: CheckoutField[];
+  sheetCheckoutFields?: CheckoutField[];
   deliveryTemplate?: string;
+  deliveryTemplateVersion?: number;
+  requiredDeliveryFields?: Array<string | string[]>;
+  deliveryTemplateUpdatedAt?: string;
+  deliveryTemplateUpdatedBy?: string;
   warrantyTemplate?: string;
   durationModes?: DurationModes;
   prices: Record<string, number>;
@@ -39,6 +45,17 @@ export type CheckoutRequirements = {
   label?: string;
   placeholder?: string;
   helper?: string;
+};
+
+export type CheckoutField = {
+  key: "customerDevice" | "customerEmail" | "customerWhatsapp" | "customerPlan";
+  label: string;
+  type: "text" | "email" | "tel" | "select";
+  required: boolean;
+  minItems?: number;
+  placeholder?: string;
+  helperText?: string;
+  options?: string[];
 };
 
 export type MessageTemplates = {
@@ -59,7 +76,14 @@ export type Product = {
   needsProfile: boolean;
   needsPin: boolean;
   checkoutRequirements?: CheckoutRequirements;
+  checkoutFields?: CheckoutField[];
+  sheetCheckoutFields?: CheckoutField[];
   messageTemplates?: MessageTemplates;
+  deliveryTemplate?: string;
+  deliveryTemplateVersion?: number;
+  requiredDeliveryFields?: Array<string | string[]>;
+  deliveryTemplateUpdatedAt?: string;
+  deliveryTemplateUpdatedBy?: string;
   code: string;
   variants: ProductVariant[];
 };
@@ -74,7 +98,11 @@ export type StockItem = {
   password: string;
   profile?: string;
   pin?: string;
-  status: "available" | "reserved" | "sold";
+  status: "available" | "reserved" | "sold" | "blocked";
+  accountCondition?: "NORMAL" | "BERMASALAH" | "DIPERIKSA" | "REPLACED" | "DISABLED" | "UNKNOWN" | string;
+  accountConditionRaw?: string;
+  accountConditionKnown?: boolean;
+  accountConditionBlocked?: boolean;
   createdAt?: string;
   signInCode?: string;
   verificationCode?: string;
@@ -153,6 +181,24 @@ export type Order = {
   channel: string;
   createdAt: string;
   deliveredStockIds?: string[];
+  deliveryTemplateSnapshot?: DeliveryTemplateSnapshot | null;
+  deliveryTemplateSnapshots?: DeliveryTemplateSnapshot[];
+};
+
+export type DeliveryTemplateSnapshot = {
+  status: "ready" | "incomplete" | "invalid" | "not_configured" | string;
+  scope?: "variant" | "product" | "none" | string;
+  accountId?: string;
+  stockId?: string;
+  variantId?: string;
+  sku?: string;
+  templateSource?: string;
+  renderedText?: string;
+  templateVersion?: number;
+  renderedAt?: string;
+  usedFields?: string[];
+  missingFields?: string[];
+  errors?: string[];
 };
 
 export type Reseller = {
@@ -209,6 +255,9 @@ export type ManagedAccount = {
   whatsapp?: string;
   profile?: string;
   pin?: string;
+  accountCondition?: "NORMAL" | "BERMASALAH" | "DIPERIKSA" | "REPLACED" | "DISABLED" | "UNKNOWN" | string;
+  accountConditionRaw?: string;
+  accountConditionKnown?: boolean;
   signInCode?: string;
   verificationCode?: string;
   resetLink?: string;
@@ -222,6 +271,9 @@ export type ManagedAccount = {
   replacedByStockId?: string;
   replacementReason?: string;
   replacementDisposition?: string;
+  deliveryTemplateSnapshot?: DeliveryTemplateSnapshot | null;
+  deliveryTemplateUnreadAt?: string;
+  deliveryTemplateOpenedAt?: string;
 };
 
 export type WhatsAppGroup = {
