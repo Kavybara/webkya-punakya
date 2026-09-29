@@ -2,6 +2,7 @@ import {
   checkoutValuesForOrder,
   validateCheckoutFieldValues,
 } from "../services/checkout-fields-service.js";
+import { clientKey } from "../lib/client-ip.js";
 
 export function finalizeSuccessfulSheetRepair(repair, sheetResult, repairedAt = "") {
   const sheetCommitFailed = Boolean(
@@ -105,30 +106,30 @@ export function registerOrderRoutes(app, deps) {
   });
 
   app.post("/api/public/order-tracking", async (req, res) => {
-    const clientKey = req.ip || req.socket?.remoteAddress || "unknown";
-    const rate = publicTrackingLimiter.check(clientKey);
+    const client = clientKey(req);
+    const rate = publicTrackingLimiter.check(client);
     if (!rate.allowed) {
       res.setHeader("Retry-After", String(rate.retryAfterSeconds));
-      await recordPublicTrackingAudit({ outcome: "rate_limited", clientKey });
+      await recordPublicTrackingAudit({ outcome: "rate_limited", client });
       return res.status(429).json({ error: "Terlalu banyak percobaan. Coba lagi beberapa menit." });
     }
 
     const db = await readDbSnapshot();
     const order = findOrderForPublicTracking(db.orders || [], req.body || {});
     if (!order) {
-      publicTrackingLimiter.recordFailure(clientKey);
-      await recordPublicTrackingAudit({ outcome: "not_found", clientKey });
+      publicTrackingLimiter.recordFailure(client);
+      await recordPublicTrackingAudit({ outcome: "not_found", client });
       return res.status(404).json({ error: "Pesanan tidak ditemukan atau data verifikasi tidak sesuai." });
     }
-    publicTrackingLimiter.clear(clientKey);
-    await recordPublicTrackingAudit({ outcome: "success", clientKey, orderId: order.id });
+    publicTrackingLimiter.clear(client);
+    await recordPublicTrackingAudit({ outcome: "success", client, orderId: order.id });
     res.setHeader("X-Robots-Tag", "noindex, nofollow");
     res.json(safeTrackingOrder(order));
   });
 
   app.get("/api/public/orders/:id", async (req, res) => {
-    const clientKey = req.ip || req.socket?.remoteAddress || "unknown";
-    const rate = publicTrackingLimiter.check(clientKey);
+    const client = clientKey(req);
+    const rate = publicTrackingLimiter.check(client);
     if (!rate.allowed) {
       res.setHeader("Retry-After", String(rate.retryAfterSeconds));
       return res.status(429).json({ error: "Terlalu banyak percobaan. Coba lagi beberapa menit." });
@@ -140,10 +141,10 @@ export function registerOrderRoutes(app, deps) {
       verification: req.query.verification,
     });
     if (!order || String(order.id || "").toLowerCase() !== String(req.params.id || "").toLowerCase()) {
-      publicTrackingLimiter.recordFailure(clientKey);
+      publicTrackingLimiter.recordFailure(client);
       return res.status(404).json({ error: "Pesanan tidak ditemukan atau data verifikasi tidak sesuai." });
     }
-    publicTrackingLimiter.clear(clientKey);
+    publicTrackingLimiter.clear(client);
     res.setHeader("X-Robots-Tag", "noindex, nofollow");
     res.json(safeTrackingOrder(order));
   });

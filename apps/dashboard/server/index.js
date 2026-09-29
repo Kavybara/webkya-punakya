@@ -42,6 +42,8 @@ import { registerSystemRoutes } from "./routes/system-routes.js";
 import { registerWhatsAppRoutes } from "./routes/whatsapp-routes.js";
 import { registerWarrantyRoutes } from "./routes/warranty-routes.js";
 import { mergeGoogleSheetsSettings } from "./settings-merge.js";
+import { clientKey, resolveTrustProxy } from "./lib/client-ip.js";
+import { createLoginAttemptLimiter } from "./lib/login-attempt-limiter.js";
 import { stockBlockedByAccountCondition } from "./google-sheets/account-condition.js";
 import { createOrderStockService } from "./services/order-stock-service.js";
 import { createFulfillmentNotificationService } from "./services/fulfillment-notification-service.js";
@@ -186,7 +188,10 @@ const allowedBrowserOrigins = configuredOrigins(
   `http://${configuredHost || "127.0.0.1"}:${configuredPort || 4174}`,
 );
 
-app.set("trust proxy", 1);
+// `req.ip` is the key for every rate limiter and audit trail, so it is only
+// trustworthy when X-Forwarded-For comes from a proxy we control. See
+// server/lib/client-ip.js for why this is an allowlist and not a hop count.
+app.set("trust proxy", resolveTrustProxy());
 app.use(securityHeaders({ isSecureRequest: requestUsesHttps }));
 app.use(cors(corsOptions(allowedBrowserOrigins)));
 app.use(express.json({ limit: "1mb" }));
@@ -1410,11 +1415,11 @@ function activityBelongsToReseller(db, auth, activity) {
   return false;
 }
 
-const loginAttempts = new Map();
+const loginAttempts = createLoginAttemptLimiter();
 const publicTrackingLimiter = createPublicTrackingLimiter();
 
-async function recordPublicTrackingAudit({ outcome, clientKey, orderId = "" }) {
-  const clientHash = crypto.createHash("sha256").update(String(clientKey || "unknown")).digest("hex").slice(0, 12);
+async function recordPublicTrackingAudit({ outcome, client, orderId = "" }) {
+  const clientHash = crypto.createHash("sha256").update(String(client || "unknown")).digest("hex").slice(0, 12);
   await updateDb((db) => {
     db.activities = db.activities || [];
     db.activities.unshift({
@@ -1430,36 +1435,21 @@ async function recordPublicTrackingAudit({ outcome, clientKey, orderId = "" }) {
   });
 }
 
-function loginAttemptKey(req, email) {
-  return `${req.ip || req.socket?.remoteAddress || "local"}::${email}`;
-}
-
 function assertLoginAllowed(req, email) {
-  const key = loginAttemptKey(req, email);
-  const attempt = loginAttempts.get(key);
-  const now = Date.now();
-  if (!attempt || attempt.resetAt <= now) return;
-  if (attempt.count >= Number(process.env.LOGIN_MAX_ATTEMPTS || 5)) {
-    const error = new Error("Terlalu banyak percobaan login. Coba lagi beberapa menit lagi.");
-    error.status = 429;
-    throw error;
-  }
+  const limit = loginAttempts.check(req, email);
+  if (limit.allowed) return;
+  const error = new Error("Terlalu banyak percobaan login. Coba lagi beberapa menit lagi.");
+  error.status = 429;
+  error.retryAfterSeconds = limit.retryAfterSeconds;
+  throw error;
 }
 
 function recordLoginFailure(req, email) {
-  const key = loginAttemptKey(req, email);
-  const now = Date.now();
-  const windowMs = Number(process.env.LOGIN_WINDOW_MS || 15 * 60 * 1000);
-  const attempt = loginAttempts.get(key);
-  if (!attempt || attempt.resetAt <= now) {
-    loginAttempts.set(key, { count: 1, resetAt: now + windowMs });
-    return;
-  }
-  attempt.count += 1;
+  loginAttempts.recordFailure(req, email);
 }
 
 function clearLoginFailures(req, email) {
-  loginAttempts.delete(loginAttemptKey(req, email));
+  loginAttempts.clear(req, email);
 }
 
 function normalizeLoginIdentifier(value = "") {
@@ -9131,7 +9121,11 @@ app.use(async (error, _req, res, _next) => {
       return null;
     }).catch(() => undefined);
   }
-  res.status(error.status || 500).json({ error: error.message || "Server error" });
+  const status = error.status || 500;
+  if (status === 429 && error.retryAfterSeconds) {
+    res.setHeader("Retry-After", String(Math.max(1, Math.ceil(error.retryAfterSeconds))));
+  }
+  res.status(status).json({ error: error.message || "Server error" });
 });
 
 await ensureDb();

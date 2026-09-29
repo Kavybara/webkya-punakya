@@ -147,6 +147,11 @@ export function registerAuthRoutes(app, deps) {
       const input = normalizeRegistrationInput(req.body || {});
       const validationError = validateRegistrationInput(input);
       if (validationError) return res.status(400).json({ error: validationError });
+      // A single shared label, so this is a global cap on registration
+      // requests rather than a per-account one. That is deliberate: the
+      // endpoint sends a WhatsApp OTP on every call, so the number one address
+      // can trigger across the whole instance is the thing worth bounding. The
+      // per-WhatsApp resend limit below still applies per applicant.
       assertLoginAllowed(req, "self-registration");
       recordLoginFailure(req, "self-registration");
 
