@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Menu, ShieldCheck, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ownerWhatsappLink } from "../../lib/ownerContact";
 
@@ -37,7 +38,7 @@ export default function PublicNavbar() {
             className="flex items-center gap-2.5 rounded-md text-[var(--text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
           >
             <span className="flex h-8 w-8 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--surface)]">
-              <i className="ri-shield-keyhole-line text-sm" aria-hidden="true" />
+              <ShieldCheck size={15} aria-hidden="true" />
             </span>
             <span className="text-base font-extrabold">Kavya</span>
           </Link>
@@ -75,7 +76,7 @@ export default function PublicNavbar() {
               aria-expanded={menuOpen}
               className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[var(--border)] text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-white lg:hidden"
             >
-              <i className={menuOpen ? "ri-close-line" : "ri-menu-line"} aria-hidden="true" />
+              {menuOpen ? <X size={18} aria-hidden="true" /> : <Menu size={18} aria-hidden="true" />}
             </button>
           </div>
         </div>

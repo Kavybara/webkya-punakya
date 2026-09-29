@@ -6,6 +6,7 @@ import {
   useMotionValue,
   useReducedMotion,
 } from "framer-motion";
+import { ArrowRight, Check, Tv } from "lucide-react";
 import { Link } from "react-router-dom";
 import PublicNavbar from "../../components/feature/PublicNavbar";
 import { api, type CatalogProduct } from "../../lib/api";
@@ -65,7 +66,7 @@ function CatalogPreview({ products, loading }: { products: CatalogProduct[]; loa
             <a key={product.id} href="#produk" className="group flex min-h-[118px] min-w-0 flex-col justify-between border-b border-r border-[var(--border)] p-4 transition-colors hover:bg-[var(--surface-hover)]">
               <span className="flex items-start justify-between gap-3">
                 <span className="grid h-10 w-10 place-items-center rounded-md border border-[var(--border)] bg-[var(--bg-raised)]">
-                  {logo ? <img src={logo} alt="" width="24" height="24" className="h-6 w-6 object-contain" /> : <i className="ri-tv-line text-[var(--text-secondary)]" />}
+                  {logo ? <img src={logo} alt="" width="24" height="24" className="h-6 w-6 object-contain" /> : <Tv size={24} className="text-[var(--text-secondary)]" aria-hidden="true" />}
                 </span>
                 <span className={`mt-1 h-2 w-2 rounded-full ${product.stockCount > 0 ? "bg-[var(--accent-cyan)]" : "bg-[var(--text-muted)]"}`} aria-label={product.stockCount > 0 ? "Stok tersedia" : "Stok habis"} />
               </span>
@@ -167,7 +168,7 @@ function HeroSection() {
                 </div>
                 <a href="#produk" className="group inline-flex min-h-11 shrink-0 items-center justify-end gap-1.5 text-sm font-semibold text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">
                   Lihat katalog produk
-                  <i className="ri-arrow-right-line text-base transition-transform group-hover:translate-x-[3px]" aria-hidden="true" />
+                  <ArrowRight size={16} className="transition-transform group-hover:translate-x-[3px]" aria-hidden="true" />
                 </a>
               </div>
             </div>
@@ -284,7 +285,7 @@ function BentoSection() {
                       viewport={{ once: true, amount: 0.8 }}
                       transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
                     >
-                      <i className="ri-check-line" aria-hidden="true" />
+                      <Check size={16} aria-hidden="true" />
                     </motion.span>
                     <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Pembayaran</span>
                   </div>
@@ -346,7 +347,7 @@ function OrderStepsSection() {
       <Reveal className="mx-auto max-w-[1180px] px-4 sm:px-6 md:px-8 lg:px-10">
         <motion.div variants={revealItem}><SectionHeading eyebrow="Cara pemesanan" title="Tiga langkah untuk mulai." description="Pilih layanan, selesaikan pembayaran, lalu pantau pesanan." /></motion.div>
         <motion.ol variants={stagger} className="grid gap-3 md:grid-cols-3">
-          {steps.map(([number, title, body], index) => <motion.li key={title} variants={revealItem} className="relative rounded-lg border border-[var(--border)] bg-[var(--surface)] p-5"><div className="flex items-center justify-between"><span className="text-3xl font-medium tracking-[-0.04em] text-[var(--text-muted)]">{number}</span>{index < 2 ? <i className="ri-arrow-right-line hidden text-[var(--text-muted)] md:block" aria-hidden="true" /> : <i className="ri-check-line text-[var(--accent-cyan)]" aria-hidden="true" />}</div><h3 className="mt-7 text-lg font-extrabold">{title}</h3><p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">{body}</p></motion.li>)}
+          {steps.map(([number, title, body], index) => <motion.li key={title} variants={revealItem} className="relative rounded-lg border border-[var(--border)] bg-[var(--surface)] p-5"><div className="flex items-center justify-between"><span className="text-3xl font-medium tracking-[-0.04em] text-[var(--text-muted)]">{number}</span>{index < 2 ? <ArrowRight size={16} className="hidden text-[var(--text-muted)] md:block" aria-hidden="true" /> : <Check size={16} className="text-[var(--accent-cyan)]" aria-hidden="true" />}</div><h3 className="mt-7 text-lg font-extrabold">{title}</h3><p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">{body}</p></motion.li>)}
         </motion.ol>
       </Reveal>
     </section>

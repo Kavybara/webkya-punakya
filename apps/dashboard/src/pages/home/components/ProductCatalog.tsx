@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type PointerEvent, type ReactNode } from "react";
 import { motion, useMotionTemplate, useMotionValue, useReducedMotion } from "framer-motion";
+import { Archive, ArrowRight, Tv, WifiOff } from "lucide-react";
 import { Link } from "react-router-dom";
 import { api, subscribeRealtime, type CatalogProduct } from "../../../lib/api";
 import { sortedAllowedPriceEntries } from "../../../lib/durations";
@@ -112,7 +113,7 @@ export default function ProductCatalog() {
           </div>
         ) : loadError ? (
           <div role="alert" className="flex max-w-2xl flex-col gap-4 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-raised)] text-[var(--text-secondary)]"><i className="ri-wifi-off-line" aria-hidden="true" /></span><div><h3 className="font-extrabold text-[var(--text-primary)]">Katalog belum tersedia</h3><p className="mt-1 text-sm leading-5 text-[var(--text-secondary)]">{loadError}</p></div></div>
+            <div className="flex items-start gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-raised)] text-[var(--text-secondary)]"><WifiOff size={18} aria-hidden="true" /></span><div><h3 className="font-extrabold text-[var(--text-primary)]">Katalog belum tersedia</h3><p className="mt-1 text-sm leading-5 text-[var(--text-secondary)]">{loadError}</p></div></div>
             <button type="button" onClick={() => { setLoading(true); setRefreshKey((value) => value + 1); }} className="min-h-11 shrink-0 rounded-full bg-[var(--text-primary)] px-5 text-sm font-extrabold text-[var(--bg-canvas)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">Coba Lagi</button>
           </div>
         ) : readyProducts.length ? (
@@ -128,7 +129,7 @@ export default function ProductCatalog() {
                     <div className="absolute left-[18%] top-[14%] h-24 w-24 rounded-full bg-[var(--accent-violet)]/10 blur-3xl" aria-hidden="true" />
                     <div className="absolute bottom-[10%] right-[12%] h-24 w-24 rounded-full bg-[var(--accent-cyan)]/10 blur-3xl" aria-hidden="true" />
                     <div className="relative flex h-20 w-20 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface)]">
-                      {logo ? <img src={logo} alt={`Logo ${asset.label}`} width="52" height="52" className="h-12 w-12 object-contain" loading="lazy" decoding="async" /> : <i className="ri-tv-line text-3xl text-[var(--text-secondary)]" aria-hidden="true" />}
+                      {logo ? <img src={logo} alt={`Logo ${asset.label}`} width="52" height="52" className="h-12 w-12 object-contain" loading="lazy" decoding="async" /> : <Tv size={30} className="text-[var(--text-secondary)]" aria-hidden="true" />}
                     </div>
                     <span className="absolute right-3 top-3 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-[10px] font-bold text-[var(--text-secondary)]">{product.category || asset.label}</span>
                     <span className="absolute bottom-3 left-3 inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-[10px] font-bold text-[var(--text-secondary)]"><span className={`h-1.5 w-1.5 rounded-full ${isReady ? "bg-[var(--accent-cyan)]" : "bg-[var(--text-muted)]"}`} />{isReady ? `${product.stockCount} stok` : "Stok habis"}</span>
@@ -136,17 +137,17 @@ export default function ProductCatalog() {
                    <div className="p-5">
                      <h3 className="text-lg font-extrabold text-[var(--text-primary)]">{product.name}</h3>
                      <div className="mt-5"><p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Mulai dari</p><p className="mt-1 text-xl font-black text-[var(--text-primary)]">{price ? formatRupiah(price) : "Belum diatur"}</p></div>
-                     {isReady ? <Link to={resellerCatalogLoginPath} className="group mt-5 flex min-h-11 items-center justify-center gap-2 rounded-full bg-[var(--text-primary)] text-sm font-extrabold text-[var(--bg-canvas)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">Lihat Paket<i className="ri-arrow-right-line transition-transform group-hover:translate-x-[3px]" /></Link> : <button type="button" disabled className="mt-5 flex min-h-11 w-full cursor-not-allowed items-center justify-center rounded-full border border-[var(--border)] text-sm font-bold text-[var(--text-muted)]">Stok Habis</button>}
+                     {isReady ? <Link to={resellerCatalogLoginPath} className="group mt-5 flex min-h-11 items-center justify-center gap-2 rounded-full bg-[var(--text-primary)] text-sm font-extrabold text-[var(--bg-canvas)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">Lihat Paket<ArrowRight size={16} className="transition-transform group-hover:translate-x-[3px]" aria-hidden="true" /></Link> : <button type="button" disabled className="mt-5 flex min-h-11 w-full cursor-not-allowed items-center justify-center rounded-full border border-[var(--border)] text-sm font-bold text-[var(--text-muted)]">Stok Habis</button>}
                   </div>
                 </SpotlightProductCard>
               );
             })}
           </motion.div>
         ) : (
-          <div className="flex max-w-2xl items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-5"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-raised)] text-[var(--text-secondary)]"><i className="ri-archive-line" /></span><div><h3 className="font-extrabold">Belum ada produk aktif</h3><p className="mt-1 text-sm leading-5 text-[var(--text-secondary)]">Produk akan muncul setelah diaktifkan dari dashboard.</p></div></div>
+          <div className="flex max-w-2xl items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-5"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-raised)] text-[var(--text-secondary)]"><Archive size={18} aria-hidden="true" /></span><div><h3 className="font-extrabold">Belum ada produk aktif</h3><p className="mt-1 text-sm leading-5 text-[var(--text-secondary)]">Produk akan muncul setelah diaktifkan dari dashboard.</p></div></div>
         )}
 
-        <div className="mt-7"><Link to={resellerCatalogLoginPath} className="group inline-flex min-h-11 items-center gap-2 rounded-full border border-[var(--border)] px-5 text-sm font-bold text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">Lihat semua produk<i className="ri-arrow-right-line transition-transform group-hover:translate-x-[3px]" /></Link></div>
+        <div className="mt-7"><Link to={resellerCatalogLoginPath} className="group inline-flex min-h-11 items-center gap-2 rounded-full border border-[var(--border)] px-5 text-sm font-bold text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">Lihat semua produk<ArrowRight size={16} className="transition-transform group-hover:translate-x-[3px]" aria-hidden="true" /></Link></div>
       </div>
     </section>
   );

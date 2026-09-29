@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowRight, Check, Circle, Clock, Copy, Minus, Plus, Search, TriangleAlert, X } from "lucide-react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { api, subscribeRealtime, type ApiOrder, type ApiPayment, type CatalogProduct, type CatalogVariant } from "../../lib/api";
 import { durationAllowedByModes, firstAllowedPriceEntry, sortedAllowedPriceEntries } from "../../lib/durations";
@@ -963,7 +964,7 @@ export default function ProductsPage() {
             {error ? (
               <>
                 <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-rose-400/20 bg-rose-400/10 text-rose-300">
-                  <i className="ri-error-warning-line text-xl" />
+                  <TriangleAlert size={20} aria-hidden="true" />
                 </div>
                 <h1 className="mt-4 text-lg font-semibold">Checkout tidak tersedia</h1>
                 <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">{error}</p>
@@ -1172,11 +1173,11 @@ export default function ProductsPage() {
                     </div>
                     <div className="inline-flex h-11 items-center overflow-hidden rounded-lg border border-white/10 bg-black/20">
                       <button type="button" onClick={() => changeQuantity(quantity - 1)} disabled={quantity <= 1} className="flex h-11 w-11 items-center justify-center text-zinc-400 hover:bg-white/[0.05] hover:text-white disabled:cursor-not-allowed disabled:text-zinc-700" aria-label="Kurangi jumlah akun">
-                        <i className="ri-subtract-line" />
+                        <Minus size={15} aria-hidden="true" />
                       </button>
                       <input value={quantity} onChange={(event) => changeQuantity(Number(event.target.value))} className="h-11 w-12 border-x border-white/10 bg-transparent text-center text-sm font-semibold text-white outline-none focus-visible:relative focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-400/70" inputMode="numeric" aria-label="Jumlah akun" />
                       <button type="button" onClick={() => changeQuantity(quantity + 1)} disabled={quantity >= (selection?.variant.stockCount || 1)} className="flex h-11 w-11 items-center justify-center text-zinc-400 hover:bg-white/[0.05] hover:text-white disabled:cursor-not-allowed disabled:text-zinc-700" aria-label="Tambah jumlah akun">
-                        <i className="ri-add-line" />
+                        <Plus size={15} aria-hidden="true" />
                       </button>
                     </div>
                   </div>
@@ -1194,7 +1195,7 @@ export default function ProductsPage() {
                     disabled={submitting || !selection || resellerCheck.status === "checking" || resellerCheck.status === "invalid"}
                     className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-white px-4 text-sm font-semibold text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500"
                   >
-                    {submitting ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-black/20 border-t-black" aria-hidden="true" /> : <i className="ri-arrow-right-line" aria-hidden="true" />}
+                    {submitting ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-black/20 border-t-black" aria-hidden="true" /> : <ArrowRight size={16} aria-hidden="true" />}
                     {submitting ? "Memproses pesanan..." : "Lanjut ke Pembayaran"}
                   </button>
                   <p className="mt-3 text-center text-xs leading-5 text-zinc-600">Tombol dikunci selama proses agar pesanan tidak dibuat dua kali.</p>
@@ -1239,7 +1240,7 @@ export default function ProductsPage() {
                       <dd className="mt-2 flex min-w-0 items-center gap-2">
                         <span className="min-w-0 break-all font-mono text-xs text-zinc-300">{createdOrder?.id}</span>
                         <button type="button" onClick={() => copyCheckoutValue("order", createdOrder?.id || "")} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 text-zinc-400 hover:border-white/20 hover:text-white" aria-label="Salin nomor pesanan">
-                          <i className={copiedValue === "order" ? "ri-check-line text-emerald-300" : "ri-file-copy-line"} />
+                          {copiedValue === "order" ? <Check size={15} className="text-emerald-300" aria-hidden="true" /> : <Copy size={15} aria-hidden="true" />}
                         </button>
                       </dd>
                     </div>
@@ -1301,7 +1302,7 @@ export default function ProductsPage() {
                       <div className="flex items-center justify-between gap-3">
                         <div><p className="font-semibold text-white">QRIS Pembayaran</p><p className="mt-1 break-all font-mono text-xs text-zinc-500">{createdOrder?.id}</p></div>
                         <button type="button" onClick={() => setQrExpanded(false)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/10 text-zinc-400 hover:text-white" aria-label="Tutup QRIS">
-                          <i className="ri-close-line text-xl" />
+                          <X size={20} aria-hidden="true" />
                         </button>
                       </div>
                       <div className="mt-4 aspect-square overflow-hidden rounded-lg bg-white p-3">
@@ -1316,7 +1317,7 @@ export default function ProductsPage() {
             {step === "process" || step === "done" ? (
               <div className="p-6 text-center sm:p-10">
                 <div className={`mx-auto flex h-14 w-14 items-center justify-center rounded-full border ${step === "done" ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-300" : "border-amber-300/20 bg-amber-300/10 text-amber-200"}`}>
-                  <i className={step === "done" ? "ri-check-line text-2xl" : "ri-time-line text-2xl"} />
+                  {step === "done" ? <Check size={24} aria-hidden="true" /> : <Clock size={24} aria-hidden="true" />}
                 </div>
                 <h2 className="mt-5 text-2xl font-semibold text-white">{stockRaceDeposit ? "Stok habis, saldo bertambah" : step === "done" ? "Pesanan selesai" : "Pembayaran berhasil"}</h2>
                 <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-zinc-400">
@@ -1427,7 +1428,7 @@ export default function ProductsPage() {
             <div className="grid gap-3 lg:grid-cols-[1fr_auto_auto] lg:items-center">
               <label className="relative block">
                 <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-                  <i className="ri-search-line" />
+                  <Search size={15} aria-hidden="true" />
                 </span>
                 <input value={query} onChange={(event) => setQuery(event.target.value)} className="h-10 w-full rounded-md border border-gray-100 bg-[#f7f1e8] pl-9 pr-3 text-sm outline-none focus:border-red-200" placeholder="Cari produk..." />
               </label>
@@ -1522,7 +1523,7 @@ export default function ProductsPage() {
                         return (
                           <button key={variant.id} type="button" onClick={() => selectCatalogVariant(product, variant, duration.duration, duration.price)} className={`grid w-full grid-cols-[auto_1fr_auto] items-center gap-3 rounded-md border p-3 text-left transition-colors ${selectedVariant ? "border-red-200 bg-red-50" : "border-gray-100 hover:border-red-100 hover:bg-red-50/40"}`}>
                             <span className={`flex h-7 w-7 items-center justify-center rounded-full ${selectedVariant ? "bg-red-500 text-white" : variant.stockCount > 0 ? "bg-red-50 text-red-500" : "bg-slate-50 text-slate-300"}`}>
-                              <i className={`${selectedVariant ? "ri-check-line" : "ri-checkbox-blank-circle-line"} text-xs`} />
+                              {selectedVariant ? <Check size={12} aria-hidden="true" /> : <Circle size={12} aria-hidden="true" />}
                             </span>
                             <span className="min-w-0">
                               <span className="block text-sm font-semibold">{variant.name} <span className="text-[10px] font-medium text-slate-400">{variant.code}</span></span>
