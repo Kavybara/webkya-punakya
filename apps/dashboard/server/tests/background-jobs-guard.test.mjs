@@ -4,6 +4,7 @@ import test from "node:test";
 
 const serverUrl = new URL("../index.js", import.meta.url);
 const source = await readFile(serverUrl, "utf8");
+const devSource = await readFile(new URL("../dev.js", import.meta.url), "utf8");
 
 /**
  * Every recurring job used to be armed with a bare `setTimeout` + `setInterval`
@@ -85,8 +86,7 @@ test("the schedule is reported from the registrations, not hardcoded", () => {
   );
 });
 
-test("every job that exists is named, so the log lists all of them", () => {
-  // Each job gets a human-readable name in the startup log. Count the
+test("every job that exists is named, so the log lists all of them", () => {  // Each job gets a human-readable name in the startup log. Count the
   // registrations so a job added without a name is caught: the test fails on
   // the mismatch rather than on a stylistic grounds.
   const registrations = [...source.matchAll(/^scheduleJob\("([^"]+)",\s*(\w+),/gm)];
@@ -108,4 +108,19 @@ test("every job that exists is named, so the log lists all of them", () => {
   ]) {
     assert.ok(names.includes(expected), `${expected} must be scheduled through the guard`);
   }
+});
+
+test("npm run dev cannot re-arm the jobs by accident", () => {
+  // `server/dev.js` is how a second copy of the API actually gets started, so
+  // it defaults the flag on rather than relying on whoever launched it to
+  // remember. `??` rather than `||` matters here: `DISABLE_BACKGROUND_JOBS=0`
+  // is a real value -- it means "yes, run the jobs" -- and `||` would throw it
+  // away and disable them instead.
+  assert.match(devSource, /DISABLE_BACKGROUND_JOBS: process\.env\.DISABLE_BACKGROUND_JOBS \?\? "1"/);
+
+  // The value has to be handed to the child explicitly. Inheriting `process.env`
+  // looks equivalent, but the child is the only one that reads the flag, and a
+  // scrubbed parent environment is exactly the case where it would be lost.
+  assert.match(devSource, /run\("api", "node", \["server\/index\.js"\], apiEnv\)/);
+  assert.doesNotMatch(devSource, /run\("api", "node", \["server\/index\.js"\]\);/);
 });
