@@ -4,6 +4,7 @@ import {
   evaluateCatalogPrecheck,
 } from "../services/catalog-precheck-service.js";
 import { clientKey } from "../lib/client-ip.js";
+import { createAttemptLimiter } from "../lib/attempt-limiter.js";
 
 export function registerCatalogRoutes(app, deps) {
   const {
@@ -25,6 +26,10 @@ export function registerCatalogRoutes(app, deps) {
     updateDb,
   } = deps;
   const catalogPrecheckLimiter = createCatalogPrecheckLimiter();
+  const resellerCheckLimiter = createAttemptLimiter({
+    maxAttempts: process.env.RESELLER_CHECK_MAX_ATTEMPTS || 20,
+    windowMs: process.env.RESELLER_CHECK_WINDOW_MS || 5 * 60 * 1000,
+  });
 
   app.get("/api/products", requireAuth(["owner"]), async (_req, res) => {
     const db = await readDb();
@@ -133,8 +138,24 @@ export function registerCatalogRoutes(app, deps) {
   });
 
   app.get("/api/public/reseller-check", async (req, res) => {
+    // This one is a deliberate product feature: the checkout has to tell a
+    // prospective reseller that their number is not registered, so the answer
+    // cannot be hidden. What can be hidden is how fast it will say yes or no —
+    // unlimited, it walks a phone-number list and maps the whole reseller base.
+    const client = clientKey(req);
+    const rate = resellerCheckLimiter.check(client);
+    if (!rate.allowed) {
+      res.setHeader("Retry-After", String(rate.retryAfterSeconds));
+      res.status(429).json({ error: "Terlalu banyak pemeriksaan. Coba lagi beberapa menit." });
+      return;
+    }
+
     const db = await readDb();
     const reseller = activeResellerByWhatsapp(db, req.query.whatsapp || "");
+    // Every request costs the same amount and discloses the same amount, so
+    // every request counts. There is no "failure" to record here — the answer
+    // is the disclosure.
+    resellerCheckLimiter.recordFailure(client);
     res.json({
       ok: true,
       active: Boolean(reseller),

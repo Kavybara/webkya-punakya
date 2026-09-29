@@ -6,6 +6,11 @@ import {
   validateRegistrationInput,
 } from "../services/registration-service.js";
 
+// The one response a password-reset request gets whether or not the identifier
+// belongs to an account. Anything more specific turns the endpoint into a way
+// to enumerate every registered email, username and WhatsApp number.
+const PASSWORD_RESET_ACCEPTED_MESSAGE = "Jika data cocok dengan akun Kavya, kode verifikasi akan dikirim melalui WhatsApp.";
+
 export function registerAuthRoutes(app, deps) {
   const {
     assertLoginAllowed,
@@ -59,7 +64,12 @@ export function registerAuthRoutes(app, deps) {
       if (!ownerPasswordConfigured(owner)) {
         if (requestedRole === "owner") {
           recordLoginFailure(req, email);
-          res.status(401).json({ error: "Password owner belum dikonfigurasi. Set OWNER_PASSWORD atau reset password owner lewat OTP WhatsApp." });
+          // Same status and same body as a wrong password. Naming the missing
+          // configuration tells an unauthenticated caller that this instance
+          // has no owner password set, which is reconnaissance worth giving to
+          // nobody. The owner console surfaces the configuration state from
+          // settings, where it is behind a login.
+          res.status(401).json({ error: "Email atau password owner salah" });
           return;
         }
       } else {
@@ -362,13 +372,48 @@ export function registerAuthRoutes(app, deps) {
           && firstConfigured(process.env.WHATSAPP_BOT_URL, dbForSend.settings?.whatsappBotUrl, "http://127.0.0.1:4016"),
       );
 
+      // An unconfigured bot is a property of the instance, not of the account
+      // being asked for, so saying so reveals nothing and tells an operator
+      // why nothing is arriving. The startup migration provisions a bot token
+      // when one is missing, so in practice this is a guard rather than a path
+      // a request reaches.
+      if (!botConfigured) {
+        res.status(503).json({
+          ok: false,
+          botConfigured,
+          deliveryStatus: "whatsapp_bot_not_configured",
+          error: passwordResetDeliveryError("whatsapp_bot_not_configured"),
+        });
+        return;
+      }
+
+      // Everything from here answers identically whether or not the identifier
+      // belongs to an account. Telling a stranger "no such user" is the whole
+      // enumeration oracle, so an unknown identifier, an account with no
+      // WhatsApp number, and a delivered code are one and the same response.
+      const accepted = {
+        ok: true,
+        botConfigured,
+        destination: "",
+        deliveryStatus: "sent",
+        message: PASSWORD_RESET_ACCEPTED_MESSAGE,
+      };
+
+      // Look the account up on a read-only snapshot first. Taking the write
+      // lock here would rewrite the whole database file on every probe, and
+      // this endpoint is unauthenticated.
+      const snapshot = await readDb();
+      const snapshotAccount = findPasswordResetAccount(snapshot, identifier);
+      if (!snapshotAccount?.whatsapp) {
+        res.json(accepted);
+        return;
+      }
+
       const created = await updateDb((db) => {
         cleanupPasswordResets(db);
         const account = findPasswordResetAccount(db, identifier);
         const whatsapp = normalizeWhatsappNumber(account?.whatsapp);
-        if (!account) return { account: null, code: "", reason: "account_not_found" };
-        if (!whatsapp) return { account: { ...account, whatsapp: "" }, code: "", reason: "whatsapp_number_not_found" };
-        if (!botConfigured) return { account: { ...account, whatsapp }, code: "", reason: "whatsapp_bot_not_configured" };
+        if (!account || !whatsapp) return { account: null, code: "" };
         const resetId = makeId("rst");
         const code = String(crypto.randomInt(100000, 1000000));
         db.passwordResets = db.passwordResets || [];
@@ -388,13 +433,8 @@ export function registerAuthRoutes(app, deps) {
       });
 
       if (!created.account || !created.code) {
-        const status = created.reason === "account_not_found" ? 404 : created.reason === "whatsapp_bot_not_configured" ? 503 : 400;
-        res.status(status).json({
-          ok: false,
-          botConfigured,
-          deliveryStatus: created.reason || "not_sent",
-          error: passwordResetDeliveryError(created.reason),
-        });
+        // The account disappeared between the snapshot and the write lock.
+        res.json(accepted);
         return;
       }
 
@@ -413,22 +453,15 @@ export function registerAuthRoutes(app, deps) {
       });
 
       if (!delivery.sent) {
-        res.status(502).json({
-          ok: false,
-          botConfigured,
-          deliveryStatus: delivery.reason || "send_failed",
-          error: passwordResetDeliveryError(delivery.reason),
-        });
+        // A send failure is only reachable for an identifier that belongs to a
+        // real account, so reporting it would hand back the enumeration signal
+        // the uniform response exists to withhold. The failed attempt is
+        // already recorded above and shows up in the owner's activity log.
+        res.json(accepted);
         return;
       }
 
-      res.json({
-        ok: true,
-        botConfigured,
-        destination: "",
-        deliveryStatus: "sent",
-        message: "Kode OTP sudah dikirim ke nomor WhatsApp terdaftar.",
-      });
+      res.json(accepted);
     } catch (error) {
       next(error);
     }
