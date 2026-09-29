@@ -40,7 +40,7 @@ function declaredIn(blockPattern) {
 }
 
 const LIGHT = declaredIn(/:root\s*\{[\s\S]*?\n\}/);
-const DARK = declaredIn(/\.kavya-public-dark,\s*[\s\S]*?\{[\s\S]*?\n\}/);
+const DARK = declaredIn(/\.theme-dark,\s*[\s\S]*?\{[\s\S]*?\n\}/);
 
 test("tokens.css declares the palette in one place", () => {
   const others = sourceFiles(SRC)
@@ -163,7 +163,7 @@ test("the dark roots are declared once, as a single selector list", () => {
   // The three dark roots are the same colour: the public marketing pages, the
   // sign-in shell, and the one signed-in frame both consoles share. The moment
   // a fourth stylesheet grows its own copy we are back to four vocabularies.
-  const DARK_ROOTS = [".kavya-public-dark", ".auth-shell", ".ui-shell"];
+  const DARK_ROOTS = [".theme-dark", ".auth-shell", ".ui-shell"];
 
   // Comments carry no braces here, but they carry prose, and a selector
   // match that starts at the top of the file would swallow all of it.

@@ -379,7 +379,7 @@ export default function HomePage() {
   return (
     <MotionConfig reducedMotion="user">
       
-        <main className="kavya-public-dark min-h-screen overflow-x-hidden font-sans">
+        <main className="theme-dark min-h-screen overflow-x-hidden font-sans">
           <PublicNavbar />
           <HeroSection />
           <ProductCatalog />

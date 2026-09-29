@@ -68,10 +68,12 @@
  * pages, the login shell, and the signed-in frame both consoles share. They
  * were already the same colour; they just each carried their own copy.
  *
- * `.kavya-public-dark` is the historical name for "this subtree is dark" and
- * is kept until the public pages are rebuilt against the token names.
+ * `.theme-dark` is the public pages' hook for "this subtree is dark". It was
+ * called `.kavya-public-dark`, which named a theme hook after the product, so a
+ * reader could not tell from the class name that it was generic. `.auth-shell`
+ * and `.ui-shell` are the same idea bound to the two components that need it.
  */
-.kavya-public-dark,
+.theme-dark,
 .auth-shell,
 .ui-shell {
   --bg-canvas: #070708;
@@ -97,12 +99,12 @@
  * them, and they have no light-theme counterpart because there is nothing
  * behind them to wash.
  */
-.kavya-public-dark {
+.theme-dark {
   --fx-grid-dot: rgba(255, 255, 255, 0.8);
   --fx-shimmer: rgba(255, 255, 255, 0.045);
 }
 
-.kavya-public-dark ::selection {
+.theme-dark ::selection {
   background: color-mix(in srgb, var(--accent-violet) 50%, transparent);
   color: var(--text-primary);
 }

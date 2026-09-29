@@ -974,7 +974,7 @@ export default function ProductsPage() {
   if (resellerCheckoutWaiting) {
     return (
       
-        <main className="kavya-public-dark min-h-screen bg-[var(--bg-canvas)] px-4 py-8 text-[var(--text-primary)]">
+        <main className="theme-dark min-h-screen bg-[var(--bg-canvas)] px-4 py-8 text-[var(--text-primary)]">
           <header className="mx-auto flex max-w-6xl items-center justify-between">
             <button type="button" onClick={backToCatalog} className="inline-flex min-h-11 items-center gap-3 rounded-lg font-semibold">
               <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface)] font-serif">K</span>
@@ -1012,7 +1012,7 @@ export default function ProductsPage() {
   if (step !== "catalog") {
     return (
       
-        <main className="kavya-public-dark min-h-screen bg-[var(--bg-canvas)] px-4 py-6 text-[var(--text-primary)] sm:px-6 sm:py-8">
+        <main className="theme-dark min-h-screen bg-[var(--bg-canvas)] px-4 py-6 text-[var(--text-primary)] sm:px-6 sm:py-8">
           <header className="mx-auto flex max-w-6xl items-center justify-between">
             <button type="button" onClick={backToCatalog} className="inline-flex min-h-11 items-center gap-3 rounded-lg font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-violet-400">
               <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] font-serif">K</span>

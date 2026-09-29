@@ -47,7 +47,7 @@ test("checkout provides responsive summary, inline validation, and a locked subm
   assert.match(source, /aria-describedby/);
   assert.match(source, /Memproses pesanan/);
   assert.match(source, /submitLockRef/);
-  assert.match(source, /kavya-public-dark min-h-screen/);
+  assert.match(source, /theme-dark min-h-screen/);
   assert.doesNotMatch(source, /import \{ Button \}/);
 });
 
@@ -69,7 +69,7 @@ test("public tracking requires token or order plus verification and sets noindex
   assert.match(page, /Credential akun tidak pernah ditampilkan/);
   assert.match(page, /aria-live="polite"/);
   assert.match(page, /genericError/);
-  assert.match(page, /kavya-public-dark min-h-screen/);
+  assert.match(page, /theme-dark min-h-screen/);
   assert.match(api, /method: "POST"/);
   assert.match(api, /\/public\/order-tracking/);
   assert.doesNotMatch(api, /\/public\/orders\//);
