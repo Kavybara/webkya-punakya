@@ -23,6 +23,8 @@
     "preview": "vite preview --host 127.0.0.1",
     "test:security": "node --test server/tests/security.test.mjs",
     "test:routes": "node --test server/tests/route-modules.test.mjs",
+    "test:ui": "node --test server/tests/owner-console-ui.test.mjs server/tests/reseller-panel-v2-ui.test.mjs",
+    "test:all": "node --test server/tests/",
     "test:sheets-template": "node --test server/tests/google-sheets-template.test.mjs",
     "test:order-stock": "node --test server/tests/order-stock-service.test.mjs"
   },

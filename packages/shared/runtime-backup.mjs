@@ -390,7 +390,10 @@ async function writeUploadableArchive({ payload, outputDir, fileName }) {
     );
     await writeFileBundle(stageDir, ".", payload.file_bundles?.project_source);
 
-    const result = spawnSync("tar", ["-czf", filePath, "-C", stageDir, "."], {
+    // --force-local stops GNU tar reading a Windows drive letter (e.g. the
+    // "C:" in "C:\...\stage") as a remote host name, which otherwise fails with
+    // "Cannot connect to C: resolve failed". It is a no-op for local paths.
+    const result = spawnSync("tar", ["--force-local", "-czf", filePath, "-C", stageDir, "."], {
       stdio: "pipe",
       shell: false,
     });
