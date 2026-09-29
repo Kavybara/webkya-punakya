@@ -949,33 +949,33 @@ export default function ProductsPage() {
   if (resellerCheckoutWaiting) {
     return (
       
-        <main className="kavya-public-dark min-h-screen bg-[var(--kavya-bg)] px-4 py-8 text-[var(--kavya-text-primary)]">
+        <main className="kavya-public-dark min-h-screen bg-[var(--bg-canvas)] px-4 py-8 text-[var(--text-primary)]">
           <header className="mx-auto flex max-w-6xl items-center justify-between">
             <button type="button" onClick={backToCatalog} className="inline-flex min-h-11 items-center gap-3 rounded-lg font-semibold">
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--kavya-border)] bg-[var(--kavya-surface)] font-serif">K</span>
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface)] font-serif">K</span>
               <span>Kavya</span>
             </button>
-            <Link to="/reseller-v2/catalog" className="inline-flex min-h-11 items-center rounded-full border border-[var(--kavya-border)] px-5 text-sm font-medium text-[var(--kavya-text-secondary)]">
+            <Link to="/reseller-v2/catalog" className="inline-flex min-h-11 items-center rounded-full border border-[var(--border)] px-5 text-sm font-medium text-[var(--text-secondary)]">
               Katalog
             </Link>
           </header>
-          <section className="mx-auto mt-16 max-w-xl rounded-xl border border-[var(--kavya-border)] bg-[var(--kavya-surface)] p-6 text-center">
+          <section className="mx-auto mt-16 max-w-xl rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 text-center">
             {error ? (
               <>
                 <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-rose-400/20 bg-rose-400/10 text-rose-300">
                   <i className="ri-error-warning-line text-xl" />
                 </div>
                 <h1 className="mt-4 text-lg font-semibold">Checkout tidak tersedia</h1>
-                <p className="mt-2 text-sm leading-6 text-[var(--kavya-text-secondary)]">{error}</p>
+                <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">{error}</p>
                 <button type="button" onClick={backToCatalog} className="mt-5 inline-flex min-h-11 items-center justify-center rounded-lg bg-white px-4 text-sm font-semibold text-black transition-colors hover:bg-zinc-200">
                   Pilih Produk Lain
                 </button>
               </>
             ) : (
               <>
-                <div className="mx-auto h-12 w-12 animate-spin rounded-full border-2 border-white/10 border-t-[var(--kavya-cyan)]" />
+                <div className="mx-auto h-12 w-12 animate-spin rounded-full border-2 border-white/10 border-t-[var(--accent-cyan)]" />
                 <h1 className="mt-4 text-lg font-semibold">Menyiapkan checkout</h1>
-                <p className="mt-2 text-sm leading-6 text-[var(--kavya-text-secondary)]">Menyiapkan paket order dari katalog reseller.</p>
+                <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">Menyiapkan paket order dari katalog reseller.</p>
               </>
             )}
           </section>
@@ -987,7 +987,7 @@ export default function ProductsPage() {
   if (step !== "catalog") {
     return (
       
-        <main className="kavya-public-dark min-h-screen bg-[var(--kavya-bg)] px-4 py-6 text-[var(--kavya-text-primary)] sm:px-6 sm:py-8">
+        <main className="kavya-public-dark min-h-screen bg-[var(--bg-canvas)] px-4 py-6 text-[var(--text-primary)] sm:px-6 sm:py-8">
           <header className="mx-auto flex max-w-6xl items-center justify-between">
             <button type="button" onClick={backToCatalog} className="inline-flex min-h-11 items-center gap-3 rounded-lg font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-violet-400">
               <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] font-serif">K</span>
@@ -1010,7 +1010,7 @@ export default function ProductsPage() {
             ))}
           </div>
 
-          <section className="mx-auto mt-8 max-w-6xl overflow-hidden rounded-xl border border-[var(--kavya-border)] bg-[var(--kavya-surface)]">
+          <section className="mx-auto mt-8 max-w-6xl overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)]">
             <div className="border-b border-white/[0.09] px-5 py-4 sm:px-7">
               <h1 className="text-base font-semibold text-white">
                 {step === "payment" ? "Selesaikan pembayaran" : step === "done" ? "Pembayaran berhasil" : step === "process" ? "Pesanan sedang diproses" : `Pesan ${selection?.product.name || "Produk"}`}
@@ -1048,7 +1048,7 @@ export default function ProductsPage() {
                         readOnly={resellerNameLocked}
                         aria-invalid={Boolean((touched.customer || submitAttempted) && fieldErrors.customer)}
                         aria-describedby={fieldErrors.customer ? "checkout-customer-error" : undefined}
-                        className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-[var(--kavya-bg-elevated)] px-4 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15 read-only:cursor-not-allowed read-only:border-white/[0.06] read-only:bg-white/[0.025] read-only:text-zinc-400"
+                        className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-[var(--bg-raised)] px-4 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15 read-only:cursor-not-allowed read-only:border-white/[0.06] read-only:bg-white/[0.025] read-only:text-zinc-400"
                         placeholder="Masukkan nama reseller"
                       />
                       {(touched.customer || submitAttempted) && fieldErrors.customer ? <span id="checkout-customer-error" className="mt-2 block text-xs text-rose-300">{fieldErrors.customer}</span> : null}
@@ -1070,7 +1070,7 @@ export default function ProductsPage() {
                             onBlur={() => setTouched((current) => ({ ...current, customerData: true }))}
                             aria-invalid={showError}
                             aria-describedby={showError ? `${fieldId}-error` : field.helperText ? `${fieldId}-help` : undefined}
-                            className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-[var(--kavya-bg-elevated)] px-4 text-sm text-white outline-none focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15"
+                            className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-[var(--bg-raised)] px-4 text-sm text-white outline-none focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15"
                           >
                             <option value="">Pilih {field.label.toLowerCase()}</option>
                             {(field.options || []).map((option) => <option key={option} value={option}>{option}</option>)}
@@ -1084,7 +1084,7 @@ export default function ProductsPage() {
                             onBlur={() => setTouched((current) => ({ ...current, customerData: true }))}
                             aria-invalid={showError}
                             aria-describedby={showError ? `${fieldId}-error` : field.helperText ? `${fieldId}-help` : undefined}
-                            className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-[var(--kavya-bg-elevated)] px-4 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15"
+                            className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-[var(--bg-raised)] px-4 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15"
                             placeholder={field.placeholder}
                           />
                         )}
@@ -1101,7 +1101,7 @@ export default function ProductsPage() {
                         <input
                           value={email}
                           onChange={(event) => setEmail(event.target.value)}
-                          className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-[var(--kavya-bg-elevated)] px-4 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15"
+                          className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-[var(--bg-raised)] px-4 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15"
                           placeholder={activeCheckoutRules.placeholder}
                         />
                       </label>
@@ -1119,7 +1119,7 @@ export default function ProductsPage() {
                         readOnly={resellerWhatsappLocked}
                         aria-invalid={Boolean((touched.whatsapp || submitAttempted) && fieldErrors.whatsapp)}
                         aria-describedby={fieldErrors.whatsapp ? "checkout-whatsapp-error" : resellerCheck.message ? "checkout-whatsapp-status" : undefined}
-                        className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-[var(--kavya-bg-elevated)] px-4 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15 read-only:cursor-not-allowed read-only:border-white/[0.06] read-only:bg-white/[0.025] read-only:text-zinc-400"
+                        className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-[var(--bg-raised)] px-4 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15 read-only:cursor-not-allowed read-only:border-white/[0.06] read-only:bg-white/[0.025] read-only:text-zinc-400"
                         placeholder="08123456789"
                       />
                       {(touched.whatsapp || submitAttempted) && fieldErrors.whatsapp ? <span id="checkout-whatsapp-error" className="mt-2 block text-xs text-rose-300">{fieldErrors.whatsapp}</span> : null}
@@ -1141,13 +1141,13 @@ export default function ProductsPage() {
 
                     <label className="block">
                       <span className="text-sm font-medium">Catatan <span className="font-normal text-zinc-500">(opsional)</span></span>
-                      <textarea value={note} onChange={(event) => setNote(event.target.value.slice(0, 500))} className="mt-2 h-24 w-full resize-none rounded-lg border border-white/10 bg-[var(--kavya-bg-elevated)] px-4 py-3 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15" placeholder="Catatan tambahan untuk pesanan..." />
+                      <textarea value={note} onChange={(event) => setNote(event.target.value.slice(0, 500))} className="mt-2 h-24 w-full resize-none rounded-lg border border-white/10 bg-[var(--bg-raised)] px-4 py-3 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15" placeholder="Catatan tambahan untuk pesanan..." />
                       <span className="mt-1 block text-right text-xs text-zinc-600">{note.length}/500</span>
                     </label>
                   </div>
                 </div>
 
-                <aside className="rounded-lg border border-white/[0.09] bg-[var(--kavya-bg-elevated)] p-5 lg:sticky lg:top-6">
+                <aside className="rounded-lg border border-white/[0.09] bg-[var(--bg-raised)] p-5 lg:sticky lg:top-6">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Ringkasan pesanan</p>
@@ -1204,7 +1204,7 @@ export default function ProductsPage() {
 
             {step === "payment" ? (
               <div className="grid gap-6 p-5 sm:p-7 md:grid-cols-[0.92fr_1.08fr]">
-                <div className="rounded-lg border border-white/[0.08] bg-[var(--kavya-bg-elevated)] p-5">
+                <div className="rounded-lg border border-white/[0.08] bg-[var(--bg-raised)] p-5">
                   <p className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-600">Ringkasan pesanan</p>
                   <h2 className="mt-4 text-xl font-semibold text-white">{createdOrder?.product}</h2>
                   <p className="mt-1 text-sm leading-6 text-zinc-400">
@@ -1249,7 +1249,7 @@ export default function ProductsPage() {
                   </dl>
                 </div>
 
-                <div className="rounded-lg border border-white/[0.08] bg-[var(--kavya-bg-elevated)] p-5 text-center">
+                <div className="rounded-lg border border-white/[0.08] bg-[var(--bg-raised)] p-5 text-center">
                   <div className="flex items-center justify-between gap-3 text-left">
                     <div>
                       <p className="text-base font-semibold text-white">{paymentStatusLabel(currentPaymentStatus)}</p>
@@ -1297,7 +1297,7 @@ export default function ProductsPage() {
                 </div>
                 {qrExpanded && qrSrc ? (
                   <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="QRIS diperbesar" onClick={() => setQrExpanded(false)}>
-                    <div className="w-full max-w-md rounded-xl border border-white/10 bg-[var(--kavya-surface)] p-4" onClick={(event) => event.stopPropagation()}>
+                    <div className="w-full max-w-md rounded-xl border border-white/10 bg-[var(--surface)] p-4" onClick={(event) => event.stopPropagation()}>
                       <div className="flex items-center justify-between gap-3">
                         <div><p className="font-semibold text-white">QRIS Pembayaran</p><p className="mt-1 break-all font-mono text-xs text-zinc-500">{createdOrder?.id}</p></div>
                         <button type="button" onClick={() => setQrExpanded(false)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/10 text-zinc-400 hover:text-white" aria-label="Tutup QRIS">
@@ -1328,10 +1328,10 @@ export default function ProductsPage() {
                 </p>
                 {createdOrder ? (
                   <dl className="mx-auto mt-6 grid max-w-3xl gap-px overflow-hidden rounded-lg border border-white/[0.08] bg-white/[0.08] text-left sm:grid-cols-2 lg:grid-cols-4">
-                    <div className="bg-[var(--kavya-bg-elevated)] p-4"><dt className="text-xs uppercase tracking-wider text-zinc-600">Nomor pesanan</dt><dd className="mt-2 break-all font-mono text-xs text-zinc-300">{createdOrder.id}</dd></div>
-                    <div className="bg-[var(--kavya-bg-elevated)] p-4"><dt className="text-xs uppercase tracking-wider text-zinc-600">Produk</dt><dd className="mt-2 text-sm font-medium text-zinc-200">{createdOrder.product}<span className="mt-1 block text-xs font-normal text-zinc-500">{createdOrder.variant}</span></dd></div>
-                    <div className="bg-[var(--kavya-bg-elevated)] p-4"><dt className="text-xs uppercase tracking-wider text-zinc-600">Nominal</dt><dd className="mt-2 text-sm font-medium text-zinc-200">{formatRupiah(createdOrder.total || 0)}</dd></div>
-                    <div className="bg-[var(--kavya-bg-elevated)] p-4"><dt className="text-xs uppercase tracking-wider text-zinc-600">Waktu pembayaran</dt><dd className="mt-2 text-sm text-zinc-300">{formatCheckoutDate(createdOrder.paidAt || "")}</dd></div>
+                    <div className="bg-[var(--bg-raised)] p-4"><dt className="text-xs uppercase tracking-wider text-zinc-600">Nomor pesanan</dt><dd className="mt-2 break-all font-mono text-xs text-zinc-300">{createdOrder.id}</dd></div>
+                    <div className="bg-[var(--bg-raised)] p-4"><dt className="text-xs uppercase tracking-wider text-zinc-600">Produk</dt><dd className="mt-2 text-sm font-medium text-zinc-200">{createdOrder.product}<span className="mt-1 block text-xs font-normal text-zinc-500">{createdOrder.variant}</span></dd></div>
+                    <div className="bg-[var(--bg-raised)] p-4"><dt className="text-xs uppercase tracking-wider text-zinc-600">Nominal</dt><dd className="mt-2 text-sm font-medium text-zinc-200">{formatRupiah(createdOrder.total || 0)}</dd></div>
+                    <div className="bg-[var(--bg-raised)] p-4"><dt className="text-xs uppercase tracking-wider text-zinc-600">Waktu pembayaran</dt><dd className="mt-2 text-sm text-zinc-300">{formatCheckoutDate(createdOrder.paidAt || "")}</dd></div>
                   </dl>
                 ) : null}
                 {step === "done" && canShowCredentials ? (

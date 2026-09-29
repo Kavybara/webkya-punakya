@@ -114,7 +114,7 @@ test("account access rows preserve readable dark hover and keyboard focus", asyn
   assert.doesNotMatch(access, /items-center gap-3 px-5 py-4 text-left hover:bg-slate-50/);
   assert.match(styles, /\.reseller-v2-access-account-row:hover/);
   assert.match(styles, /\.reseller-v2-access-account-row:focus-visible/);
-  assert.match(styles, /background:\s*var\(--reseller-surface-hover\)/);
+  assert.match(styles, /background:\s*var\(--surface-hover\)/);
 });
 
 test("reseller resource pages separate loading error and empty states", async () => {

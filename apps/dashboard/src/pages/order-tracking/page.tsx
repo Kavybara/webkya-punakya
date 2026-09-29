@@ -104,7 +104,7 @@ export default function OrderTrackingPage() {
 
   return (
     
-      <main className="kavya-public-dark min-h-screen bg-[var(--kavya-bg)] px-4 py-6 text-[var(--kavya-text-primary)] sm:px-6 sm:py-8">
+      <main className="kavya-public-dark min-h-screen bg-[var(--bg-canvas)] px-4 py-6 text-[var(--text-primary)] sm:px-6 sm:py-8">
         <header className="mx-auto flex max-w-5xl items-center justify-between">
           <Link to="/" className="inline-flex min-h-11 items-center gap-3 rounded-lg font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-violet-400">
             <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] font-serif">K</span>
@@ -128,7 +128,7 @@ export default function OrderTrackingPage() {
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-[var(--kavya-border)] bg-[var(--kavya-surface)]" aria-live="polite" aria-busy={loading}>
+          <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)]" aria-live="polite" aria-busy={loading}>
             <div className="border-b border-white/[0.09] px-5 py-5 sm:px-7">
               <h2 className="text-lg font-semibold">{result ? "Status pesanan" : "Temukan pesanan"}</h2>
               <p className="mt-1 text-sm text-zinc-500">
@@ -147,7 +147,7 @@ export default function OrderTrackingPage() {
                         name="orderId"
                         value={orderId}
                         onChange={(event) => setOrderId(event.target.value)}
-                        className="mt-2 h-12 w-full rounded-lg border border-[var(--kavya-border)] bg-[var(--kavya-bg-elevated)] px-4 text-sm text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15"
+                        className="mt-2 h-12 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-raised)] px-4 text-sm text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15"
                         placeholder="ORD-..."
                         autoComplete="off"
                         autoCapitalize="characters"
@@ -161,7 +161,7 @@ export default function OrderTrackingPage() {
                         name="verification"
                         value={verification}
                         onChange={(event) => setVerification(event.target.value)}
-                        className="mt-2 h-12 w-full rounded-lg border border-[var(--kavya-border)] bg-[var(--kavya-bg-elevated)] px-4 text-sm text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15"
+                        className="mt-2 h-12 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-raised)] px-4 text-sm text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15"
                         placeholder="08... atau nama@email.com"
                         autoComplete="off"
                         spellCheck={false}

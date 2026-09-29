@@ -89,12 +89,16 @@ test("reset validates password match and exposes a successful login route", asyn
   assert.match(components, /to="\/"/);
 });
 
-test("auth styles define shared dark tokens, mobile layout, focus, and reduced motion", async () => {
+test("auth styles use the shared dark tokens, plus mobile layout, focus, and reduced motion", async () => {
   const styles = await source("components/auth/auth.css");
 
-  for (const token of ["--auth-bg", "--auth-bg-elevated", "--auth-surface", "--auth-surface-hover", "--auth-text-primary", "--auth-text-secondary", "--auth-text-muted", "--auth-border", "--auth-border-hover", "--auth-violet", "--auth-magenta", "--auth-cyan", "--auth-success", "--auth-warning", "--auth-danger"]) {
+  // The palette lives in `styles/tokens.css` now. What this sheet owns is
+  // the layout, and the contract is that it consumes the shared names
+  // rather than carrying a private copy of the dark.
+  for (const token of ["--bg-canvas", "--bg-raised", "--surface", "--surface-hover", "--text-primary", "--text-secondary", "--text-muted", "--border", "--border-strong", "--accent-violet", "--accent-cyan", "--status-success", "--status-warning", "--status-danger"]) {
     assert.match(styles, new RegExp(token));
   }
+  assert.doesNotMatch(styles, /^\s*--auth-/m, "auth.css declares its own colours again");
   assert.match(styles, /:focus-visible/);
   assert.match(styles, /@media \(max-width: 767px\)/);
   assert.match(styles, /prefers-reduced-motion/);

@@ -1,0 +1,106 @@
+/*
+ * The design tokens. Every colour, and the shape scale, in one place.
+ *
+ * Before this file existed the app had four private vocabularies --
+ * `--kavya-*` in index.css, `--console-*`, `--auth-*` and `--reseller-*` in
+ * the three feature stylesheets. Three of the four held the same thirteen
+ * values under different names, and the fourth held the same palette one or
+ * two steps out of true. Nine of the sixty declared tokens were never read
+ * by anything, including three separate copies of one magenta.
+ *
+ * That is what made the rest of the design work impossible to reason about:
+ * there was no single answer to "what colour is a surface here", so every new
+ * component picked one and the two consoles drifted apart.
+ *
+ * Naming is by role, never by appearance or by which screen it came from.
+ * A component asks for `--surface`, not for "the console grey". If the
+ * palette changes, the component is untouched.
+ *
+ * Two themes:
+ *   - `:root` is the public light surface (warm paper, cream), which is what
+ *     the body has always been.
+ *   - The dark palette is applied to the four dark roots the app already
+ *     had. It is declared once, in one selector list, so there is no second
+ *     copy to drift.
+ *
+ * Both blocks declare the same names. A token that exists in only one theme
+ * resolves to nothing in the other and the property silently falls back to
+ * `unset`, which is how `bg-[var(--surface)]` ends up rendering as a
+ * transparent box with a currentColor border. Keep the two lists in step.
+ */
+
+:root {
+  /* --- the warm paper the public site sits on --- */
+  --bg-canvas: #fff9f5;
+  --bg-raised: #f2ece2;
+  --surface: #f8fafc;
+  --surface-hover: #f1ede7;
+  --surface-glass: rgba(242, 236, 226, 0.95);
+  --surface-glass-strong: rgba(248, 250, 252, 0.92);
+
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --text-inverse: #f8fafc;
+
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+
+  /*
+   * Accents and status colours are the same in both themes -- they are
+   * chosen for how they read against a dark ground, and there is no light
+   * variant of "this order is overdue". Declared once, inherited everywhere.
+   */
+  --accent-violet: #8b5cf6;
+  --accent-magenta: #ec4899;
+  --accent-cyan: #38bdf8;
+
+  --status-success: #34d399;
+  --status-warning: #fbbf24;
+  --status-danger: #fb7185;
+  --status-info: #60a5fa;
+}
+
+/*
+ * The dark palette. One declaration, four roots -- the public marketing
+ * pages, the owner console, the login shell and the reseller console. They
+ * were already the same colour; they just each carried their own copy.
+ *
+ * `.kavya-public-dark` is the historical name for "this subtree is dark" and
+ * is kept until the public pages are rebuilt against the token names.
+ */
+.kavya-public-dark,
+.kavya-console,
+.auth-shell,
+.kavya-reseller-v2 {
+  --bg-canvas: #070708;
+  --bg-raised: #0c0c0f;
+  --surface: #111216;
+  --surface-hover: #17181d;
+  --surface-glass: rgba(8, 8, 9, 0.78);
+  --surface-glass-strong: rgba(13, 13, 15, 0.72);
+
+  --text-primary: #f4f4f5;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
+  --text-inverse: #0f172a;
+
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.17);
+}
+
+/*
+ * Decorative washes for the marketing pages. Kept out of the block above
+ * because they are effects, not surfaces -- nothing legible ever sits on
+ * them, and they have no light-theme counterpart because there is nothing
+ * behind them to wash.
+ */
+.kavya-public-dark {
+  --fx-grid-dot: rgba(255, 255, 255, 0.8);
+  --fx-shimmer: rgba(255, 255, 255, 0.045);
+}
+
+.kavya-public-dark ::selection {
+  background: color-mix(in srgb, var(--accent-violet) 50%, transparent);
+  color: var(--text-primary);
+}
