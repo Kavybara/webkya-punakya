@@ -84,7 +84,7 @@ export function ConsoleSearch({ open, onClose }: { open: boolean; onClose: () =>
         <div className="console-command-input-row">
           <Search size={19} aria-hidden="true" />
           <input ref={inputRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cari pesanan, pelanggan, reseller, produk, atau stok..." aria-label="Pencarian global" />
-          <button type="button" className="console-icon-button" onClick={onClose} aria-label="Tutup pencarian"><X size={18} /></button>
+          <button type="button" className="ui-icon-button" onClick={onClose} aria-label="Tutup pencarian"><X size={18} /></button>
         </div>
         <div className="console-command-body">
           <div className="console-command-heading">

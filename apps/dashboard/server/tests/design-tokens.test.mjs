@@ -160,9 +160,10 @@ test("every Tailwind colour points at a token that exists", () => {
 });
 
 test("the dark roots are declared once, as a single selector list", () => {
-  // The four dark roots are the same colour. The moment a fifth stylesheet
-  // grows its own copy we are back to four vocabularies.
-  const DARK_ROOTS = [".kavya-public-dark", ".kavya-console", ".auth-shell", ".kavya-reseller-v2"];
+  // The three dark roots are the same colour: the public marketing pages, the
+  // sign-in shell, and the one signed-in frame both consoles share. The moment
+  // a fourth stylesheet grows its own copy we are back to four vocabularies.
+  const DARK_ROOTS = [".kavya-public-dark", ".auth-shell", ".ui-shell"];
 
   // Comments carry no braces here, but they carry prose, and a selector
   // match that starts at the top of the file would swallow all of it.
@@ -173,6 +174,6 @@ test("the dark roots are declared once, as a single selector list", () => {
   assert.deepEqual(
     paletteRules,
     [[":root"], DARK_ROOTS],
-    "the palette is declared somewhere other than :root and the four dark roots",
+    "the palette is declared somewhere other than :root and the three dark roots",
   );
 });

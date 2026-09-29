@@ -1,4 +1,4 @@
-import type { LucideIcon } from "lucide-react";
+import type { AppShellNavItem } from "../ui";
 import {
   BadgeHelp,
   BookOpenCheck,
@@ -9,14 +9,14 @@ import {
   ReceiptText,
 } from "lucide-react";
 
-export type ResellerNavigationItem = {
-  label: string;
-  shortLabel: string;
-  path: string;
+export type ResellerNavigationItem = AppShellNavItem & {
+  /** The pre-v2 address this page replaced, kept so the audit map can be checked against it. */
   legacyPath?: string;
-  icon: LucideIcon;
 };
 
+// A separate type rather than the kit's, because these items carry a field the
+// shell does not know about. It is still assignable to AppShellNavGroup: an
+// extra property on a non-fresh object is not an error.
 export type ResellerNavigationGroup = {
   label: string;
   items: ResellerNavigationItem[];
@@ -91,6 +91,17 @@ export const resellerNavigation: ResellerNavigationGroup[] = [
     ],
   },
 ];
+
+/** The five destinations a phone can reach without opening the menu. */
+export const resellerBottomNavigation: ResellerNavigationItem[] = [
+  "/reseller-v2/ringkasan",
+  "/reseller-v2/catalog",
+  "/reseller-v2/orders",
+  "/reseller-v2/accounts",
+  "/reseller-v2/warranty",
+]
+  .map((path) => resellerNavigation.flatMap((group) => group.items).find((item) => item.path === path))
+  .filter((item): item is ResellerNavigationItem => Boolean(item));
 
 export const resellerAuditMap = [
   {

@@ -275,11 +275,11 @@ export default function OwnerConsoleOrdersPage() {
           <aside className="console-detail-drawer console-order-detail-drawer" role="dialog" aria-modal="true" aria-labelledby="console-order-detail-title">
             <div className="console-drawer-header">
               <div><span>Audit pesanan</span><h2 id="console-order-detail-title">{selectedOrder.id}</h2></div>
-              <button type="button" className="console-icon-button" onClick={closeOrderDetail} aria-label="Tutup detail"><X size={18} /></button>
+              <button type="button" className="ui-icon-button" onClick={closeOrderDetail} aria-label="Tutup detail"><X size={18} /></button>
             </div>
             <div className="console-drawer-body">
               <div className="console-drawer-statuses"><Badge tone={badgeTone(paymentLabel(selectedOrder))}>{paymentLabel(selectedOrder)}</Badge><Badge tone={badgeTone(fulfillmentLabel(selectedOrder))}>{fulfillmentLabel(selectedOrder)}</Badge>{isSmokeTest(selectedOrder) ? <Badge tone="info">Smoke test</Badge> : null}</div>
-              {detailLoading ? <div className="console-order-detail-loading"><RefreshCw size={17} className="console-spin" /> Memuat detail order...</div> : null}
+              {detailLoading ? <div className="console-order-detail-loading"><RefreshCw size={17} className="ui-spin" /> Memuat detail order...</div> : null}
               {detailError ? <div className="console-inline-error">{detailError}</div> : null}
               <dl>
                 <div><dt>Customer</dt><dd>{selectedOrder.customer || "-"}</dd></div>
@@ -337,7 +337,7 @@ export default function OwnerConsoleOrdersPage() {
             <div><span>Tindakan sensitif</span><h2 id="console-confirm-title">Konfirmasi tindakan</h2><h3>{actionText(pendingAction.kind).title}</h3><p>{actionText(pendingAction.kind).detail}</p></div>
             {pendingAction.kind === "approve-manual" ? <label className="console-reason-field"><span>Alasan approval</span><textarea value={actionReason} onChange={(event) => setActionReason(event.target.value)} placeholder="Tulis alasan yang dapat diaudit..." autoFocus /></label> : null}
             {actionError ? <div className="console-inline-error">{actionError}</div> : null}
-            <div className="console-confirm-actions"><button type="button" className="console-secondary-button" onClick={() => setPendingAction(null)} disabled={actionBusy}>Batal</button><button type="button" className="console-primary-button" onClick={executeAction} disabled={actionBusy}>{actionBusy ? "Memproses..." : actionText(pendingAction.kind).button}</button></div>
+            <div className="console-confirm-actions"><button type="button" className="ui-button is-secondary" onClick={() => setPendingAction(null)} disabled={actionBusy}>Batal</button><button type="button" className="console-primary-button" onClick={executeAction} disabled={actionBusy}>{actionBusy ? "Memproses..." : actionText(pendingAction.kind).button}</button></div>
           </section>
         </div>
       ) : null}

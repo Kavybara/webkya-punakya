@@ -122,11 +122,19 @@ test("Owner Console orders reuses existing APIs and masks fulfillment credential
 });
 
 test("Owner Console keeps a responsive drawer and honours reduced motion", async () => {
+  // The frame moved into the shared kit when the two shells became one, so
+  // the drawer and the reduced-motion opt-out are asserted where they now
+  // live. Reading console.css alone would have kept passing while the sidebar
+  // it used to draw went unstyled.
+  const frame = await source("components/ui/shell.css");
   const styles = await source("components/console/console.css");
   // Assert a drawer-style breakpoint exists rather than a specific pixel
   // value, so the breakpoint can move without breaking the contract.
+  assert.match(frame, /\.ui-shell-sidebar\.is-drawer/, "the frame must still have a drawer for a phone");
+  assert.match(frame, /@media\s*\(max-width:\s*\d+px\)/);
+  assert.match(frame, /prefers-reduced-motion/);
+  // And the console's own page-level rules still respond to a narrow screen.
   assert.match(styles, /@media\s*\(max-width:\s*\d+px\)/);
-  assert.match(styles, /prefers-reduced-motion/);
 });
 
 test("all Owner Console navigation destinations have lazy v2 routes", async () => {

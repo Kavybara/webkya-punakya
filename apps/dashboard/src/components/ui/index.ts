@@ -3,7 +3,10 @@
 // a component that only looks right on the page that happened to be written
 // first.
 import "./ui.css";
+import "./shell.css";
 
+export { AppShell, useDismiss } from "./AppShell";
+export type { AppShellNavGroup, AppShellNavItem } from "./AppShell";
 export { Badge } from "./Badge";
 export { DetailRow, Field } from "./Field";
 export { ActionCard, Metric, MetricRow } from "./Metric";

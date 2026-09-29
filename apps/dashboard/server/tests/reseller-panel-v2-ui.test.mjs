@@ -223,12 +223,26 @@ test("legacy reseller pages render inside the new ResellerShell", async () => {
 
 test("Reseller V2 shell keeps reseller auth and scoped destinations", async () => {
   const shell = await source("src/components/reseller-v2/ResellerShell.tsx");
+  const frame = await source("src/components/ui/AppShell.tsx");
   const navigation = await source("src/components/reseller-v2/navigation.ts");
 
-  assert.match(shell, /current\.role !== "reseller"/);
-  assert.match(shell, /\/login\?next=\/reseller-v2/);
-  assert.doesNotMatch(shell, /localStorage/);
-  assert.doesNotMatch(shell, /sessionStorage/);
+  // The gate itself is one implementation now, so it is asserted where it
+  // lives. What the reseller still owns is declaring which role it is and
+  // where a reader lands when that role is wrong -- and those two values are
+  // the whole access rule as far as this file is concerned.
+  assert.match(frame, /current\.role !== role/, "the shared frame must turn away the wrong role");
+  assert.match(frame, /navigate\(`\/login\?next=/, "no session must go to sign in, with somewhere to return to");
+  assert.match(shell, /role="reseller"/, "ResellerShell must declare the role it admits");
+  assert.match(shell, /homePath=\{SUMMARY_PATH\}/, "an unauthenticated reseller must return to the summary");
+  assert.match(shell, /deniedPath="\/owner-v2"/, "a reseller who wanders into the owner console goes home");
+  assert.match(shell, /SUMMARY_PATH = "\/reseller-v2\/ringkasan"/);
+
+  // A console must not hand-roll its own session storage. The only thing the
+  // frame keeps locally is how wide the rail is.
+  assert.doesNotMatch(shell, /localStorage|sessionStorage/);
+  assert.doesNotMatch(frame, /sessionStorage/);
+  assert.match(frame, /localStorage\.setItem\(COLLAPSE_KEY/);
+
   assert.match(navigation, /\/reseller-v2\/catalog/);
   assert.match(navigation, /\/reseller-v2\/orders/);
   assert.match(navigation, /\/reseller-v2\/accounts/);
@@ -262,9 +276,16 @@ test("Reseller global search stays within scoped reseller data", async () => {
 });
 
 test("Reseller V2 ships mobile bottom navigation with a touch-target floor", async () => {
-  const css = await source("src/components/reseller-v2/reseller-v2.css");
+  // The bar is drawn by the shared frame now. The reseller's own contribution
+  // is choosing the five destinations that appear in it -- the owner console
+  // has the same bar, so asserting the CSS here alone would pass for either.
+  const css = await source("src/components/ui/shell.css");
+  const shell = await source("src/components/reseller-v2/ResellerShell.tsx");
+  const navigation = await source("src/components/reseller-v2/navigation.ts");
 
-  assert.match(css, /\.reseller-v2-bottom-nav/);
+  assert.match(navigation, /export const resellerBottomNavigation/, "the reseller must name its five phone destinations");
+  assert.match(shell, /bottomNavigation=\{bottomNavigation\}/);
+  assert.match(css, /\.ui-shell-bottom-nav/);
   // Assert a mobile breakpoint exists rather than a specific pixel value.
   assert.match(css, /@media\s*\(max-width:\s*\d+px\)/);
   // 44px is a WCAG-recommended minimum hit target; keep the floor, not the

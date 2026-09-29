@@ -258,7 +258,7 @@ export function TopUpDialog({
           <div className="reseller-v2-topup-body">
             {loading ? (
               <div className="reseller-v2-topup-loading">
-                <LoaderCircle className="reseller-v2-spin" size={20} /> Memuat
+                <LoaderCircle className="ui-spin" size={20} /> Memuat
                 metode pembayaran...
               </div>
             ) : (
@@ -352,7 +352,7 @@ export function TopUpDialog({
                   >
                     {submitting ? (
                       <>
-                        <LoaderCircle className="reseller-v2-spin" size={16} />{" "}
+                        <LoaderCircle className="ui-spin" size={16} />{" "}
                         Memproses...
                       </>
                     ) : method === "qris_auto" ? (

@@ -64,17 +64,16 @@
 }
 
 /*
- * The dark palette. One declaration, four roots -- the public marketing
- * pages, the owner console, the login shell and the reseller console. They
+ * The dark palette. One declaration, three roots -- the public marketing
+ * pages, the login shell, and the signed-in frame both consoles share. They
  * were already the same colour; they just each carried their own copy.
  *
  * `.kavya-public-dark` is the historical name for "this subtree is dark" and
  * is kept until the public pages are rebuilt against the token names.
  */
 .kavya-public-dark,
-.kavya-console,
 .auth-shell,
-.kavya-reseller-v2 {
+.ui-shell {
   --bg-canvas: #070708;
   --bg-raised: #0c0c0f;
   --surface: #111216;

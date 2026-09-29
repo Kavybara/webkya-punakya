@@ -1,12 +1,12 @@
-import type { LucideIcon } from "lucide-react";
+import type { AppShellNavGroup, AppShellNavItem } from "../ui";
 import {
   Boxes,
   CircleGauge,
   HeartPulse,
-  Layers3,
-  MessageCircle,
   KeyRound,
+  Layers3,
   ListChecks,
+  MessageCircle,
   PackageCheck,
   PlugZap,
   ReceiptText,
@@ -14,21 +14,13 @@ import {
   Users,
 } from "lucide-react";
 
-export type ConsoleNavigationItem = {
-  label: string;
-  path: string;
-  icon: LucideIcon;
-};
-
-export type ConsoleNavigationGroup = {
-  label: string;
-  items: ConsoleNavigationItem[];
-};
+export type ConsoleNavigationItem = AppShellNavItem;
+export type ConsoleNavigationGroup = AppShellNavGroup;
 
 export const consoleNavigation: ConsoleNavigationGroup[] = [
   {
     label: "Ringkasan",
-    items: [{ label: "Overview", path: "/owner-v2", icon: CircleGauge }],
+    items: [{ label: "Overview", path: "/owner-v2", icon: CircleGauge, end: true }],
   },
   {
     label: "Penjualan",
@@ -65,6 +57,22 @@ export const consoleNavigation: ConsoleNavigationGroup[] = [
       { label: "Status Integrasi", path: "/owner-v2/integrations", icon: PlugZap },
     ],
   },
+];
+
+/**
+ * What a phone can reach without opening the menu.
+ *
+ * The reseller has had a bottom bar and the owner has not, which meant an
+ * owner on a phone opened a drawer for every single thing. These five are the
+ * destinations the overview itself points at, so the bar carries the paths a
+ * reader is already walking.
+ */
+export const consoleBottomNavigation: AppShellNavItem[] = [
+  { label: "Overview", shortLabel: "Beranda", path: "/owner-v2", icon: CircleGauge, end: true },
+  { label: "Pesanan & QRIS", shortLabel: "Pesanan", path: "/owner-v2/orders", icon: ReceiptText },
+  { label: "Stok Akun", shortLabel: "Stok", path: "/owner-v2/stock", icon: Boxes },
+  { label: "Manajemen Akun", shortLabel: "Akun", path: "/owner-v2/accounts", icon: PackageCheck },
+  { label: "Antrean Kerja", shortLabel: "Antrean", path: "/owner-v2/operations", icon: ListChecks },
 ];
 
 export const ownerConsoleAuditMap = [

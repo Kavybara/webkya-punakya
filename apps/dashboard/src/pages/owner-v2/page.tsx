@@ -329,7 +329,7 @@ export default function OwnerConsoleOverviewPage() {
           <aside className="console-detail-drawer" role="dialog" aria-modal="true" aria-labelledby="order-drawer-title">
             <div className="console-drawer-header">
               <div><span>Detail pesanan</span><h2 id="order-drawer-title">{selectedOrder.id}</h2></div>
-              <button type="button" className="console-icon-button" onClick={() => setSelectedOrder(null)} aria-label="Tutup detail"><X size={18} /></button>
+              <button type="button" className="ui-icon-button" onClick={() => setSelectedOrder(null)} aria-label="Tutup detail"><X size={18} /></button>
             </div>
             <div className="console-drawer-body">
               <div className="console-drawer-statuses">
