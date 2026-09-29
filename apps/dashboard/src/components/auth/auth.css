@@ -17,7 +17,7 @@
   justify-content: space-between;
   padding: clamp(32px, 4vw, 64px);
   border-right: 1px solid var(--border);
-  background: radial-gradient(circle at 62% 52%, rgba(139, 92, 246, 0.07), transparent 34%), #08080a;
+  background: radial-gradient(circle at 62% 52%, color-mix(in srgb, var(--accent-violet) 7%, transparent), transparent 34%), #08080a;
 }
 
 .auth-brand-name,
@@ -56,9 +56,9 @@
   inset: -45%;
   opacity: 0.62;
   background:
-    radial-gradient(circle at 31% 57%, rgba(236, 72, 153, 0.2), transparent 28%),
-    radial-gradient(circle at 52% 31%, rgba(139, 92, 246, 0.23), transparent 31%),
-    radial-gradient(circle at 68% 67%, rgba(56, 189, 248, 0.16), transparent 28%),
+    radial-gradient(circle at 31% 57%, color-mix(in srgb, var(--accent-magenta) 20%, transparent), transparent 28%),
+    radial-gradient(circle at 52% 31%, color-mix(in srgb, var(--accent-violet) 23%, transparent), transparent 31%),
+    radial-gradient(circle at 68% 67%, color-mix(in srgb, var(--accent-cyan) 16%, transparent), transparent 28%),
     radial-gradient(circle at 50% 65%, rgba(255, 255, 255, 0.13), transparent 17%);
   filter: blur(28px);
   animation: auth-glow 8s ease-in-out infinite alternate;
@@ -93,9 +93,9 @@
 .auth-input::placeholder { color: #85858f; opacity: 1; }
 .auth-input:hover { background: var(--surface-hover); }
 .auth-input:focus,
-.auth-otp-row input:focus { border-color: rgba(56, 189, 248, 0.75); box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.13); }
+.auth-otp-row input:focus { border-color: color-mix(in srgb, var(--accent-cyan) 75%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-cyan) 13%, transparent); }
 .auth-input.is-invalid,
-.auth-otp-row input[aria-invalid="true"] { border-color: rgba(251, 113, 133, 0.72); }
+.auth-otp-row input[aria-invalid="true"] { border-color: color-mix(in srgb, var(--status-danger) 72%, transparent); }
 .auth-field small { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
 .auth-password-wrap { position: relative; }
 .auth-password-wrap .auth-input { padding-right: 48px; }
@@ -103,7 +103,7 @@
 .auth-password-toggle:hover { background: var(--surface-hover); color: var(--text-primary); }
 .auth-error { margin: 0; color: var(--status-danger); font-size: 13px; line-height: 1.45; }
 .auth-notice { margin: 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 9px; background: rgba(255, 255, 255, 0.025); color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
-.auth-notice.is-success { border-color: rgba(52, 211, 153, 0.25); color: #a7f3d0; }
+.auth-notice.is-success { border-color: color-mix(in srgb, var(--status-success) 25%, transparent); color: #a7f3d0; }
 .auth-general-error { margin-bottom: 18px; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--status-danger) 32%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--status-danger) 7%, transparent); }
 .auth-button { min-height: 48px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid transparent; border-radius: 999px; padding: 0 24px; background: var(--text-primary); color: #09090b; font-size: 14px; font-weight: 650; cursor: pointer; transition: transform 150ms ease, background-color 150ms ease, border-color 150ms ease; }
 .auth-button:hover { background: #fff; }
@@ -128,13 +128,13 @@
 .auth-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; padding: 0; margin: 0 0 28px; list-style: none; }
 .auth-steps li { position: relative; display: grid; justify-items: center; gap: 8px; color: var(--text-muted); font-size: 11px; text-align: center; }
 .auth-steps li:not(:last-child)::after { content: ""; position: absolute; z-index: 0; top: 14px; left: calc(50% + 18px); width: calc(100% - 36px); height: 1px; background: var(--border); }
-.auth-steps li.is-complete:not(:last-child)::after { background: rgba(139, 92, 246, 0.55); }
+.auth-steps li.is-complete:not(:last-child)::after { background: color-mix(in srgb, var(--accent-violet) 55%, transparent); }
 .auth-steps li > span { position: relative; z-index: 1; width: 29px; height: 29px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 50%; background: var(--bg-raised); font-size: 11px; }
 .auth-steps li strong { font-weight: 550; }
 .auth-steps li.is-active { color: var(--text-primary); }
-.auth-steps li.is-active > span { border-color: rgba(56, 189, 248, 0.68); box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.1); }
+.auth-steps li.is-active > span { border-color: color-mix(in srgb, var(--accent-cyan) 68%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-cyan) 10%, transparent); }
 .auth-steps li.is-complete { color: var(--text-secondary); }
-.auth-steps li.is-complete > span { border-color: rgba(139, 92, 246, 0.58); color: #c4b5fd; }
+.auth-steps li.is-complete > span { border-color: color-mix(in srgb, var(--accent-violet) 58%, transparent); color: #c4b5fd; }
 .auth-otp-field { min-width: 0; margin: 0; padding: 0; border: 0; }
 .auth-otp-row { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
 .auth-otp-row input { min-width: 0; height: 54px; padding: 0; text-align: center; font-size: 21px; font-weight: 650; }
@@ -154,7 +154,7 @@
 .auth-match.is-match { color: var(--status-success); }
 .auth-match.is-mismatch { color: var(--status-danger); }
 .auth-success { display: grid; justify-items: center; padding: 28px 0 8px; text-align: center; }
-.auth-success > span { width: 52px; height: 52px; display: grid; place-items: center; border: 1px solid rgba(52, 211, 153, 0.3); border-radius: 50%; background: rgba(52, 211, 153, 0.08); color: var(--status-success); }
+.auth-success > span { width: 52px; height: 52px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--status-success) 30%, transparent); border-radius: 50%; background: color-mix(in srgb, var(--status-success) 8%, transparent); color: var(--status-success); }
 .auth-success h2 { margin: 20px 0 8px; font-size: 22px; font-weight: 600; }
 .auth-success p { margin: 0 0 24px; color: var(--text-secondary); font-size: 14px; line-height: 1.6; }
 

@@ -151,8 +151,8 @@
 }
 
 .reseller-catalog-duration-option.is-selected {
-  border-color: rgba(139, 92, 246, 0.62);
-  background: rgba(139, 92, 246, 0.11);
+  border-color: color-mix(in srgb, var(--accent-violet) 62%, transparent);
+  background: color-mix(in srgb, var(--accent-violet) 11%, transparent);
   color: var(--text-primary);
 }
 
@@ -364,8 +364,8 @@
   color: var(--text-primary);
 }
 .reseller-v2-nav-link.is-active {
-  border-color: rgba(139, 92, 246, 0.32);
-  background: rgba(139, 92, 246, 0.12);
+  border-color: color-mix(in srgb, var(--accent-violet) 32%, transparent);
+  background: color-mix(in srgb, var(--accent-violet) 12%, transparent);
   color: #ddd6fe;
 }
 .reseller-v2-nav-link svg {
@@ -513,7 +513,7 @@
   height: 30px;
   place-items: center;
   border-radius: 8px;
-  background: rgba(139, 92, 246, 0.18);
+  background: color-mix(in srgb, var(--accent-violet) 18%, transparent);
   color: #ddd6fe;
   font-size: 11px;
 }
@@ -788,8 +788,8 @@
 }
 .reseller-v2-account-view-tabs button:hover,
 .reseller-v2-account-view-tabs button.is-active {
-  border-color: rgba(139, 92, 246, 0.58);
-  background: rgba(139, 92, 246, 0.16);
+  border-color: color-mix(in srgb, var(--accent-violet) 58%, transparent);
+  background: color-mix(in srgb, var(--accent-violet) 16%, transparent);
   color: var(--text-primary);
 }
 .reseller-v2-account-view-tabs button span {
@@ -883,7 +883,7 @@
 .reseller-v2-access-account-row:focus-visible {
   position: relative;
   z-index: 1;
-  outline: 2px solid rgba(139, 92, 246, 0.72);
+  outline: 2px solid color-mix(in srgb, var(--accent-violet) 72%, transparent);
   outline-offset: -2px;
 }
 .reseller-v2-account-list > button:last-child {
@@ -909,7 +909,7 @@
   margin-left: 7px;
   padding: 2px 6px;
   border-radius: 999px;
-  background: rgba(139, 92, 246, 0.18);
+  background: color-mix(in srgb, var(--accent-violet) 18%, transparent);
   color: #c4b5fd;
   font-size: 9px;
   font-style: normal;
@@ -925,9 +925,9 @@
   justify-content: space-between;
   gap: 16px;
   padding: 14px 16px;
-  border: 1px solid rgba(52, 211, 153, 0.22);
+  border: 1px solid color-mix(in srgb, var(--status-success) 22%, transparent);
   border-radius: 10px;
-  background: rgba(52, 211, 153, 0.06);
+  background: color-mix(in srgb, var(--status-success) 6%, transparent);
 }
 
 .reseller-v2-purchase-banner div,
@@ -1299,9 +1299,9 @@
 .reseller-v2-topup-error {
   margin: 0;
   padding: 11px;
-  border: 1px solid rgba(251, 113, 133, 0.3);
+  border: 1px solid color-mix(in srgb, var(--status-danger) 30%, transparent);
   border-radius: 8px;
-  background: rgba(251, 113, 133, 0.08);
+  background: color-mix(in srgb, var(--status-danger) 8%, transparent);
   color: #fda4af;
   font-size: 11px;
 }
@@ -1313,9 +1313,9 @@
   display: flex;
   gap: 9px;
   padding: 12px;
-  border: 1px solid rgba(52, 211, 153, 0.25);
+  border: 1px solid color-mix(in srgb, var(--status-success) 25%, transparent);
   border-radius: 8px;
-  background: rgba(52, 211, 153, 0.07);
+  background: color-mix(in srgb, var(--status-success) 7%, transparent);
 }
 .reseller-v2-topup-success span {
   display: block;
@@ -1386,7 +1386,7 @@
   background:
     radial-gradient(
       circle at 15% 10%,
-      rgba(139, 92, 246, 0.13),
+      color-mix(in srgb, var(--accent-violet) 13%, transparent),
       transparent 38%
     ),
     var(--surface);
@@ -1473,7 +1473,7 @@
   flex: 0 0 auto;
   place-items: center;
   border-radius: 8px;
-  background: rgba(139, 92, 246, 0.1);
+  background: color-mix(in srgb, var(--accent-violet) 10%, transparent);
   color: #c4b5fd;
 }
 .reseller-v2-action strong,
@@ -1540,23 +1540,23 @@
   white-space: nowrap;
 }
 .reseller-v2-badge.is-success {
-  border-color: rgba(52, 211, 153, 0.22);
-  background: rgba(52, 211, 153, 0.08);
+  border-color: color-mix(in srgb, var(--status-success) 22%, transparent);
+  background: color-mix(in srgb, var(--status-success) 8%, transparent);
   color: var(--status-success);
 }
 .reseller-v2-badge.is-warning {
-  border-color: rgba(251, 191, 36, 0.22);
-  background: rgba(251, 191, 36, 0.08);
+  border-color: color-mix(in srgb, var(--status-warning) 22%, transparent);
+  background: color-mix(in srgb, var(--status-warning) 8%, transparent);
   color: var(--status-warning);
 }
 .reseller-v2-badge.is-danger {
-  border-color: rgba(251, 113, 133, 0.22);
-  background: rgba(251, 113, 133, 0.08);
+  border-color: color-mix(in srgb, var(--status-danger) 22%, transparent);
+  background: color-mix(in srgb, var(--status-danger) 8%, transparent);
   color: var(--status-danger);
 }
 .reseller-v2-badge.is-info {
-  border-color: rgba(96, 165, 250, 0.22);
-  background: rgba(96, 165, 250, 0.08);
+  border-color: color-mix(in srgb, var(--status-info) 22%, transparent);
+  background: color-mix(in srgb, var(--status-info) 8%, transparent);
   color: var(--status-info);
 }
 .reseller-v2-recent {
@@ -1625,7 +1625,7 @@
   height: 36px;
   place-items: center;
   border-radius: 9px;
-  background: rgba(52, 211, 153, 0.08);
+  background: color-mix(in srgb, var(--status-success) 8%, transparent);
   color: var(--status-success);
 }
 .reseller-v2-state strong {
@@ -1645,12 +1645,12 @@
 }
 .reseller-v2-state.is-error {
   margin-bottom: 12px;
-  border: 1px solid rgba(251, 113, 133, 0.18);
+  border: 1px solid color-mix(in srgb, var(--status-danger) 18%, transparent);
   border-radius: 10px;
-  background: rgba(251, 113, 133, 0.05);
+  background: color-mix(in srgb, var(--status-danger) 5%, transparent);
 }
 .reseller-v2-state.is-error .reseller-v2-state-icon {
-  background: rgba(251, 113, 133, 0.1);
+  background: color-mix(in srgb, var(--status-danger) 10%, transparent);
   color: var(--status-danger);
 }
 .reseller-v2-skeleton {
@@ -1766,7 +1766,7 @@
   height: 32px;
   place-items: center;
   border-radius: 7px;
-  background: rgba(139, 92, 246, 0.1);
+  background: color-mix(in srgb, var(--accent-violet) 10%, transparent);
 }
 .reseller-v2-search-results button > div {
   min-width: 0;
@@ -2162,7 +2162,7 @@
     text-decoration: none;
   }
   .reseller-v2-bottom-nav a.is-active {
-    background: rgba(139, 92, 246, 0.12);
+    background: color-mix(in srgb, var(--accent-violet) 12%, transparent);
     color: #ddd6fe;
   }
   .reseller-v2-table-scroll {
@@ -2208,7 +2208,7 @@
   border: 1px solid var(--border);
   border-radius: 10px;
   background:
-    radial-gradient(circle at 0 50%, rgba(139, 92, 246, 0.12), transparent 34%),
+    radial-gradient(circle at 0 50%, color-mix(in srgb, var(--accent-violet) 12%, transparent), transparent 34%),
     var(--surface);
 }
 
@@ -2218,9 +2218,9 @@
   height: 44px;
   flex: 0 0 auto;
   place-items: center;
-  border: 1px solid rgba(139, 92, 246, 0.28);
+  border: 1px solid color-mix(in srgb, var(--accent-violet) 28%, transparent);
   border-radius: 9px;
-  background: rgba(139, 92, 246, 0.1);
+  background: color-mix(in srgb, var(--accent-violet) 10%, transparent);
   color: #c4b5fd;
 }
 
@@ -2289,8 +2289,8 @@
 }
 
 .reseller-guide-selector > button.is-active {
-  border-color: rgba(139, 92, 246, 0.48);
-  background: rgba(139, 92, 246, 0.09);
+  border-color: color-mix(in srgb, var(--accent-violet) 48%, transparent);
+  background: color-mix(in srgb, var(--accent-violet) 9%, transparent);
   color: var(--text-primary);
 }
 

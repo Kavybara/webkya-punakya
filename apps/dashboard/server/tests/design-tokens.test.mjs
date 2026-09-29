@@ -85,6 +85,23 @@ test("no component reaches for a colour that is not a token", () => {
   assert.deepEqual(offenders, [], `undeclared token referenced: ${offenders.join(", ")}`);
 });
 
+test("a tinted wash names its token instead of repeating the hue", () => {
+  // The three feature stylesheets held 43 different violet alphas, 30 cyans
+  // and 27 greens. Nobody could remember which of 0.23 and 0.25 was the active
+  // nav border, so they made a new one. The alpha is a deliberate per-use
+  // choice; the hue was never meant to be a choice at all, and
+  // `color-mix(in srgb, var(--accent-violet) 23%, transparent)` composites to
+  // exactly the same pixels as `rgba(139, 92, 246, 0.23)`.
+  const HUES = ["139, 92, 246", "236, 72, 153", "56, 189, 248", "52, 211, 153", "251, 191, 36", "251, 113, 133", "96, 165, 250"];
+  const hue = new RegExp(String.raw`rgba\(\s*(?:${HUES.join("|")})\s*,`, "g");
+  const offenders = sourceFiles(SRC)
+    .filter((file) => file !== TOKENS)
+    .filter((file) => hue.test(fs.readFileSync(file, "utf8")))
+    .map(rel);
+
+  assert.deepEqual(offenders, [], `hard-coded palette hue in ${offenders.join(", ")}`);
+});
+
 test("the dark roots are declared once, as a single selector list", () => {
   // The four dark roots are the same colour. The moment a fifth stylesheet
   // grows its own copy we are back to four vocabularies.
