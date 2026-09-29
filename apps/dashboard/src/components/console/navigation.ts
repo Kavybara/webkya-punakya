@@ -6,6 +6,7 @@ import {
   Layers3,
   MessageCircle,
   KeyRound,
+  ListChecks,
   PackageCheck,
   PlugZap,
   ReceiptText,
@@ -52,6 +53,7 @@ export const consoleNavigation: ConsoleNavigationGroup[] = [
   {
     label: "Operasional",
     items: [
+      { label: "Antrean Kerja", path: "/owner-v2/operations", icon: ListChecks },
       { label: "Health Center", path: "/owner-v2/health", icon: HeartPulse },
       { label: "WhatsApp", path: "/owner-v2/whatsapp", icon: MessageCircle },
     ],

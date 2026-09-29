@@ -27,8 +27,8 @@ function issueSeverity(issue: OperationIssue): OwnerNotification["severity"] {
 }
 
 function safeHref(href = "") {
-  if (!href || href.startsWith("/owner-v2/operations")) return "/owner-v2/health";
-  return href.startsWith("/owner-v2/") ? href : "/owner-v2/health";
+  if (!href) return "/owner-v2/operations";
+  return href.startsWith("/owner-v2/") ? href : "/owner-v2/operations";
 }
 
 export function buildOwnerNotifications({

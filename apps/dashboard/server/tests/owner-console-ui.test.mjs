@@ -37,7 +37,10 @@ test("Owner Console navigation uses v2 destinations without legacy links", async
   for (const path of ["products", "stock", "accounts", "resellers", "whatsapp", "activities", "integrations"]) {
     assert.match(navigation, new RegExp(`\\/owner-v2\\/${path}`));
   }
-  assert.doesNotMatch(navigation, /path: "\/owner-v2\/operations"/);
+  // The operations work queue is a real destination, not a redirect to Health
+  // Center. Health Center reports infrastructure health only and cannot run
+  // the recovery actions that live on this page.
+  assert.match(navigation, /path: "\/owner-v2\/operations"/);
   assert.doesNotMatch(navigation, /path: "\/dashboard\//);
 });
 

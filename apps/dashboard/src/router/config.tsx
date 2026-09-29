@@ -33,6 +33,9 @@ const OwnerConsoleWarrantyPage = lazy(
 const OwnerConsoleHealthPage = lazy(
   () => import("../pages/owner-v2/health/page"),
 );
+const OwnerConsoleOperationsPage = lazy(
+  () => import("../pages/owner-v2/operations/page"),
+);
 const OwnerConsoleWhatsappPage = lazy(
   () => import("../pages/owner-v2/whatsapp/page"),
 );
@@ -116,7 +119,7 @@ export const routes: RouteObject[] = [
   { path: "/owner-v2/warranty", element: page(OwnerConsoleWarrantyPage) },
   { path: "/owner-v2/resellers", element: page(OwnerConsoleResellersPage) },
   { path: "/owner-v2/health", element: page(OwnerConsoleHealthPage) },
-  { path: "/owner-v2/operations", element: <Navigate to="/owner-v2/health" replace /> },
+  { path: "/owner-v2/operations", element: page(OwnerConsoleOperationsPage) },
   { path: "/owner-v2/whatsapp", element: page(OwnerConsoleWhatsappPage) },
   { path: "/owner-v2/activities", element: page(OwnerConsoleActivitiesPage) },
   {
