@@ -103,6 +103,7 @@ import {
   googleSheetsSectionError,
   googleSheetsSyncHealth,
 } from "./services/google-sheets-sync-policy-service.js";
+import { evaluateCatalogPrecheck } from "./services/catalog-precheck-service.js";
 import {
   createPublicTrackingLimiter,
   ensureOrderTrackingToken,
@@ -8395,26 +8396,57 @@ registerSettingsRoutes(app, {
   verifyGmailOAuthState,
 });
 
+// The pure half of the public precheck: a snapshot in, a decision out. Shared
+// by the read-only fast path in the route and by the locked refresh below, so
+// the two cannot drift into answering different questions.
+const catalogPrecheckHelpers = {
+  availableStockCount,
+  durationAllowedForVariant,
+  getProduct,
+  isVariantOrderable,
+  normalizeDurationLabel,
+  orderLockError,
+  publicCatalog,
+};
+
+async function refreshCatalogStock(request) {
+  return updateDb(async (db) => {
+    const before = evaluateCatalogPrecheck(db, request, catalogPrecheckHelpers);
+    if (!before.ok) throw before.error;
+
+    await syncSheetsForProductOrThrow(db, before.product, "catalog_precheck", { force: true });
+
+    // The sync can retire the product, take the lock, or move the count, so
+    // the decision has to be made again against the refreshed data.
+    const after = evaluateCatalogPrecheck(db, request, catalogPrecheckHelpers);
+    if (!after.ok) throw after.error;
+
+    return {
+      ok: true,
+      productId: after.productId,
+      variantId: after.variantId,
+      stockCount: after.stockCount,
+      catalog: after.catalog,
+    };
+  });
+}
+
 registerCatalogRoutes(app, {
   activeResellerByWhatsapp,
   applyWaPriceSync,
-  availableStockCount,
-  durationAllowedForVariant,
+  catalogPrecheckCooldownMs: GOOGLE_SHEETS_CATALOG_PRECHECK_COOLDOWN_MS,
+  catalogPrecheckHelpers,
   findWaPriceSource,
-  getProduct,
-  isVariantOrderable,
   legacyRootDir,
   makeId,
-  normalizeDurationLabel,
   nowText,
-  orderLockError,
   previewWaPriceSync,
   publicCatalog,
   readDb,
   readDbSnapshot,
+  refreshCatalogStock,
   requireAuth,
   resellerRequiredMessage,
-  syncSheetsForProductOrThrow,
   updateDb,
 });
 

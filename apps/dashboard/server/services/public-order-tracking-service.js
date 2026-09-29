@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 
+import { createAttemptLimiter } from "../lib/attempt-limiter.js";
+
 const GENERIC_TRACKING_ERROR = "Pesanan tidak ditemukan atau data verifikasi tidak sesuai.";
 
 function normalizeText(value = "") {
@@ -111,42 +113,11 @@ export function safeTrackingPayment(payment = {}, order = {}) {
 }
 
 export function createPublicTrackingLimiter(options = {}) {
-  const attempts = new Map();
-  const maxAttempts = Math.max(1, Number(options.maxAttempts || process.env.TRACKING_MAX_ATTEMPTS || 8));
-  const windowMs = Math.max(1_000, Number(options.windowMs || process.env.TRACKING_WINDOW_MS || 15 * 60 * 1000));
-  const now = options.now || Date.now;
-
-  function activeAttempt(key) {
-    const current = attempts.get(key);
-    const timestamp = now();
-    if (!current || current.resetAt <= timestamp) {
-      attempts.delete(key);
-      return null;
-    }
-    return current;
-  }
-
-  return {
-    check(key) {
-      const current = activeAttempt(key);
-      if (!current || current.count < maxAttempts) return { allowed: true, remaining: maxAttempts - (current?.count || 0) };
-      return {
-        allowed: false,
-        remaining: 0,
-        retryAfterSeconds: Math.max(1, Math.ceil((current.resetAt - now()) / 1_000)),
-      };
-    },
-    recordFailure(key) {
-      const timestamp = now();
-      const current = activeAttempt(key);
-      attempts.set(key, current
-        ? { ...current, count: current.count + 1 }
-        : { count: 1, resetAt: timestamp + windowMs });
-    },
-    clear(key) {
-      attempts.delete(key);
-    },
-  };
+  return createAttemptLimiter({
+    maxAttempts: options.maxAttempts || process.env.TRACKING_MAX_ATTEMPTS || 8,
+    windowMs: options.windowMs || process.env.TRACKING_WINDOW_MS || 15 * 60 * 1000,
+    now: options.now,
+  });
 }
 
 export { GENERIC_TRACKING_ERROR };
