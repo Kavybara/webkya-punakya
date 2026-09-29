@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Clipboard, KeyRound, Link2, Mail, RefreshCw, Search, ShieldCheck, Smartphone } from "lucide-react";
 import { ConsoleShell } from "../../../components/console/ConsoleShell";
-import { Badge, MetricRow, Notice } from "../../../components/ui";
+import { Badge, Button, MetricRow, Notice } from "../../../components/ui";
 import {
   api,
   type AccountAccessLookupResult,
@@ -214,7 +214,7 @@ export default function OwnerConsoleAccountAccessPage() {
                 </div>
                 <strong className={resultValue ? "" : "is-empty"}>{resultValue || lookupErrorText(result)}</strong>
                 <p>{[result.account.product, result.account.variant, result.account.profile].filter(Boolean).join(" - ")}</p>
-                {resultValue ? <button type="button" className="ui-button is-secondary" onClick={() => copyResult().catch(() => undefined)}>{copied ? <Check size={16} /> : result.result.kind === "link" ? <Link2 size={16} /> : <Clipboard size={16} />}{copied ? "Tersalin" : result.result.kind === "link" ? "Salin Link" : "Salin Kode"}</button> : null}
+                {resultValue ? <Button weight="secondary" onClick={() => copyResult().catch(() => undefined)}>{copied ? <Check size={16} /> : result.result.kind === "link" ? <Link2 size={16} /> : <Clipboard size={16} />}{copied ? "Tersalin" : result.result.kind === "link" ? "Salin Link" : "Salin Kode"}</Button> : null}
                 <small>Hasil otomatis dihapus dari layar setelah 60 detik dan tidak disimpan di browser.</small>
               </div>
             ) : null}
@@ -228,7 +228,7 @@ export default function OwnerConsoleAccountAccessPage() {
           </div>
           <div className="console-access-account-list">
             {accountsLoading ? <div className="console-access-state"><RefreshCw className="animate-spin" size={18} />Memuat akun...</div> : null}
-            {!accountsLoading && accountsError ? <div className="console-access-state is-error">{accountsError}<button type="button" className="ui-button is-secondary" onClick={() => loadAccounts(provider)}>Coba lagi</button></div> : null}
+            {!accountsLoading && accountsError ? <div className="console-access-state is-error">{accountsError}<Button weight="secondary" onClick={() => loadAccounts(provider)}>Coba lagi</Button></div> : null}
             {!accountsLoading && !accountsError && !visibleAccounts.length ? <div className="console-access-state">Tidak ada akun yang cocok.</div> : null}
             {!accountsLoading && !accountsError ? visibleAccounts.map((account) => {
               const target = accountTarget(account, provider);

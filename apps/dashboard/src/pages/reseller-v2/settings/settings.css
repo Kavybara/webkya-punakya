@@ -1,0 +1,278 @@
+/* ------------------------------------------------------------------ *
+ * Reseller settings.
+ *
+ * Page-owned presentation only. Everything structural -- the panel
+ * shell, the form controls, the metrics, the states -- comes from the
+ * kit, so what is here is the arrangement this page needs and the four
+ * affordances the kit does not ship: a section tab rail, a read-only
+ * field treatment, a save row, and the current-session line.
+ * ------------------------------------------------------------------ */
+
+.reseller-v2-settings-layout {
+  display: grid;
+  grid-template-columns: 272px minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.reseller-v2-settings-content {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+}
+
+/* ------------------------------------------------------------------ *
+ * The rail: who you are, then what you are editing.
+ * ------------------------------------------------------------------ */
+
+.reseller-v2-settings-aside {
+  position: sticky;
+  top: 24px;
+  padding: 10px;
+}
+
+.reseller-v2-settings-identity {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-raised);
+}
+.reseller-v2-settings-identity > div { min-width: 0; }
+.reseller-v2-settings-identity strong {
+  display: block;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reseller-v2-settings-identity span {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reseller-v2-settings-tabs {
+  display: grid;
+  gap: 3px;
+  margin-top: 8px;
+}
+.reseller-v2-settings-tabs button {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+.reseller-v2-settings-tabs button:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.reseller-v2-settings-tabs button.is-active {
+  background: color-mix(in srgb, var(--accent-violet) 16%, transparent);
+  color: var(--text-primary);
+}
+.reseller-v2-settings-tabs button:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------------ *
+ * Panels.
+ * ------------------------------------------------------------------ */
+
+.reseller-v2-settings-panel header > div { min-width: 0; }
+.reseller-v2-settings-panel header h2 { color: var(--text-primary); }
+.reseller-v2-settings-panel header p {
+  margin: 5px 0 0;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.reseller-v2-settings-panel header > i {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--accent-violet);
+}
+.reseller-v2-settings-panel-body { padding: 18px; }
+
+/* The identity form reads as a record first and an editor second; a
+   locked field that looks like an editable one invites a click that
+   does nothing. */
+.reseller-v2-settings-panel-body input[readonly] {
+  background: color-mix(in srgb, var(--text-muted) 8%, transparent);
+  color: var(--text-secondary);
+  cursor: default;
+}
+
+.reseller-v2-settings-form { display: grid; gap: 16px; }
+.reseller-v2-settings-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.reseller-v2-settings-form-grid.is-single { grid-template-columns: minmax(0, 1fr); }
+
+.reseller-v2-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+}
+
+.reseller-v2-settings-button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 15px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+.reseller-v2-settings-button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+.reseller-v2-settings-button:disabled { cursor: not-allowed; opacity: 0.55; }
+.reseller-v2-settings-button:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+.reseller-v2-settings-button.is-primary {
+  border-color: var(--accent-violet);
+  background: var(--accent-violet);
+  color: #150f2e;
+}
+.reseller-v2-settings-button.is-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-violet) 86%, #fff);
+}
+.reseller-v2-settings-button.is-danger {
+  border-color: color-mix(in srgb, var(--status-danger) 42%, transparent);
+  background: color-mix(in srgb, var(--status-danger) 12%, transparent);
+  color: color-mix(in srgb, var(--status-danger) 72%, var(--text-primary));
+}
+.reseller-v2-settings-button.is-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--status-danger) 20%, transparent);
+}
+
+.reseller-v2-settings-icon-button {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+.reseller-v2-settings-icon-button:hover {
+  border-color: color-mix(in srgb, var(--accent-violet) 58%, transparent);
+  background: color-mix(in srgb, var(--accent-violet) 16%, transparent);
+  color: var(--text-primary);
+}
+.reseller-v2-settings-icon-button:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------------ *
+ * The session line. There is exactly one row here, so it is a row and
+ * not a list -- a one-item list reads as "more below".
+ * ------------------------------------------------------------------ */
+
+.reseller-v2-settings-session {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-raised);
+}
+.reseller-v2-settings-session > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 11px;
+}
+.reseller-v2-settings-session-icon {
+  display: inline-flex;
+  color: var(--accent-cyan);
+}
+.reseller-v2-settings-session p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.reseller-v2-settings-session > span {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+/* ------------------------------------------------------------------ *
+ * Narrow. The rail stops being a rail first: above the fold it would
+ * cost a whole screen of height for two buttons.
+ * ------------------------------------------------------------------ */
+
+@media (max-width: 1024px) {
+  .reseller-v2-settings-layout { grid-template-columns: minmax(0, 1fr); }
+  .reseller-v2-settings-aside { position: static; }
+}
+
+@media (max-width: 640px) {
+  .reseller-v2-settings-form-grid { grid-template-columns: minmax(0, 1fr); }
+  .reseller-v2-settings-panel-body { padding: 15px; }
+  .reseller-v2-settings-actions > .reseller-v2-settings-button { flex: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reseller-v2-settings-tabs button,
+  .reseller-v2-settings-button,
+  .reseller-v2-settings-icon-button { transition: none; }
+}

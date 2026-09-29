@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, type ReactNode } from "react";
 import { LoaderCircle, X } from "lucide-react";
+import { Button } from "./Button";
 
 /**
  * The modal surface: a centred dialog and a side drawer, one implementation.
@@ -230,11 +231,11 @@ export function DialogActions({ onCancel, onConfirm, confirmLabel, busy = false,
 }) {
   return (
     <div className="ui-dialog-actions">
-      <button type="button" className="ui-button is-secondary" onClick={onCancel} disabled={busy}>Batal</button>
-      <button type="button" className={danger ? "ui-button is-danger" : "ui-button is-primary"} onClick={onConfirm} disabled={busy}>
+      <Button weight="secondary" onClick={onCancel} disabled={busy}>Batal</Button>
+      <Button weight={danger ? "danger" : "primary"} onClick={onConfirm} disabled={busy}>
         {busy ? <LoaderCircle className="ui-spin" size={15} /> : null}
         {busy ? "Memproses..." : confirmLabel}
-      </button>
+      </Button>
     </div>
   );
 }

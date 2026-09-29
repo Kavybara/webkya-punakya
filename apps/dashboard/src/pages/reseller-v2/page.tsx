@@ -25,7 +25,7 @@ import {
   summarizeResellerAccounts,
 } from "../../lib/resellerAccounts";
 import { formatRupiah } from "../../lib/format";
-import { ActionCard, Badge, EmptyState, ErrorState, LoadingSkeleton, Metric, maskIdentity } from "../../components/ui";
+import { ActionCard, Badge, Button, EmptyState, ErrorState, LoadingSkeleton, Metric, maskIdentity } from "../../components/ui";
 
 type OverviewData = {
   reseller: ApiReseller | null;
@@ -431,8 +431,8 @@ function BalanceCard({
         <p>{held ? `Saldo tertahan ${held}` : "Siap digunakan untuk transaksi."}</p>
       </div>
       <div className="ui-balance-actions">
-        <button type="button" className="ui-button is-primary" onClick={onTopUp}>Top Up</button>
-        <button type="button" className="ui-button is-secondary" onClick={onHistory}>Riwayat saldo</button>
+        <Button weight="primary" onClick={onTopUp}>Top Up</Button>
+        <Button weight="secondary" onClick={onHistory}>Riwayat saldo</Button>
       </div>
     </article>
   );

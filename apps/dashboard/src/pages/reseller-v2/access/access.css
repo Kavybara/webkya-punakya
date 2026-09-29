@@ -1,0 +1,388 @@
+/*
+ * Akses & Kode -- the reseller's most sensitive surface.
+ *
+ * Everything the page shows is either an identity (an email, a Disney login
+ * number) or a credential (a four digit sign-in code, a reset link). The
+ * colours therefore stay close to the kit's neutral surfaces and the accent
+ * carries one meaning only: this is the tool that is currently armed. A
+ * credential that reveals itself is the loudest thing on the page, and nothing
+ * else is allowed to compete with it.
+ */
+
+.reseller-v2-access-source {
+  display: inline-flex;
+  gap: 4px;
+  margin-top: 14px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-raised);
+}
+.reseller-v2-access-source button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease;
+}
+.reseller-v2-access-source button:hover { color: var(--text-primary); }
+.reseller-v2-access-source button.is-active {
+  border-color: color-mix(in srgb, var(--accent-violet) 58%, transparent);
+  background: color-mix(in srgb, var(--accent-violet) 16%, transparent);
+  color: var(--text-primary);
+}
+
+/* ------------------------------------------------------------------ *
+ * The workbench: which tool, and who to look it up for.
+ *
+ * It sticks, because on a long account list the two controls a reseller
+ * actually uses -- pick a tool, press Cari Akun -- should not scroll away
+ * from under the result they are producing.
+ * ------------------------------------------------------------------ */
+
+.reseller-v2-access-workbench {
+  position: sticky;
+  top: 72px;
+  z-index: 20;
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-glass-strong);
+  backdrop-filter: blur(10px);
+}
+.reseller-v2-access-tools {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+}
+.reseller-v2-access-tools button {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease;
+}
+.reseller-v2-access-tools button:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+.reseller-v2-access-tools button.is-active {
+  border-color: color-mix(in srgb, var(--accent-violet) 62%, transparent);
+  background: color-mix(in srgb, var(--accent-violet) 14%, transparent);
+  color: var(--text-primary);
+}
+.reseller-v2-access-tools button > span {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.reseller-v2-access-tools button > span svg { flex: 0 0 auto; }
+.reseller-v2-access-tools button > small {
+  color: var(--text-muted);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.reseller-v2-access-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+.reseller-v2-access-form > .ui-field { flex: 1; min-width: 0; }
+.reseller-v2-access-submit {
+  display: inline-flex;
+  min-height: 38px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 18px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: var(--accent-violet);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 150ms ease, opacity 150ms ease;
+}
+.reseller-v2-access-submit:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-violet) 86%, #fff);
+}
+.reseller-v2-access-submit:disabled { cursor: not-allowed; opacity: 0.5; }
+.reseller-v2-access-spin { animation: reseller-v2-access-spin 900ms linear infinite; }
+@keyframes reseller-v2-access-spin { to { transform: rotate(360deg); } }
+
+.reseller-v2-access-freshness {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.reseller-v2-access-freshness strong { color: var(--text-primary); }
+
+/* ------------------------------------------------------------------ *
+ * The result
+ * ------------------------------------------------------------------ */
+
+.reseller-v2-access-result-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding: 14px 16px;
+}
+.reseller-v2-access-identity,
+.reseller-v2-access-result-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 11px;
+}
+.reseller-v2-access-result-identity {
+  flex: 1;
+}
+.reseller-v2-access-result-identity > span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent-violet) 14%, transparent);
+  color: var(--accent-violet);
+}
+.reseller-v2-access-result-identity strong,
+.reseller-v2-access-result-identity small { display: block; }
+.reseller-v2-access-result-identity strong {
+  color: var(--text-primary);
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+.reseller-v2-access-result-identity small {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.reseller-v2-access-result-head > p {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.reseller-v2-access-result { margin-top: 12px; }
+.reseller-v2-access-result > header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.reseller-v2-access-result > header > span {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-violet) 14%, transparent);
+  color: var(--accent-violet);
+}
+.reseller-v2-access-result > header h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+.reseller-v2-access-result-body { padding: 16px; }
+.reseller-v2-access-result-body > p {
+  margin: 12px 0 0;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.reseller-v2-access-result-body > p.reseller-v2-access-result-date { margin-top: 4px; color: var(--text-muted); }
+.reseller-v2-access-meta { margin-top: 10px; }
+
+/*
+ * The credential itself. A code is set in the display face at a size that can
+ * be read back over a call, and a link never prints its path at all -- the
+ * host is the identity of the link, the length is the reassurance, and the
+ * full string is only ever handed to the clipboard or the browser.
+ */
+.reseller-v2-access-value {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--accent-violet) 30%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--accent-violet) 7%, transparent);
+}
+.reseller-v2-access-value > div:first-child { min-width: 0; }
+.reseller-v2-access-value p {
+  margin: 0 0 9px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.reseller-v2-access-value strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+.reseller-v2-access-value small {
+  display: block;
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.reseller-v2-access-value-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.reseller-v2-access-value-actions > a {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 15px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+.reseller-v2-access-value-actions > a:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+/* ------------------------------------------------------------------ *
+ * The identity list
+ * ------------------------------------------------------------------ */
+
+.reseller-v2-access-list { margin-top: 12px; }
+.reseller-v2-access-list > header {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.reseller-v2-access-list > header h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+.reseller-v2-access-list > header p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.reseller-v2-access-list > div > button {
+  display: flex;
+  width: 100%;
+  min-height: 64px;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+.reseller-v2-access-list > div > button:last-child { border-bottom: 0; }
+.reseller-v2-access-list > div > button:hover,
+.reseller-v2-access-list > div > button:focus-visible {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.reseller-v2-access-list > div > button:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid color-mix(in srgb, var(--accent-violet) 72%, transparent);
+  outline-offset: -2px;
+}
+.reseller-v2-access-list > div > button.is-muted { opacity: 0.72; }
+.reseller-v2-access-list-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+}
+.reseller-v2-access-list > div > button > div { min-width: 0; flex: 1; }
+.reseller-v2-access-list > div > button strong,
+.reseller-v2-access-list > div > button small { display: block; }
+.reseller-v2-access-list > div > button strong {
+  color: var(--text-primary);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+.reseller-v2-access-list > div > button small {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.reseller-v2-access-list > div > button > svg { flex: 0 0 auto; color: var(--text-muted); }
+.reseller-v2-access-list-loading { padding: 16px; }
+
+@media (max-width: 720px) {
+  .reseller-v2-access-workbench { position: static; }
+  .reseller-v2-access-form { flex-direction: column; align-items: stretch; }
+  .reseller-v2-access-submit { width: 100%; }
+  .reseller-v2-access-value { align-items: flex-start; flex-direction: column; }
+  .reseller-v2-access-value-actions { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reseller-v2-access-spin { animation: none; }
+}

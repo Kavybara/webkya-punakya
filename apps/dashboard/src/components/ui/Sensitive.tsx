@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, Copy, Eye, EyeOff } from "lucide-react";
+import { Check, CircleAlert, Copy, Eye, EyeOff } from "lucide-react";
 
 /**
  * A value that is masked until someone asks for it, and masks itself again.
@@ -53,29 +53,42 @@ export function SensitiveValue({ value, concealAfterMs = REVEAL_AFTER_MS }: { va
   );
 }
 
+/**
+ * The two states a copy can end in, kept apart on purpose.
+ *
+ * `idle` is not a failure -- it is the button before it is pressed. Only
+ * `failed` means the value did not reach the clipboard.
+ */
+type CopyState = "idle" | "copied" | "failed";
+
 export function CopyButton({ value, label = "Salin", onCopied }: { value: string; label?: string; onCopied?: () => void }) {
-  const [copied, setCopied] = useState(false);
+  const [state, setState] = useState<CopyState>("idle");
 
   async function copy() {
-    // A clipboard write can reject (no permission, insecure context, a
-    // clipboard that is not there). Swallowing it silently would leave the
-    // button claiming a copy that never happened, so the failure is reported
-    // through the same channel the success uses.
+    // A clipboard write can reject: no permission, an insecure context, a
+    // browser with no clipboard at all. The old version caught that and reset
+    // the label to "Salin" -- which is indistinguishable from never having
+    // pressed the button, so a reseller reading a code could believe they had
+    // copied it and typed the old one into a customer chat. The failure now
+    // says so in the button itself.
     try {
       await navigator.clipboard.writeText(value);
-      setCopied(true);
-      onCopied?.();
+      setState("copied");
     } catch {
-      setCopied(false);
-      onCopied?.();
+      setState("failed");
     }
-    window.setTimeout(() => setCopied(false), 1500);
+    onCopied?.();
+    window.setTimeout(() => setState("idle"), 1500);
   }
 
   return (
-    <button type="button" className="ui-copy" onClick={() => void copy()}>
-      {copied ? <Check size={15} /> : <Copy size={15} />}
-      {copied ? "Tersalin" : label}
+    <button
+      type="button"
+      className={`ui-copy${state === "failed" ? " is-failed" : ""}`}
+      onClick={() => void copy()}
+    >
+      {state === "copied" ? <Check size={15} /> : state === "failed" ? <CircleAlert size={15} /> : <Copy size={15} />}
+      {state === "copied" ? "Tersalin" : state === "failed" ? "Gagal" : label}
     </button>
   );
 }

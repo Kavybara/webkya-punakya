@@ -1,0 +1,617 @@
+/*
+ * Reseller catalogue.
+ *
+ * Everything the legacy page drew with Tailwind utilities, restated against
+ * the kit's tokens so the catalogue follows the theme instead of hardcoding a
+ * white card on a cream canvas. The brand gradient on a product tile is the
+ * one thing that stays a Tailwind class: it comes from `productBrandAssets`
+ * and is a per-product colour the catalogue has no other way to know.
+ */
+
+.reseller-v2-catalog-panel {
+  margin-top: 14px;
+}
+
+/* The header the legacy page centred above the grid. It is a panel header, so
+   it sits in the panel's own header slot rather than in a bespoke banner. */
+.reseller-v2-catalog-head > div {
+  min-width: 0;
+}
+
+.reseller-v2-catalog-head p {
+  max-width: 62ch;
+  margin: 7px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.reseller-v2-catalog-toolbar {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.reseller-v2-catalog-search {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 9px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  transition:
+    border-color 150ms ease,
+    background 150ms ease;
+}
+
+.reseller-v2-catalog-search:focus-within {
+  border-color: var(--accent-violet);
+  background: var(--surface);
+}
+
+/* The kit styles an input inside a Field, and this one sits inside a wrapper
+   that already carries the border, so the inner box is removed. Two classes
+   rather than one: at equal specificity the later stylesheet would win, and
+   load order of the two files is not something this page should depend on. */
+.reseller-v2-catalog-toolbar .reseller-v2-catalog-search input {
+  min-height: 42px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.reseller-v2-catalog-count {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.reseller-v2-catalog-count strong {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.reseller-v2-catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  padding: 16px;
+}
+
+.reseller-v2-catalog-skeleton {
+  min-height: 260px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.reseller-v2-catalog-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+/* Expansion is a state the reader can lose track of in a grid of cards, so
+   the open one is marked with an edge rather than only a size change. */
+.reseller-v2-catalog-card.is-expanded {
+  border-color: color-mix(in srgb, var(--accent-violet) 52%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-violet) 22%, transparent);
+}
+
+.reseller-v2-catalog-card > button {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.reseller-v2-catalog-card > button:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: -2px;
+}
+
+.reseller-v2-catalog-art {
+  position: relative;
+  display: flex;
+  height: 150px;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--bg-raised);
+}
+
+.reseller-v2-catalog-art .ui-badge {
+  position: absolute;
+  top: 11px;
+  left: 11px;
+}
+
+.reseller-v2-catalog-chip {
+  position: absolute;
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #1f2937;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.reseller-v2-catalog-chip.is-dark {
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+}
+
+.reseller-v2-catalog-chip.is-toggle {
+  top: auto;
+  right: 11px;
+  bottom: 11px;
+}
+
+/* The code is the fallback identity when the brand has no logo, so the tile
+   keeps its shape either way -- a logo that fails to load must not collapse
+   the card it sits in. */
+.reseller-v2-catalog-mark {
+  position: relative;
+  display: grid;
+  width: 74px;
+  height: 74px;
+  place-items: center;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 18px 40px rgba(2, 6, 23, 0.45);
+}
+
+/* The monogram is dark ink on a deliberately fixed light plate -- a brand tile
+   that changed colour with the theme would no longer look like the product's
+   own logo. `--text-inverse` is exactly that ink, and in the console's dark
+   shell it resolves to the same near-black that used to be typed out here. */
+.reseller-v2-catalog-mark span {
+  padding: 0 8px;
+  color: var(--text-inverse);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.25;
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+
+.reseller-v2-catalog-mark img {
+  position: absolute;
+  width: 46px;
+  height: 46px;
+  object-fit: contain;
+}
+
+.reseller-v2-catalog-body {
+  padding: 15px 16px 17px;
+}
+
+.reseller-v2-catalog-body h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.reseller-v2-catalog-body p {
+  min-height: 42px;
+  margin: 7px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.reseller-v2-catalog-facts {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.reseller-v2-catalog-facts span,
+.reseller-v2-catalog-facts strong {
+  display: block;
+}
+
+.reseller-v2-catalog-facts span {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.reseller-v2-catalog-facts strong {
+  margin-top: 3px;
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.reseller-v2-catalog-facts > div:last-child {
+  text-align: right;
+}
+
+.reseller-v2-catalog-facts > div:last-child span + span {
+  margin-top: 4px;
+}
+
+/* ------------------------------------------------------------------ *
+ * The open half: variants, then duration, then the way out.
+ * ------------------------------------------------------------------ */
+
+.reseller-v2-catalog-variants {
+  padding: 15px 16px 17px;
+  border-top: 1px solid var(--border);
+}
+
+.reseller-v2-catalog-variants-title {
+  margin: 0 0 10px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.reseller-v2-catalog-variant-list {
+  display: grid;
+  gap: 7px;
+}
+
+.reseller-v2-catalog-variant {
+  display: grid;
+  min-width: 0;
+  min-height: 58px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease,
+    color 150ms ease;
+}
+
+.reseller-v2-catalog-variant:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.reseller-v2-catalog-variant.is-selected {
+  border-color: color-mix(in srgb, var(--accent-violet) 58%, transparent);
+  background: color-mix(in srgb, var(--accent-violet) 12%, transparent);
+  color: var(--text-primary);
+}
+
+.reseller-v2-catalog-variant:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.reseller-v2-catalog-variant-mark {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-muted);
+}
+
+.reseller-v2-catalog-variant.is-selected .reseller-v2-catalog-variant-mark {
+  border-color: transparent;
+  background: var(--accent-violet);
+  color: #fff;
+}
+
+.reseller-v2-catalog-variant-copy {
+  min-width: 0;
+}
+
+.reseller-v2-catalog-variant-copy strong,
+.reseller-v2-catalog-variant-copy small {
+  display: block;
+}
+
+.reseller-v2-catalog-variant-copy strong {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reseller-v2-catalog-variant-copy em {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 500;
+}
+
+.reseller-v2-catalog-variant-copy small {
+  overflow: hidden;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reseller-v2-catalog-variant-price {
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-weight: 700;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.reseller-v2-catalog-variant-price small {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.reseller-v2-catalog-duration-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 15px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-raised);
+}
+
+.reseller-v2-catalog-duration-mode {
+  min-height: 38px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease,
+    color 150ms ease;
+}
+
+.reseller-v2-catalog-duration-mode:hover {
+  color: var(--text-primary);
+}
+
+.reseller-v2-catalog-duration-mode.is-active {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.reseller-v2-catalog-duration-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.reseller-v2-catalog-duration-option {
+  min-width: 0;
+  min-height: 62px;
+  overflow: hidden;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease,
+    color 150ms ease;
+}
+
+.reseller-v2-catalog-duration-option:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.reseller-v2-catalog-duration-option.is-selected {
+  border-color: color-mix(in srgb, var(--accent-violet) 62%, transparent);
+  background: color-mix(in srgb, var(--accent-violet) 11%, transparent);
+  color: var(--text-primary);
+}
+
+.reseller-v2-catalog-duration-label,
+.reseller-v2-catalog-duration-price {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reseller-v2-catalog-duration-label {
+  color: inherit;
+  font-size: 12px;
+}
+
+.reseller-v2-catalog-duration-price {
+  margin-top: 5px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.reseller-v2-catalog-checkout {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 14px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--text-primary);
+  color: var(--text-on-inverse);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 150ms ease, opacity 150ms ease;
+}
+
+.reseller-v2-catalog-checkout:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-violet) 70%, var(--text-primary));
+}
+
+.reseller-v2-catalog-checkout:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+/* The same button in its pre-selection state says something different, so it
+   cannot borrow the busy styling: this one was never actionable. */
+.reseller-v2-catalog-checkout.is-pending {
+  cursor: not-allowed;
+  opacity: 1;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+}
+
+/* ------------------------------------------------------------------ *
+ * The phone bar. It is the only way to reach checkout below the fold on a
+ * small screen, so it stays above the shell's own bottom navigation.
+ * ------------------------------------------------------------------ */
+
+.reseller-v2-catalog-mobile-bar {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  z-index: 40;
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--surface-glass-strong);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(10px);
+}
+
+.reseller-v2-catalog-mobile-bar > div {
+  min-width: 0;
+}
+
+.reseller-v2-catalog-mobile-bar p,
+.reseller-v2-catalog-mobile-bar span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reseller-v2-catalog-mobile-bar p {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.reseller-v2-catalog-mobile-bar span {
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.reseller-v2-catalog-mobile-bar button {
+  display: inline-flex;
+  min-height: 42px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  padding: 0 15px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--text-primary);
+  color: var(--text-on-inverse);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.reseller-v2-catalog-mobile-bar button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.reseller-v2-catalog-spin {
+  animation: reseller-v2-catalog-spin 1s linear infinite;
+}
+
+@keyframes reseller-v2-catalog-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 1180px) {
+  .reseller-v2-catalog-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 767px) {
+  .reseller-v2-catalog-grid {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 13px;
+  }
+
+  .reseller-v2-catalog-toolbar,
+  .reseller-v2-catalog-body,
+  .reseller-v2-catalog-variants {
+    padding-inline: 13px;
+  }
+
+  .reseller-v2-catalog-body p {
+    min-height: 0;
+  }
+
+  .reseller-v2-catalog-mobile-bar {
+    display: flex;
+  }
+}

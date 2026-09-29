@@ -1,0 +1,292 @@
+/* Warranty (reseller).
+   Feature stylesheet: it owns the `reseller-v2-` classes this page invents and
+   nothing else. Shared surfaces (panel frame, metric row, field, detail row,
+   badge, notice, state) come from the design kit, which is already loaded by
+   the shell -- so the rules here are the spacing and the two or three pieces of
+   this page's own shape, not a second skin for the same components. */
+
+.reseller-v2-warranty-loading {
+  margin-top: 12px;
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface);
+}
+
+/* The one line that says what pressing the button will act on. It is the
+   cheapest possible way to stop a claim being filed against the wrong account
+   after a select changes, so it sits above the form rather than inside it. */
+.reseller-v2-warranty-target {
+  margin: 12px 0 0;
+  padding: 10px 13px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.reseller-v2-warranty-target strong {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.reseller-v2-warranty-panel {
+  margin-top: 12px;
+}
+
+.reseller-v2-warranty-panel > header {
+  align-items: flex-start;
+}
+
+.reseller-v2-warranty-admin {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.reseller-v2-warranty-admin strong {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.reseller-v2-warranty-panel-note {
+  margin: 0;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.reseller-v2-warranty-form {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.reseller-v2-warranty-selected {
+  padding: 15px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-raised);
+}
+
+.reseller-v2-warranty-selected-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 13px;
+}
+
+.reseller-v2-warranty-selected-head > div {
+  min-width: 0;
+}
+
+.reseller-v2-warranty-selected-head span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.reseller-v2-warranty-selected-head strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+/* Six read-only values that belong to one account, read as a card rather than
+   as a stack of form controls: nothing here is editable, so nothing here is
+   shaped like an input. */
+.reseller-v2-warranty-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  column-gap: 24px;
+  margin: 0;
+}
+
+/* The character count wants the right edge; the hint under every other field
+   stays left, so the rule is scoped to this one field. */
+.reseller-v2-warranty-counter label small {
+  text-align: right;
+}
+
+.reseller-v2-warranty-evidence-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.reseller-v2-warranty-evidence input[type="file"] {
+  min-height: 44px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+.reseller-v2-warranty-evidence input[type="file"]::file-selector-button {
+  margin-right: 11px;
+  padding: 0 13px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease;
+}
+
+.reseller-v2-warranty-evidence input[type="file"]::file-selector-button:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.reseller-v2-warranty-submit {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent-violet);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    transform 150ms ease;
+}
+
+.reseller-v2-warranty-submit:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-violet) 86%, #fff);
+}
+
+.reseller-v2-warranty-submit:active:not(:disabled) {
+  transform: translateY(0.5px);
+}
+
+.reseller-v2-warranty-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.reseller-v2-warranty-spin {
+  animation: reseller-v2-warranty-spin 900ms linear infinite;
+}
+
+@keyframes reseller-v2-warranty-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.reseller-v2-warranty-history {
+  margin-top: 12px;
+}
+
+.reseller-v2-warranty-claims {
+  display: grid;
+}
+
+.reseller-v2-warranty-claim {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.reseller-v2-warranty-claim:last-child {
+  border-bottom: 0;
+}
+
+.reseller-v2-warranty-claim > div {
+  min-width: 0;
+}
+
+.reseller-v2-warranty-claim strong,
+.reseller-v2-warranty-claim small {
+  display: block;
+}
+
+.reseller-v2-warranty-claim strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.reseller-v2-warranty-claim small {
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.reseller-v2-warranty-claim-note {
+  margin: 8px 0 0;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.reseller-v2-warranty-claim-note b {
+  color: var(--text-primary);
+}
+
+.reseller-v2-warranty-claim-evidence {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 10.5px;
+}
+
+@media (max-width: 767px) {
+  .reseller-v2-warranty-panel > header {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .reseller-v2-warranty-form,
+  .reseller-v2-warranty-panel-note {
+    padding: 15px;
+  }
+
+  .reseller-v2-warranty-details {
+    grid-template-columns: 1fr;
+  }
+
+  .reseller-v2-warranty-claim {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .reseller-v2-warranty-submit {
+    min-height: 52px;
+  }
+}

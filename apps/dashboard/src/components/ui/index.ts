@@ -8,6 +8,8 @@ import "./shell.css";
 export { AppShell, useDismiss } from "./AppShell";
 export type { AppShellNavGroup, AppShellNavItem } from "./AppShell";
 export { Badge } from "./Badge";
+export { Button } from "./Button";
+export type { ButtonWeight } from "./Button";
 export { CommandKeyHint, CommandPalette } from "./CommandPalette";
 export type { CommandGroup, CommandHit } from "./CommandPalette";
 export { DetailRow, Field } from "./Field";

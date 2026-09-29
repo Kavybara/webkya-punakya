@@ -14,6 +14,7 @@ import {
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { api } from "../../lib/api";
 import { clearSession, readSession } from "../../lib/session";
+import { Button } from "./Button";
 
 const COLLAPSE_KEY = "kavya-shell-collapsed";
 
@@ -368,15 +369,14 @@ export function AppShell({
               <div className="ui-shell-page-actions">
                 {lastUpdated ? <small>Diperbarui {lastUpdated}</small> : null}
                 {onRefresh ? (
-                  <button
-                    type="button"
-                    className="ui-button is-secondary"
+                  <Button
+                    weight="secondary"
                     onClick={onRefresh}
                     disabled={refreshing}
                   >
                     <RefreshCw size={16} className={refreshing ? "ui-spin" : ""} aria-hidden="true" />
                     {refreshing ? "Memuat" : "Perbarui"}
-                  </button>
+                  </Button>
                 ) : null}
               </div>
             )}

@@ -252,3 +252,62 @@ test("every control inside a shell gets the focus ring without opting in", async
   assert.match(ring, /\.auth-shell\s+:focus-visible/, "the sign-in shell must give its controls a focus ring");
   assert.match(ring, /outline:\s*2px solid/, "the ring must stay visible against the dark surfaces");
 });
+
+test("a copy that did not happen is not allowed to look like one that did", async () => {
+  const { text, css } = await kit();
+
+  // The old CopyButton caught a rejected clipboard write and reset the label to
+  // "Salin" -- the same string it shows before it is ever pressed. A reseller
+  // reading a sign-in code could press it, be refused by the browser, see
+  // nothing change, and hand the customer a code that was never copied. The
+  // three states are now named, and `failed` is one of them.
+  assert.match(text, /type CopyState = "idle" \| "copied" \| "failed"/, "copy must distinguish idle from failed");
+  assert.match(
+    text,
+    /catch\s*\{\s*\n\s*setState\("failed"\)/,
+    "a rejected clipboard write must land in the failed state, not back in idle",
+  );
+  assert.match(
+    text,
+    /state === "failed" \? "Gagal"/,
+    "the failure must be legible in the button, where the reader is already looking",
+  );
+
+  // And it must be visibly not-the-success. A "Gagal" in the same grey as
+  // "Tersalin" reads as a copy one glance later.
+  assert.match(css, /\.ui-copy\.is-failed\s*\{/, "the failed state needs its own styling");
+  assert.match(
+    css,
+    /\.ui-copy\.is-failed\s*\{[\s\S]*?color:\s*var\(--status-danger\)/,
+    "the failed state must be tinted with the danger token, not left neutral",
+  );
+  // Hover must not launder the failure away while the reader is still reading it.
+  assert.match(
+    css,
+    /\.ui-copy\.is-failed:hover\s*\{[\s\S]*?color:\s*var\(--status-danger\)/,
+    "hovering a failed copy must not reset it to a neutral button",
+  );
+});
+
+test("the one button defaults to type=button, and has a component behind its styles", async () => {
+  const { text, css } = await kit();
+
+  // ui.css has carried a complete .ui-button styleset for a while with nothing
+  // to render it, so callers assembled the class list by hand. That is how a
+  // page wanting both a destructive and a quiet action in one row ends up
+  // guessing at modifier names.
+  assert.match(css, /\.ui-button\.is-primary\b/, "the button styles are expected to exist");
+  for (const weight of ["primary", "secondary", "danger", "quiet"]) {
+    assert.match(css, new RegExp(String.raw`\.ui-button\.is-${weight}\b`), `.ui-button.is-${weight} must be styled`);
+  }
+
+  // type="button" rather than the HTML default of submit: both consoles are
+  // forms, and a button meant to close a panel that silently submits the form
+  // behind it only misbehaves for whoever clicks it last.
+  assert.match(
+    text,
+    /<button type="button" className=\{classes\} \{\.\.\.rest\}>/,
+    "Button must set type=button before spreading, so an explicit type still wins",
+  );
+  assert.match(text, /weight\?: ButtonWeight/, "the weight must be part of the public props");
+});

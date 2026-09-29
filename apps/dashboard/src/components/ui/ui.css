@@ -672,6 +672,24 @@
 }
 .ui-copy:hover { border-color: var(--border-strong); background: var(--surface-hover); color: var(--text-primary); }
 
+/* A copy that did not happen. The button is the only place the reader is
+   looking when they press it, so that is where the refusal belongs -- and it
+   has to be visibly not-the-success, or "Gagal" in the same grey reads as
+   "Tersalin" one glance later. Tinted the way .ui-badge.is-danger is, so a
+   refused copy and a danger badge are recognisably the same kind of news. */
+.ui-copy.is-failed {
+  border-color: color-mix(in srgb, var(--status-danger) 34%, transparent);
+  background: color-mix(in srgb, var(--status-danger) 9%, transparent);
+  color: var(--status-danger);
+}
+/* Hover must not launder the failure back into a neutral button while the
+   reader is still reading it. */
+.ui-copy.is-failed:hover {
+  border-color: color-mix(in srgb, var(--status-danger) 34%, transparent);
+  background: color-mix(in srgb, var(--status-danger) 9%, transparent);
+  color: var(--status-danger);
+}
+
 /* ------------------------------------------------------------------ *
  * Focus
  *
