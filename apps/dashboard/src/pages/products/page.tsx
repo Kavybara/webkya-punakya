@@ -6,7 +6,8 @@ import { durationAllowedByModes, firstAllowedPriceEntry, sortedAllowedPriceEntri
 import { productBrandAsset, productLogoUrl } from "../../lib/productBrandAssets";
 import { customerPaymentBreakdown } from "../../lib/payment";
 import { readSession, updateSession } from "../../lib/session";
-import { formatRupiah, type CheckoutField } from "../../mocks/data";
+import type { CheckoutField } from "../../lib/types";
+import { formatRupiah } from "../../lib/format";
 
 type CheckoutStep = "catalog" | "details" | "payment" | "process" | "done";
 

@@ -4,6 +4,7 @@ import { ConsoleDataTable, type ConsoleColumn, type ConsoleFilter } from "../../
 import { ConsoleBadge, ConsoleDialog, ConsoleDialogActions, ConsoleField, ConsoleMetrics, ConsoleNotice } from "../../../components/console/ConsoleResource";
 import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import { api, type WhatsappListHistory, type WhatsappRental, type WhatsappStatus } from "../../../lib/api";
+import { formatCalendarDate, formatDateTime } from "../../../lib/format";
 
 type RentalForm = {
   linkGrub: string;
@@ -50,19 +51,6 @@ function addDays(value: string | undefined, days: number) {
   const base = new Date(`${dateInputValue(value) || fallback}T00:00:00`);
   base.setDate(base.getDate() + Math.trunc(Number(days || 0)));
   return base.toISOString().slice(0, 10);
-}
-
-function shortDate(value?: string) {
-  if (!value) return "-";
-  const input = dateInputValue(value);
-  const date = input ? new Date(`${input}T00:00:00`) : new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" });
-}
-
-function shortDateTime(value?: string) {
-  if (!value) return "-";
-  const date = new Date(String(value).replace(" ", "T"));
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
 function adjustmentDays(form: Pick<RentalForm, "adjustmentDirection" | "adjustmentUnit" | "adjustmentAmount"> | AdjustmentForm) {
@@ -223,7 +211,7 @@ export default function OwnerConsoleWhatsappPage() {
   const columns = useMemo<Array<ConsoleColumn<WhatsappRental>>>(() => [
     { id: "group", header: "Grup", value: (row) => `${row.name} ${row.linkGrub || ""}`, sortable: true, cell: (row) => <button type="button" className="console-link-cell-button" onClick={() => openListHistory(row).catch(() => undefined)}><span className="console-product-cell"><strong>{row.name}</strong><small>{row.linkGrub || "Link belum tersedia"}</small></span></button> },
     { id: "owner", header: "Owner", value: (row) => `${row.owner || ""} ${row.contact || ""}`, sortable: true, cell: (row) => <span className="console-product-cell"><strong>{row.owner || "-"}</strong><small>{row.contact || "Nomor belum diisi"}</small></span> },
-    { id: "period", header: "Periode", value: (row) => `${row.startedAt || ""} ${row.endsAt || ""}`, sortable: true, cell: (row) => <span className="console-product-cell"><strong>{shortDate(row.startedAt)}</strong><small>sampai {shortDate(row.endsAt)}</small></span> },
+    { id: "period", header: "Periode", value: (row) => `${row.startedAt || ""} ${row.endsAt || ""}`, sortable: true, cell: (row) => <span className="console-product-cell"><strong>{formatCalendarDate(row.startedAt)}</strong><small>sampai {formatCalendarDate(row.endsAt)}</small></span> },
     { id: "status", header: "Status", value: (row) => row.status, sortable: true, cell: (row) => <ConsoleBadge tone={row.status === "active" ? "success" : row.status === "expired" ? "danger" : "warning"}>{row.status}</ConsoleBadge> },
     { id: "actions", header: "Aksi", value: () => "", cell: (row) => <div className="console-row-actions"><button type="button" disabled={busy === row.id} onClick={() => openListHistory(row).catch(() => undefined)} aria-label={`Riwayat list ${row.name}`}><History size={14} /></button><button type="button" onClick={() => openEdit(row)} aria-label={`Edit ${row.name}`}><Edit3 size={14} /></button><button type="button" onClick={() => { setAdjusting(row); setAdjustForm(emptyAdjustment()); }} aria-label={`Tambah durasi ${row.name}`}><CalendarPlus size={14} /></button>{row.linkGrub ? <a href={row.linkGrub} target="_blank" rel="noreferrer" aria-label={`Buka grup ${row.name}`}><Link2 size={14} /></a> : null}</div> },
   ], [busy]);
@@ -243,7 +231,7 @@ export default function OwnerConsoleWhatsappPage() {
     {error ? <ConsoleNotice tone="danger">{error}</ConsoleNotice> : null}{message ? <ConsoleNotice>{message}</ConsoleNotice> : null}
     {showConnectionPanel ? <section className="console-panel console-whatsapp-pairing-panel"><div className="console-panel-header"><div><span>Koneksi bot</span><h2>{pairingCode ? "Pairing code tersedia" : status?.qrAvailable ? "QR WhatsApp tersedia" : "Pairing code belum terbaca"}</h2></div><ConsoleBadge tone="warning">{status?.state || "periksa"}</ConsoleBadge></div><div className="console-whatsapp-pairing-body"><KeyRound size={20} /><div><p>{pairingCode ? "Masukkan kode ini di WhatsApp: Perangkat tertaut -> Tautkan dengan nomor telepon." : status?.qrAvailable ? "Buka halaman pairing WhatsApp untuk melihat QR terbaru dari bot." : `Status bot: ${connectionDetail}. Hapus folder bailey auth lalu restart untuk meminta kode baru.`}</p>{pairingCode ? <strong className="console-whatsapp-pairing-code">{pairingCode}</strong> : null}</div><div className="console-whatsapp-pairing-actions">{pairingCode ? <button type="button" onClick={() => copyPairingCode().catch(() => undefined)}><span>{copiedPairing ? <Check size={15} /> : <Copy size={15} />}</span>{copiedPairing ? "Tersalin" : "Salin kode"}</button> : null}{status?.publicQrUrl ? <a href={status.publicQrUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /> Buka pairing</a> : null}<button type="button" onClick={() => load().catch(() => undefined)}><RefreshCw size={15} /> Refresh</button></div></div></section> : null}
     <section className="console-panel"><div className="console-panel-header"><div><span>Operasional</span><h2>Rental grup</h2></div><div className="console-panel-toolbar-actions"><button type="button" onClick={openCreate}><Plus size={15} /> Tambah rental</button></div></div><ConsoleDataTable rows={groups} columns={columns} filters={filters} rowKey={(row) => row.id} loading={loading} error={error} initialPageSize={10} /></section>
-    {selectedGroup ? <section className="console-panel console-whatsapp-list-history"><div className="console-panel-header"><div><span>Riwayat perubahan list</span><h2>{selectedGroup.name}</h2></div><div className="console-panel-toolbar-actions"><button type="button" disabled={listHistoryLoading} onClick={() => openListHistory(selectedGroup).catch(() => undefined)}><RefreshCw size={15} /> Refresh riwayat</button></div></div>{listHistoryLoading ? <div className="console-table-state">Memuat riwayat list...</div> : listHistory?.items.length ? <div className="console-list-history-grid">{listHistory.items.map((item) => <article key={item.id} className="console-list-history-card"><div><strong>{item.keyword}</strong><ConsoleBadge tone={item.source === "audit" ? "success" : "muted"}>{item.action}</ConsoleBadge></div><p>{item.textPreview || "Isi list tidak memiliki preview teks."}</p><small>{item.senderName || item.sender || (item.source === "snapshot" ? "Snapshot list terakhir" : "Admin tidak tercatat")} / {shortDateTime(item.updatedAt)}{item.media ? " / ada media" : ""}</small></article>)}</div> : <div className="console-table-state">Belum ada riwayat perubahan list untuk grup ini.</div>}</section> : null}
+    {selectedGroup ? <section className="console-panel console-whatsapp-list-history"><div className="console-panel-header"><div><span>Riwayat perubahan list</span><h2>{selectedGroup.name}</h2></div><div className="console-panel-toolbar-actions"><button type="button" disabled={listHistoryLoading} onClick={() => openListHistory(selectedGroup).catch(() => undefined)}><RefreshCw size={15} /> Refresh riwayat</button></div></div>{listHistoryLoading ? <div className="console-table-state">Memuat riwayat list...</div> : listHistory?.items.length ? <div className="console-list-history-grid">{listHistory.items.map((item) => <article key={item.id} className="console-list-history-card"><div><strong>{item.keyword}</strong><ConsoleBadge tone={item.source === "audit" ? "success" : "muted"}>{item.action}</ConsoleBadge></div><p>{item.textPreview || "Isi list tidak memiliki preview teks."}</p><small>{item.senderName || item.sender || (item.source === "snapshot" ? "Snapshot list terakhir" : "Admin tidak tercatat")} / {formatDateTime(item.updatedAt)}{item.media ? " / ada media" : ""}</small></article>)}</div> : <div className="console-table-state">Belum ada riwayat perubahan list untuk grup ini.</div>}</section> : null}
     {editing !== undefined ? <ConsoleDialog title={editing ? "Edit rental" : "Tambah rental"} eyebrow="WhatsApp" onClose={() => setEditing(undefined)} footer={<ConsoleDialogActions onCancel={() => setEditing(undefined)} onConfirm={save} confirmLabel="Simpan rental" busy={busy === "save"} />}>
       <div className="console-resource-form-grid">
         <ConsoleField label="Link grup"><input type="url" value={form.linkGrub} onChange={(event) => setForm({ ...form, linkGrub: event.target.value })} placeholder="https://chat.whatsapp.com/..." /></ConsoleField>
@@ -252,14 +240,14 @@ export default function OwnerConsoleWhatsappPage() {
         {!editing ? <>
           <ConsoleField label="Mulai"><input type="date" value={form.startedAt} onChange={(event) => setForm({ ...form, startedAt: event.target.value })} /></ConsoleField>
           <ConsoleField label="Durasi"><select value={form.durationMonths} onChange={(event) => setForm({ ...form, durationMonths: event.target.value })}>{monthOptions.map((value) => <option key={value} value={value}>{value} bulan</option>)}</select></ConsoleField>
-          <ConsoleField label="Berakhir"><div className="console-readonly-field">{shortDate(createEndsAt)} <small>{createDays} hari</small></div></ConsoleField>
+          <ConsoleField label="Berakhir"><div className="console-readonly-field">{formatCalendarDate(createEndsAt)} <small>{createDays} hari</small></div></ConsoleField>
         </> : <>
-          <ConsoleField label="Mulai"><div className="console-readonly-field">{shortDate(editing.startedAt)}</div></ConsoleField>
-          <ConsoleField label="Berakhir saat ini"><div className="console-readonly-field">{shortDate(editing.endsAt)}</div></ConsoleField>
+          <ConsoleField label="Mulai"><div className="console-readonly-field">{formatCalendarDate(editing.startedAt)}</div></ConsoleField>
+          <ConsoleField label="Berakhir saat ini"><div className="console-readonly-field">{formatCalendarDate(editing.endsAt)}</div></ConsoleField>
           <ConsoleField label="Aksi durasi"><select value={form.adjustmentDirection} onChange={(event) => setForm({ ...form, adjustmentDirection: event.target.value as RentalForm["adjustmentDirection"] })}><option value="add">Tambah</option><option value="subtract">Kurangi</option></select></ConsoleField>
           <ConsoleField label="Satuan"><select value={form.adjustmentUnit} onChange={(event) => setForm({ ...form, adjustmentUnit: event.target.value as RentalForm["adjustmentUnit"] })}><option value="month">Bulan (30 hari)</option><option value="day">Hari</option></select></ConsoleField>
           <ConsoleField label="Jumlah"><input type="number" min="0" max={form.adjustmentUnit === "month" ? 12 : 30} value={form.adjustmentAmount} onChange={(event) => setForm({ ...form, adjustmentAmount: event.target.value })} /></ConsoleField>
-          <ConsoleField label="Berakhir baru"><div className="console-readonly-field">{editPreviewEndsAt ? shortDate(editPreviewEndsAt) : shortDate(editing.endsAt)}</div></ConsoleField>
+          <ConsoleField label="Berakhir baru"><div className="console-readonly-field">{editPreviewEndsAt ? formatCalendarDate(editPreviewEndsAt) : formatCalendarDate(editing.endsAt)}</div></ConsoleField>
         </>}
         <ConsoleField label="Status"><select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as WhatsappRental["status"] })}><option value="active">Aktif</option><option value="paused">Dijeda</option><option value="expired">Berakhir</option></select></ConsoleField>
       </div>
@@ -267,11 +255,11 @@ export default function OwnerConsoleWhatsappPage() {
     </ConsoleDialog> : null}
     {adjusting ? <ConsoleDialog title="Atur durasi rental" eyebrow={adjusting.name} onClose={() => setAdjusting(null)} footer={<ConsoleDialogActions onCancel={() => setAdjusting(null)} onConfirm={adjust} confirmLabel="Simpan durasi" busy={busy === "adjust"} />}>
       <div className="console-resource-form-grid">
-        <ConsoleField label="Berakhir saat ini"><div className="console-readonly-field">{shortDate(adjusting.endsAt)}</div></ConsoleField>
+        <ConsoleField label="Berakhir saat ini"><div className="console-readonly-field">{formatCalendarDate(adjusting.endsAt)}</div></ConsoleField>
         <ConsoleField label="Aksi"><select value={adjustForm.direction} onChange={(event) => setAdjustForm({ ...adjustForm, direction: event.target.value as AdjustmentForm["direction"] })}><option value="add">Tambah</option><option value="subtract">Kurangi</option></select></ConsoleField>
         <ConsoleField label="Satuan"><select value={adjustForm.unit} onChange={(event) => setAdjustForm({ ...adjustForm, unit: event.target.value as AdjustmentForm["unit"] })}><option value="month">Bulan (30 hari)</option><option value="day">Hari</option></select></ConsoleField>
         <ConsoleField label="Jumlah"><input type="number" min="1" max={adjustForm.unit === "month" ? 12 : 30} value={adjustForm.amount} onChange={(event) => setAdjustForm({ ...adjustForm, amount: event.target.value })} /></ConsoleField>
-        <ConsoleField label="Berakhir baru"><div className="console-readonly-field">{modalPreviewEndsAt ? shortDate(modalPreviewEndsAt) : shortDate(adjusting.endsAt)}</div></ConsoleField>
+        <ConsoleField label="Berakhir baru"><div className="console-readonly-field">{modalPreviewEndsAt ? formatCalendarDate(modalPreviewEndsAt) : formatCalendarDate(adjusting.endsAt)}</div></ConsoleField>
       </div>
     </ConsoleDialog> : null}
   </ConsoleShell>;

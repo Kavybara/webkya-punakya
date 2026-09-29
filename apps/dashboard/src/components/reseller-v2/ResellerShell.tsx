@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { formatRupiah } from "../../lib/format";
 import {
   Bell,
   ChevronRight,
@@ -71,13 +72,7 @@ export function ResellerShell({
       .resellers()
       .then((rows) => {
         const amount = Number(rows[0]?.deposit || 0);
-        setLoadedBalance(
-          new Intl.NumberFormat("id-ID", {
-            style: "currency",
-            currency: "IDR",
-            maximumFractionDigits: 0,
-          }).format(amount),
-        );
+        setLoadedBalance(formatRupiah(amount));
       })
       .catch(() => setLoadedBalance("-"));
   }, [balance]);

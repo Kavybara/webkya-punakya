@@ -3,6 +3,7 @@ import { Cloud, Database, HardDrive, MessageCircle, RefreshCw, Server, Sheet, Wa
 import { ConsoleBadge, ConsoleMetrics, ConsoleNotice } from "../../../components/console/ConsoleResource";
 import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import { api, type HealthResult, type SystemStatus } from "../../../lib/api";
+import { formatDateTime } from "../../../lib/format";
 
 function formatBytes(value = 0) {
   const bytes = Math.max(0, Number(value || 0));
@@ -10,12 +11,6 @@ function formatBytes(value = 0) {
   if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
   if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${bytes} B`;
-}
-
-function formatTime(value = "") {
-  if (!value) return "-";
-  const date = new Date(String(value).replace(" ", "T"));
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
 function statusTone(ok: boolean, warning = false) {
@@ -69,7 +64,7 @@ export default function OwnerConsoleHealthPage() {
         icon: <Sheet size={18} />,
         ok: Boolean(health?.googleSheetsConfigured && health?.googleSheetsHealthy !== false),
         warning: Boolean(health?.googleSheetsConfigured && health?.googleSheetsHealthy === false),
-        detail: health?.googleSheetsFailedSections?.length ? `Gagal: ${health.googleSheetsFailedSections.join(", ")}` : `Sync terakhir ${formatTime(health?.googleSheetsLastSyncAt || "")}`,
+        detail: health?.googleSheetsFailedSections?.length ? `Gagal: ${health.googleSheetsFailedSections.join(", ")}` : `Sync terakhir ${formatDateTime(health?.googleSheetsLastSyncAt || "")}`,
       },
       {
         key: "cloudflare",
@@ -84,7 +79,7 @@ export default function OwnerConsoleHealthPage() {
         title: "Database",
         icon: <Database size={18} />,
         ok: Boolean(health?.database?.exists || system?.database?.exists),
-        detail: `${formatBytes(health?.database?.size || system?.database?.size || 0)} / update ${formatTime(health?.database?.modifiedAt || system?.database?.modifiedAt || "")}`,
+        detail: `${formatBytes(health?.database?.size || system?.database?.size || 0)} / update ${formatDateTime(health?.database?.modifiedAt || system?.database?.modifiedAt || "")}`,
       },
       {
         key: "backup",
@@ -92,14 +87,14 @@ export default function OwnerConsoleHealthPage() {
         icon: <HardDrive size={18} />,
         ok: Boolean(health?.backup?.count || system?.backup?.count),
         warning: true,
-        detail: health?.backup?.latestName ? `${health.backup.latestName} / ${formatTime(health.backup.latestAt)}` : "Backup belum ditemukan.",
+        detail: health?.backup?.latestName ? `${health.backup.latestName} / ${formatDateTime(health.backup.latestAt)}` : "Backup belum ditemukan.",
       },
     ];
   }, [health, system]);
 
   const attention = checks.filter((item) => !item.ok).length + (health?.maintenance?.enabled ? 1 : 0);
 
-  return <ConsoleShell title="Health Center" description="Pantau kesehatan teknis web, bot, pembayaran, tunnel, Sheets, database, dan backup." refreshing={loading} attentionCount={attention} systemState={error ? "unknown" : attention ? "warning" : "healthy"} lastUpdated={formatTime(system?.checkedAt || "")} onRefresh={load}>
+  return <ConsoleShell title="Health Center" description="Pantau kesehatan teknis web, bot, pembayaran, tunnel, Sheets, database, dan backup." refreshing={loading} attentionCount={attention} systemState={error ? "unknown" : attention ? "warning" : "healthy"} lastUpdated={formatDateTime(system?.checkedAt || "")} onRefresh={load}>
     <ConsoleMetrics items={[{ label: "WhatsApp", value: system?.whatsapp?.connected ? "Connected" : "Periksa", tone: statusTone(Boolean(system?.whatsapp?.connected), true) }, { label: "Pakasir", value: health?.pakasirConfigured ? "Configured" : "Kosong", tone: statusTone(Boolean(health?.pakasirConfigured), true) }, { label: "Cloudflare", value: system?.tunnel?.running || system?.integrations?.cloudflare?.running ? "Running" : "Offline", tone: statusTone(Boolean(system?.tunnel?.running || system?.integrations?.cloudflare?.running), true) }, { label: "Memory", value: `${system?.memory?.percent ?? 0}%`, tone: Number(system?.memory?.percent || 0) > 85 ? "warning" : "success" }]} />
     {error ? <ConsoleNotice tone="danger">{error}</ConsoleNotice> : null}
     {health?.maintenance?.enabled ? <ConsoleNotice tone="warning">{health.maintenance.reason || "Maintenance order sedang aktif."}</ConsoleNotice> : null}

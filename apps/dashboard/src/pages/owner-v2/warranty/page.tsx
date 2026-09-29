@@ -10,6 +10,7 @@ import {
   type WarrantyManualClaimOption,
   type WarrantyReplacementCandidate,
 } from "../../../lib/api";
+import { formatDateTimeFull } from "../../../lib/format";
 
 const editableStatuses: WarrantyClaimStatus[] = ["reviewing", "resolved", "rejected"];
 const terminalStatuses = new Set<WarrantyClaimStatus>(["resolved", "rejected"]);
@@ -41,13 +42,6 @@ function statusTone(status: WarrantyClaimStatus | string) {
   if (status === "rejected") return "danger" as const;
   if (status === "submitted") return "warning" as const;
   return "info" as const;
-}
-
-function formatTime(value = "") {
-  const date = new Date(value.includes("T") ? value : value.replace(" ", "T"));
-  return Number.isNaN(date.getTime())
-    ? value || "-"
-    : date.toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 function formatReviewDuration(minutes = 0) {
@@ -418,7 +412,7 @@ export default function OwnerConsoleWarrantyPage() {
   }
 
   const columns = useMemo<Array<ConsoleColumn<WarrantyClaim>>>(() => [
-    { id: "claim", header: "Klaim", value: (row) => row.id, sortable: true, cell: (row) => <span className="console-product-cell"><strong>{row.id}</strong><small>{formatTime(row.createdAt)}</small></span> },
+    { id: "claim", header: "Klaim", value: (row) => row.id, sortable: true, cell: (row) => <span className="console-product-cell"><strong>{row.id}</strong><small>{formatDateTimeFull(row.createdAt)}</small></span> },
     { id: "reseller", header: "Reseller", value: (row) => row.resellerName || row.resellerId || "-", sortable: true, cell: (row) => <span className="console-product-cell"><strong>{row.resellerName || row.resellerId || "-"}</strong><small>{row.accountIdentity || "Identitas dimasking"}</small></span> },
     { id: "product", header: "Produk", value: (row) => `${row.product} ${row.variant}`, sortable: true, cell: (row) => <span className="console-product-cell"><strong>{row.product || "-"}</strong><small>{row.variant || "-"}</small></span> },
     { id: "order", header: "Order", value: (row) => row.orderId || "-", hideOnMobile: true },
@@ -478,7 +472,7 @@ export default function OwnerConsoleWarrantyPage() {
       {selectedManualOption ? <div className="mt-4 grid gap-3 md:grid-cols-3">
         <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4"><span className="text-xs uppercase tracking-wider text-zinc-500">Reseller</span><p className="mt-2 font-semibold text-white">{selectedManualOption.resellerName || "-"}</p><p className="mt-1 text-sm text-zinc-400">{selectedManualOption.orderId || "Tanpa Order ID"}</p></div>
         <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4"><span className="text-xs uppercase tracking-wider text-zinc-500">Akun</span><p className="mt-2 font-semibold text-white">{selectedManualOption.accountIdentity || "Dimasking"}</p><p className="mt-1 text-sm text-zinc-400">Profil {selectedManualOption.profile || "-"}</p></div>
-        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4"><span className="text-xs uppercase tracking-wider text-zinc-500">Garansi</span><p className="mt-2 font-semibold text-white">Sisa {selectedManualOption.remainingDays} hari</p><p className="mt-1 text-sm text-zinc-400">Sampai {formatTime(selectedManualOption.warrantyEndsAt)}</p></div>
+        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4"><span className="text-xs uppercase tracking-wider text-zinc-500">Garansi</span><p className="mt-2 font-semibold text-white">Sisa {selectedManualOption.remainingDays} hari</p><p className="mt-1 text-sm text-zinc-400">Sampai {formatDateTimeFull(selectedManualOption.warrantyEndsAt)}</p></div>
       </div> : null}
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <ConsoleField label="Kendala dari WhatsApp" hint="Tuliskan keluhan reseller secara ringkas dan jelas.">
@@ -517,7 +511,7 @@ export default function OwnerConsoleWarrantyPage() {
         <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
           <span className="text-xs uppercase tracking-wider text-zinc-500">Masa garansi</span>
           <p className="mt-2 font-semibold text-white">{selected.warrantyDays || "-"} hari</p>
-          <p className="mt-1 text-sm text-zinc-400">{formatTime(selected.warrantyStartedAt || "")} – {formatTime(selected.warrantyEndsAt || "")}</p>
+          <p className="mt-1 text-sm text-zinc-400">{formatDateTimeFull(selected.warrantyStartedAt || "")} – {formatDateTimeFull(selected.warrantyEndsAt || "")}</p>
         </div>
         <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
           <span className="text-xs uppercase tracking-wider text-zinc-500">Bukti reseller</span>

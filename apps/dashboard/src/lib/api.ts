@@ -1,4 +1,4 @@
-import type { Activity, ManagedAccount, Order, Product, ProductVariant, Reseller, StockItem } from "../mocks/data";
+import type { Activity, ManagedAccount, Order, Product, ProductVariant, Reseller, StockItem } from "./types";
 import { clearSession, readSession } from "./session";
 
 type JsonBody = Record<string, unknown> | Array<unknown> | undefined;

@@ -34,20 +34,13 @@ import {
   normalizeResellerAccountStatus,
   summarizeResellerAccounts,
 } from "../../lib/resellerAccounts";
+import { formatRupiah } from "../../lib/format";
 
 type OverviewData = {
   reseller: ApiReseller | null;
   orders: ApiOrder[];
   accounts: ApiAccount[];
 };
-
-function money(value = 0) {
-  return new Intl.NumberFormat("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    maximumFractionDigits: 0,
-  }).format(Number(value || 0));
-}
 
 function compactDate(value = "") {
   const parsed = new Date(value);
@@ -155,7 +148,7 @@ export default function ResellerV2OverviewPage() {
     )),
     [data.accounts],
   );
-  const balance = money(Number(data.reseller?.deposit || 0));
+  const balance = formatRupiah(Number(data.reseller?.deposit || 0));
   const greeting = data.reseller?.name || data.reseller?.username || "Reseller";
 
   return (
@@ -389,7 +382,7 @@ export default function ResellerV2OverviewPage() {
                         <small>{order.variant}</small>
                       </div>
                       <span>{order.product}</span>
-                      <strong>{money(order.total)}</strong>
+                      <strong>{formatRupiah(order.total)}</strong>
                       <ResellerStatusBadge tone={status.tone}>
                         {status.label}
                       </ResellerStatusBadge>

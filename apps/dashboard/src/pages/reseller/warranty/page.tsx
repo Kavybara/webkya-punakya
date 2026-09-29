@@ -8,7 +8,7 @@ import {
 } from "react";
 import { DashboardLayout } from "../../../components/feature/DashboardLayout";
 import { api, subscribeRealtime, type WarrantyClaim } from "../../../lib/api";
-import type { ManagedAccount } from "../../../mocks/data";
+import type { ManagedAccount } from "../../../lib/types";
 import {
   MiniBadge,
   ResellerPageTitle,

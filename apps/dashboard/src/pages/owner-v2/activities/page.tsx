@@ -5,11 +5,7 @@ import { ConsoleDataTable, type ConsoleColumn, type ConsoleFilter } from "../../
 import { ConsoleBadge, ConsoleMetrics } from "../../../components/console/ConsoleResource";
 import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import { api, subscribeRealtime, type ApiActivity } from "../../../lib/api";
-
-function formatTime(value?: string) {
-  const date = value ? new Date(value.includes("T") ? value : value.replace(" ", "T")) : null;
-  return date && !Number.isNaN(date.getTime()) ? date.toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : value || "-";
-}
+import { formatDateTime } from "../../../lib/format";
 
 export default function OwnerConsoleActivitiesPage() {
   const [rows, setRows] = useState<ApiActivity[]>([]);
@@ -23,7 +19,7 @@ export default function OwnerConsoleActivitiesPage() {
     { id: "type", header: "Kategori", value: (row) => row.type, sortable: true, cell: (row) => <ConsoleBadge tone={row.type === "security" ? "warning" : "muted"}>{row.type}</ConsoleBadge> },
     { id: "actor", header: "Aktor", value: (row) => row.actorName || row.actorRole || "Sistem", sortable: true },
     { id: "reference", header: "Referensi", value: (row) => row.orderId || row.accountId || row.resellerId || "-", hideOnMobile: true },
-    { id: "time", header: "Waktu", value: (row) => row.createdAt, sortable: true, cell: (row) => formatTime(row.createdAt) },
+    { id: "time", header: "Waktu", value: (row) => row.createdAt, sortable: true, cell: (row) => formatDateTime(row.createdAt) },
     { id: "action", header: "Aksi", value: () => "", cell: (row) => row.orderId ? <Link className="console-row-action" to={`/owner-v2/orders?order=${encodeURIComponent(row.orderId)}`} aria-label={`Buka order ${row.orderId}`}><ArrowUpRight size={15} /></Link> : <span /> },
   ], []);
   const filters = useMemo<Array<ConsoleFilter<ApiActivity>>>(() => [{ id: "type", label: "Kategori", options: ["order", "stock", "reseller", "whatsapp", "account", "security"].map((value) => ({ label: value, value })), value: (row) => row.type }], []);

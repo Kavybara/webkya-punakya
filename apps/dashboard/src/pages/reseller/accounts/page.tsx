@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { DashboardLayout } from "../../../components/feature/DashboardLayout";
 import { api, subscribeRealtime, type AccountAccessLookupResult, type AccountAccessLookupType, type ApiReseller } from "../../../lib/api";
-import type { ManagedAccount } from "../../../mocks/data";
+import type { ManagedAccount } from "../../../lib/types";
 import { normalizeResellerAccountStatus } from "../../../lib/resellerAccounts";
 import {
   MiniBadge,

@@ -13,7 +13,8 @@ import { Link, useSearchParams } from "react-router-dom";
 import { ConsoleDataTable, type ConsoleColumn, type ConsoleFilter } from "../../../components/console/ConsoleDataTable";
 import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import { api, subscribeRealtime, type ApiOrder } from "../../../lib/api";
-import { formatRupiah } from "../../../mocks/data";
+import { formatRupiah } from "../../../lib/format";
+import { formatDateTimeFull } from "../../../lib/format";
 
 type ActionKind = "mark-paid" | "approve-manual" | "retry-delivery" | "repair-sheets" | "rerender-template";
 type PendingAction = { kind: ActionKind; order: ApiOrder } | null;
@@ -33,12 +34,6 @@ function parseDate(value?: string) {
   if (!value) return null;
   const parsed = new Date(value.includes("T") ? value : value.replace(" ", "T"));
   return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function formatDateTime(value?: string) {
-  const parsed = parseDate(value);
-  if (!parsed) return value || "-";
-  return parsed.toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 function isPaid(order: ApiOrder) {
@@ -193,7 +188,7 @@ export default function OwnerConsoleOrdersPage() {
     { id: "total", header: "Total", value: (order) => Number(order.total || 0), sortable: true, cell: (order) => formatRupiah(Number(order.total || 0)) },
     { id: "payment", header: "Pembayaran", value: paymentLabel, sortable: true, cell: (order) => <StatusBadge label={paymentLabel(order)} /> },
     { id: "fulfillment", header: "Fulfillment", value: fulfillmentLabel, sortable: true, cell: (order) => <StatusBadge label={fulfillmentLabel(order)} /> },
-    { id: "time", header: "Waktu", value: (order) => parseDate(order.createdAt)?.getTime() || 0, sortable: true, hideOnMobile: true, cell: (order) => formatDateTime(order.createdAt) },
+    { id: "time", header: "Waktu", value: (order) => parseDate(order.createdAt)?.getTime() || 0, sortable: true, hideOnMobile: true, cell: (order) => formatDateTimeFull(order.createdAt) },
     { id: "action", header: "Aksi", value: () => "Detail", cell: (order) => <button type="button" className="console-row-action" onClick={() => openOrderDetail(order)} aria-label={`Buka detail ${order.id}`}><ArrowUpRight size={15} /></button> },
   ], [openOrderDetail]);
 
@@ -298,7 +293,7 @@ export default function OwnerConsoleOrdersPage() {
                 <div><dt>Metode</dt><dd>{selectedOrder.paymentMethod || (Number(selectedOrder.depositUsed || 0) ? "Deposit" : "QRIS")}</dd></div>
                 <div><dt>Akun terkirim</dt><dd>{deliveredCount}</dd></div>
                 <div><dt>Template pengiriman</dt><dd>{selectedOrder.deliveryTemplateSnapshot?.status === "ready" ? `Siap · versi ${selectedOrder.deliveryTemplateSnapshot.templateVersion || 1}` : selectedOrder.deliveryTemplateSnapshot?.status === "incomplete" ? "Detail akun belum lengkap" : selectedOrder.deliveryTemplateSnapshot?.status === "invalid" ? "Template tidak valid" : "Belum dikonfigurasi"}</dd></div>
-                <div><dt>Dibuat</dt><dd>{formatDateTime(selectedOrder.createdAt)}</dd></div>
+                <div><dt>Dibuat</dt><dd>{formatDateTimeFull(selectedOrder.createdAt)}</dd></div>
               </dl>
               <div className="console-privacy-note"><ShieldAlert size={16} /><span>Kredensial akun disembunyikan. Password, OTP, PIN, token, dan link privat tidak dirender di Console.</span></div>
 
@@ -319,7 +314,7 @@ export default function OwnerConsoleOrdersPage() {
                 <section className="console-order-trace" aria-labelledby="console-trace-title">
                   <h3 id="console-trace-title">Timeline audit</h3>
                   {selectedOrder.traceEvents.slice(-8).reverse().map((event) => (
-                    <div key={event.id}><span /><p><strong>{event.title}</strong><small>{event.detail}</small><time>{formatDateTime(event.createdAt)}</time></p></div>
+                    <div key={event.id}><span /><p><strong>{event.title}</strong><small>{event.detail}</small><time>{formatDateTimeFull(event.createdAt)}</time></p></div>
                   ))}
                 </section>
               ) : null}

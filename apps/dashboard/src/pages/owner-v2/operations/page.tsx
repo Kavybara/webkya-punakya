@@ -5,6 +5,7 @@ import { ConsoleDataTable, type ConsoleColumn, type ConsoleFilter } from "../../
 import { ConsoleActionToast, ConsoleBadge, ConsoleDialog, ConsoleDialogActions, ConsoleField, ConsoleMetrics, ConsoleNotice } from "../../../components/console/ConsoleResource";
 import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import { api, type ApiReseller, type OperationIssue, type OperationsCenterResult, type OperationsRepairPreview } from "../../../lib/api";
+import { formatDateTime } from "../../../lib/format";
 
 type Recovery = "sync" | "repair" | null;
 type IssueAction = { type: "release" | "retry" | "mark-paid" | "check-payment"; issue: OperationIssue } | null;
@@ -47,7 +48,7 @@ export default function OwnerConsoleOperationsPage() {
   const [repairPreview, setRepairPreview] = useState<OperationsRepairPreview | null>(null);
   const [updated, setUpdated] = useState("");
   const clearMessage = useCallback(() => setMessage(""), []);
-  const load = useCallback(async () => { setLoading(true); setError(""); const results = await Promise.allSettled([api.operationsCenter(), api.resellers()]); if (results[0].status === "fulfilled") { setData(results[0].value); setUpdated(new Date(results[0].value.checkedAt).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })); } else setError("Operations Center gagal dimuat."); if (results[1].status === "fulfilled") setResellers(results[1].value); setLoading(false); }, []);
+  const load = useCallback(async () => { setLoading(true); setError(""); const results = await Promise.allSettled([api.operationsCenter(), api.resellers()]); if (results[0].status === "fulfilled") { setData(results[0].value); setUpdated(formatDateTime(results[0].value.checkedAt)); } else setError("Operations Center gagal dimuat."); if (results[1].status === "fulfilled") setResellers(results[1].value); setLoading(false); }, []);
   useEffect(() => { load().catch(() => undefined); }, [load]);
   const issues = useMemo(() => {
     if (!data) return [];

@@ -4,7 +4,7 @@ import { ConsoleDataTable, type ConsoleColumn, type ConsoleFilter } from "../../
 import { ConsoleBadge, ConsoleDialog, ConsoleDialogActions, ConsoleField, ConsoleMetrics, ConsoleNotice } from "../../../components/console/ConsoleResource";
 import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import { api, type ApiProduct } from "../../../lib/api";
-import { formatRupiah } from "../../../mocks/data";
+import { formatRupiah } from "../../../lib/format";
 
 type ProductForm = { name: string; code: string; category: string; description: string; isActive: boolean; resellerOnly: boolean; needsProfile: boolean; needsPin: boolean; variantName: string; variantCode: string; price: string };
 type ProductVariant = ApiProduct["variants"][number];

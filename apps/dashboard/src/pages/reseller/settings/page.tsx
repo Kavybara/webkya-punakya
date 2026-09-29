@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "../../../components/feature/DashboardLayout";
 import { api, type ApiOrder, type ApiReseller } from "../../../lib/api";
 import { clearSession, readSession, writeSession } from "../../../lib/session";
-import { formatRupiah } from "../../../mocks/data";
+import { formatRupiah } from "../../../lib/format";
 import { MiniBadge, ResellerPageTitle, ResellerStatCard } from "../resellerUi";
 
 type SettingsTab = "profile" | "security";

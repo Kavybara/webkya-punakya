@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import type { ManagedAccount, Order } from "../../mocks/data";
-import { formatRupiah } from "../../mocks/data";
+import type { ManagedAccount, Order } from "../../lib/types";
+import { formatRupiah } from "../../lib/format";
 import {
   normalizeResellerAccountStatus,
   resellerAccountDate,

@@ -5,6 +5,7 @@ import {
   type ApiPayment,
   type ResellerDepositInstructions,
 } from "../../lib/api";
+import { formatRupiah } from "../../lib/format";
 
 const methodOrder = [
   "qris_auto",
@@ -30,14 +31,6 @@ function methodLabel(method = "") {
       } as Record<string, string>
     )[method] || method
   );
-}
-
-function money(value = 0) {
-  return new Intl.NumberFormat("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    maximumFractionDigits: 0,
-  }).format(Number(value || 0));
 }
 
 function qrSource(payment: ApiPayment | null) {
@@ -243,7 +236,7 @@ export function TopUpDialog({
               </div>
               <div>
                 <dt>Total</dt>
-                <dd>{money(payment.totalPayment || payment.amount)}</dd>
+                <dd>{formatRupiah(payment.totalPayment || payment.amount)}</dd>
               </div>
               <div>
                 <dt>Batas bayar</dt>

@@ -20,7 +20,8 @@ import { Link } from "react-router-dom";
 import { ConsoleDataTable, type ConsoleColumn, type ConsoleFilter } from "../../components/console/ConsoleDataTable";
 import { ConsoleShell } from "../../components/console/ConsoleShell";
 import { api, type ApiOrder, type ApiReseller, type ApiStockItem, type OperationsCenterResult, type SystemStatus } from "../../lib/api";
-import { formatRupiah } from "../../mocks/data";
+import { formatRupiah, formatRupiahCompact } from "../../lib/format";
+import { formatDateTime } from "../../lib/format";
 
 type OverviewData = {
   orders: ApiOrder[];
@@ -49,18 +50,6 @@ function isSmokeTest(order: ApiOrder) {
 
 function isPaid(order: ApiOrder) {
   return ["paid", "manual"].includes(String(order.qrisStatus || "").toLowerCase());
-}
-
-function compactCurrency(value: number) {
-  if (value >= 1_000_000) return `Rp${(value / 1_000_000).toLocaleString("id-ID", { maximumFractionDigits: 1 })} jt`;
-  if (value >= 1_000) return `Rp${(value / 1_000).toLocaleString("id-ID", { maximumFractionDigits: 0 })} rb`;
-  return `Rp${Number(value || 0).toLocaleString("id-ID")}`;
-}
-
-function formatDateTime(value?: string) {
-  const parsed = parseDate(value);
-  if (!parsed) return value || "-";
-  return parsed.toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
 function paymentLabel(order: ApiOrder) {
@@ -266,7 +255,7 @@ export default function OwnerConsoleOverviewPage() {
                   <defs><linearGradient id="consoleRevenueFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.34} /><stop offset="100%" stopColor="#8b5cf6" stopOpacity={0.01} /></linearGradient></defs>
                   <CartesianGrid vertical={false} stroke="rgba(255,255,255,.06)" />
                   <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#71717a", fontSize: 12 }} />
-                  <YAxis axisLine={false} tickLine={false} tick={{ fill: "#71717a", fontSize: 12 }} tickFormatter={(value) => compactCurrency(Number(value))} width={58} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fill: "#71717a", fontSize: 12 }} tickFormatter={(value) => formatRupiahCompact(Number(value))} width={58} />
                   <Tooltip formatter={(value) => formatRupiah(Number(value))} contentStyle={{ background: "#111216", border: "1px solid rgba(255,255,255,.12)", borderRadius: 10, color: "#f4f4f5" }} labelStyle={{ color: "#a1a1aa" }} />
                   <Area type="monotone" dataKey="revenue" stroke="#8b5cf6" strokeWidth={2.2} fill="url(#consoleRevenueFill)" />
                 </AreaChart>

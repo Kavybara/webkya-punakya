@@ -1,4 +1,4 @@
-import type { ManagedAccount } from "../mocks/data";
+import type { ManagedAccount } from "./types";
 
 export type ResellerAccountStatus =
   | "active"

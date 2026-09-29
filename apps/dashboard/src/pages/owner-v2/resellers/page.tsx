@@ -4,7 +4,7 @@ import { ConsoleDataTable, type ConsoleColumn, type ConsoleFilter } from "../../
 import { ConsoleActionToast, ConsoleBadge, ConsoleDialog, ConsoleDialogActions, ConsoleField, ConsoleMetrics, ConsoleNotice } from "../../../components/console/ConsoleResource";
 import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import { api, type AccountAccessLookupType, type ApiDepositRequest, type ApiReseller } from "../../../lib/api";
-import { formatRupiah } from "../../../mocks/data";
+import { formatRupiah } from "../../../lib/format";
 
 type ResellerForm = { name: string; username: string; password: string; email: string; whatsapp: string; deposit: string; isActive: boolean; allowedAccessTools: AccountAccessLookupType[] };
 type ResellerAction = { type: "delete"; reseller: ApiReseller } | { type: "approve" | "reject"; request: ApiDepositRequest } | null;

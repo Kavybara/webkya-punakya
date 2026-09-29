@@ -22,14 +22,16 @@ import { ConsoleSearch } from "./ConsoleSearch";
 import { consoleNavigation } from "./navigation";
 import { buildOwnerNotifications, type OwnerNotification } from "./ownerNotifications";
 import "./console.css";
+import { formatDateTime } from "../../lib/format";
 
 const notificationSeenKey = "owner-notification-seen-v1";
 
 function notificationTime(value = "") {
   if (!value) return "Baru saja";
-  const date = new Date(String(value).replace(" ", "T"));
-  if (Number.isNaN(date.getTime())) return "Baru saja";
-  return date.toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  // formatDateTime echoes the input back when it cannot parse it, so an
+  // unchanged result means the timestamp was unreadable.
+  const formatted = formatDateTime(value);
+  return formatted === value ? "Baru saja" : formatted;
 }
 
 function NotificationIcon({ notification }: { notification: OwnerNotification }) {

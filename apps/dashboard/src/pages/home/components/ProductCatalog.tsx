@@ -4,10 +4,7 @@ import { Link } from "react-router-dom";
 import { api, subscribeRealtime, type CatalogProduct } from "../../../lib/api";
 import { sortedAllowedPriceEntries } from "../../../lib/durations";
 import { productBrandAsset, productLogoUrl } from "../../../lib/productBrandAssets";
-
-function formatPrice(price: number) {
-  return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(price).replace("IDR", "Rp");
-}
+import { formatRupiah } from "../../../lib/format";
 
 function minPrice(product: CatalogProduct) {
   const prices = product.variants
@@ -138,7 +135,7 @@ export default function ProductCatalog() {
                   </div>
                    <div className="p-5">
                      <h3 className="text-lg font-extrabold text-[var(--kavya-text-primary)]">{product.name}</h3>
-                     <div className="mt-5"><p className="text-[10px] uppercase tracking-[0.12em] text-[var(--kavya-text-muted)]">Mulai dari</p><p className="mt-1 text-xl font-black text-[var(--kavya-text-primary)]">{price ? formatPrice(price) : "Belum diatur"}</p></div>
+                     <div className="mt-5"><p className="text-[10px] uppercase tracking-[0.12em] text-[var(--kavya-text-muted)]">Mulai dari</p><p className="mt-1 text-xl font-black text-[var(--kavya-text-primary)]">{price ? formatRupiah(price) : "Belum diatur"}</p></div>
                      {isReady ? <Link to={resellerCatalogLoginPath} className="group mt-5 flex min-h-11 items-center justify-center gap-2 rounded-full bg-[var(--kavya-text-primary)] text-sm font-extrabold text-[var(--kavya-bg)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">Lihat Paket<i className="ri-arrow-right-line transition-transform group-hover:translate-x-[3px]" /></Link> : <button type="button" disabled className="mt-5 flex min-h-11 w-full cursor-not-allowed items-center justify-center rounded-full border border-[var(--kavya-border)] text-sm font-bold text-[var(--kavya-text-muted)]">Stok Habis</button>}
                   </div>
                 </SpotlightProductCard>
