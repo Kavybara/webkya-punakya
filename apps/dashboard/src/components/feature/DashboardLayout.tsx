@@ -1,6 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { PageTransition } from "./PageTransition";
 import { clearSession, readSession } from "../../lib/session";
 import { ResellerShell } from "../reseller-v2/ResellerShell";
 
@@ -47,7 +46,7 @@ export function DashboardLayout({
   return (
     <ResellerShell title={title} description="Kelola kebutuhan reseller melalui panel Kavya.">
       <div className="reseller-v2-legacy-content">
-        <PageTransition>{children}</PageTransition>
+        {children}
       </div>
     </ResellerShell>
   );

@@ -1,5 +1,4 @@
 import type { HTMLAttributes, ReactNode } from "react";
-import { Badge } from "../base/Badge";
 
 export function OwnerStat({
   label,
@@ -120,6 +119,3 @@ export function PageToolbar({
   return <div className={`rounded-xl border border-gray-100 bg-white p-3 shadow-sm shadow-slate-950/5 sm:p-4 ${className}`}>{children}</div>;
 }
 
-export function StatusBadge({ tone, children }: { tone: "emerald" | "red" | "amber" | "slate"; children: ReactNode }) {
-  return <Badge variant={tone}>{children}</Badge>;
-}

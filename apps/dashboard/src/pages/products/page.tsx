@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { PageTransition } from "../../components/feature/PageTransition";
 import { api, subscribeRealtime, type ApiOrder, type ApiPayment, type CatalogProduct, type CatalogVariant } from "../../lib/api";
 import { durationAllowedByModes, firstAllowedPriceEntry, sortedAllowedPriceEntries } from "../../lib/durations";
 import { productBrandAsset, productLogoUrl } from "../../lib/productBrandAssets";
@@ -949,7 +948,7 @@ export default function ProductsPage() {
 
   if (resellerCheckoutWaiting) {
     return (
-      <PageTransition>
+      
         <main className="kavya-public-dark min-h-screen bg-[var(--kavya-bg)] px-4 py-8 text-[var(--kavya-text-primary)]">
           <header className="mx-auto flex max-w-6xl items-center justify-between">
             <button type="button" onClick={backToCatalog} className="inline-flex min-h-11 items-center gap-3 rounded-lg font-semibold">
@@ -981,13 +980,13 @@ export default function ProductsPage() {
             )}
           </section>
         </main>
-      </PageTransition>
+      
     );
   }
 
   if (step !== "catalog") {
     return (
-      <PageTransition>
+      
         <main className="kavya-public-dark min-h-screen bg-[var(--kavya-bg)] px-4 py-6 text-[var(--kavya-text-primary)] sm:px-6 sm:py-8">
           <header className="mx-auto flex max-w-6xl items-center justify-between">
             <button type="button" onClick={backToCatalog} className="inline-flex min-h-11 items-center gap-3 rounded-lg font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-violet-400">
@@ -1395,12 +1394,12 @@ export default function ProductsPage() {
 
           <p className="mt-10 text-center text-sm text-zinc-600">Pembayaran terhubung langsung dengan status pesanan Kavya.</p>
         </main>
-      </PageTransition>
+      
     );
   }
 
   return (
-    <PageTransition>
+    
       <main className="min-h-screen bg-[#f4eee4] px-4 py-6 text-slate-950">
         <section className="mx-auto min-h-[calc(100vh-48px)] max-w-6xl rounded-md border border-gray-200 bg-[#fbf6ef] px-5 py-5">
           <header className="flex items-center justify-between">
@@ -1572,6 +1571,6 @@ export default function ProductsPage() {
           ) : null}
         </section>
       </main>
-    </PageTransition>
+    
   );
 }

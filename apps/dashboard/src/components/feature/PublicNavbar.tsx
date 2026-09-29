@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { ownerWhatsappLink } from "../../lib/ownerContact";
 
 export default function PublicNavbar() {
   const [scrolled, setScrolled] = useState(false);
@@ -9,7 +10,7 @@ export default function PublicNavbar() {
     { label: "Produk", href: "#produk" },
     { label: "Cara Kerja", href: "#cara-pemesanan" },
     { label: "Reseller", href: "/register" },
-    { label: "Bantuan", href: "https://wa.me/6287777655549" },
+    { label: "Bantuan", href: ownerWhatsappLink() },
   ];
 
   useEffect(() => {

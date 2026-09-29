@@ -17,8 +17,12 @@ import {
   accountStatusClass,
   productLabel,
 } from "../resellerUi";
+import { OWNER_WHATSAPP } from "../../../lib/ownerContact";
 
-const fallbackWarrantyNumber = "6285194629029";
+// The server resolves its own warranty contact by falling back to the
+// owner, so this must agree with it -- a customer shown a different
+// number than the one the server messages is worse than no number.
+const fallbackWarrantyNumber = OWNER_WHATSAPP;
 const inputClass =
   "mt-2 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:border-emerald-300";
 const readonlyInputClass =

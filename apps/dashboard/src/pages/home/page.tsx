@@ -7,13 +7,13 @@ import {
   useReducedMotion,
 } from "framer-motion";
 import { Link } from "react-router-dom";
-import { PageTransition } from "../../components/feature/PageTransition";
 import PublicNavbar from "../../components/feature/PublicNavbar";
 import { api, type CatalogProduct } from "../../lib/api";
 import { productBrandAsset, productLogoUrl } from "../../lib/productBrandAssets";
+import { ownerWhatsappLink } from "../../lib/ownerContact";
 import ProductCatalog from "./components/ProductCatalog";
 
-const whatsappUrl = "https://wa.me/6287777655549";
+const whatsappUrl = ownerWhatsappLink();
 const revealViewport = { once: true, amount: 0.16 };
 const revealTransition = { duration: 0.55, ease: [0.22, 1, 0.36, 1] as const };
 const revealItem = {
@@ -377,7 +377,7 @@ function Footer() {
 export default function HomePage() {
   return (
     <MotionConfig reducedMotion="user">
-      <PageTransition>
+      
         <main className="kavya-public-dark min-h-screen overflow-x-hidden font-sans">
           <PublicNavbar />
           <HeroSection />
@@ -387,7 +387,7 @@ export default function HomePage() {
           <FinalCtaSection />
           <Footer />
         </main>
-      </PageTransition>
+      
     </MotionConfig>
   );
 }

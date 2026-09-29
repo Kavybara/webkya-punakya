@@ -3,8 +3,9 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AuthError, AuthInput, AuthShell, AuthSubmitButton, PasswordInput } from "../../components/auth/AuthShell";
 import { api } from "../../lib/api";
 import { writeSession } from "../../lib/session";
+import { OWNER_WHATSAPP } from "../../lib/ownerContact";
 
-const fallbackOwnerWhatsapp = "6287777655549";
+
 
 function normalizeWhatsapp(number = "") {
   const digits = String(number || "").replace(/[^\d]/g, "");
@@ -31,7 +32,7 @@ export default function LoginPage() {
   const [error, setError] = useState(sessionMessage);
   const [loading, setLoading] = useState(false);
   const [remember, setRemember] = useState(true);
-  const [ownerWhatsapp, setOwnerWhatsapp] = useState(fallbackOwnerWhatsapp);
+  const [ownerWhatsapp, setOwnerWhatsapp] = useState(OWNER_WHATSAPP);
   const [identifierTouched, setIdentifierTouched] = useState(false);
   const [passwordTouched, setPasswordTouched] = useState(false);
   const [capsLock, setCapsLock] = useState(false);
@@ -49,7 +50,7 @@ export default function LoginPage() {
   }, []);
 
   const ownerWhatsappUrl = useMemo(() => {
-    const number = normalizeWhatsapp(ownerWhatsapp) || fallbackOwnerWhatsapp;
+    const number = normalizeWhatsapp(ownerWhatsapp) || OWNER_WHATSAPP;
     return `https://wa.me/${number}?text=${encodeURIComponent("Halo Kak, saya mau daftar reseller Kavya.")}`;
   }, [ownerWhatsapp]);
 

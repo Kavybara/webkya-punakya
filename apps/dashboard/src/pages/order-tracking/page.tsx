@@ -1,7 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Clock3, Headphones, Search, ShieldCheck } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
-import { PageTransition } from "../../components/feature/PageTransition";
 import { api, type PublicTrackingOrder } from "../../lib/api";
 
 const genericError = "Pesanan tidak ditemukan atau data verifikasi tidak sesuai.";
@@ -104,7 +103,7 @@ export default function OrderTrackingPage() {
   }
 
   return (
-    <PageTransition>
+    
       <main className="kavya-public-dark min-h-screen bg-[var(--kavya-bg)] px-4 py-6 text-[var(--kavya-text-primary)] sm:px-6 sm:py-8">
         <header className="mx-auto flex max-w-5xl items-center justify-between">
           <Link to="/" className="inline-flex min-h-11 items-center gap-3 rounded-lg font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-violet-400">
@@ -221,6 +220,6 @@ export default function OrderTrackingPage() {
           <Headphones size={16} /> Butuh bantuan? Hubungi owner dan sertakan nomor pesanan.
         </footer>
       </main>
-    </PageTransition>
+    
   );
 }

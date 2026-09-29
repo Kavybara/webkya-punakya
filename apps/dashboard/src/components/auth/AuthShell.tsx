@@ -1,7 +1,6 @@
 import { useRef, useState, type InputHTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
 import { Check, Eye, EyeOff, House, LoaderCircle, ShieldCheck } from "lucide-react";
 import { Link } from "react-router-dom";
-import { PageTransition } from "../feature/PageTransition";
 import "./auth.css";
 
 type AuthShellProps = {
@@ -12,12 +11,12 @@ type AuthShellProps = {
 
 export function AuthShell({ children, title, description }: AuthShellProps) {
   return (
-    <PageTransition>
+    
       <main className="auth-shell">
         <AuthBrandPanel />
         <AuthFormPanel title={title} description={description}>{children}</AuthFormPanel>
       </main>
-    </PageTransition>
+    
   );
 }
 
