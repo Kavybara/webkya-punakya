@@ -112,9 +112,6 @@
 .console-order-actions button { display: inline-flex; min-height: 40px; align-items: center; gap: 7px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-raised); color: var(--text-secondary); font-size: 11px; font-weight: 620; cursor: pointer; }
 .console-order-actions button:hover { border-color: var(--border-strong); background: var(--surface-hover); color: var(--text-primary); }
 .console-confirm-icon { display: grid; width: 42px; height: 42px; margin-bottom: 17px; place-items: center; border: 1px solid color-mix(in srgb, var(--status-warning) 22%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--status-warning) 7%, transparent); color: var(--status-warning); }
-.console-primary-button { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; padding: 0 14px; border: 0; border-radius: 8px; background: var(--text-primary); color: var(--text-on-inverse); font-size: 12px; font-weight: 700; cursor: pointer; }
-.console-primary-button:hover { background: #fff; }
-.console-primary-button:disabled { cursor: wait; opacity: 0.6; }
 .console-resource-metrics .is-danger { border-color: color-mix(in srgb, var(--status-danger) 20%, transparent); }
 .console-resource-metrics .is-warning { border-color: color-mix(in srgb, var(--status-warning) 20%, transparent); }
 .console-resource-metrics .is-success { border-color: color-mix(in srgb, var(--status-success) 16%, transparent); }
@@ -205,7 +202,6 @@
 .console-integration-config-grid .console-panel:nth-child(2), .console-integration-config-grid .console-panel:nth-child(3), .console-integration-config-grid .console-panel:nth-child(4) { grid-row: span 2; }
 .console-config-save { gap: 7px; margin-top: 16px; }
 .console-config-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-.console-config-actions > button:not(.console-primary-button) { min-height: 40px; padding: 0 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text-secondary); cursor: pointer; }
 .console-integration-config-grid textarea { -webkit-text-security: disc; }
 .console-settings-skeleton { min-height: 240px; border: 1px solid var(--border); border-radius: 10px; background: linear-gradient(90deg, var(--surface) 25%, var(--surface-hover) 50%, var(--surface) 75%); background-size: 200% 100%; animation: ui-shimmer 1.4s linear infinite; }
 .console-access-layout { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(340px, .85fr); gap: 14px; }
@@ -227,7 +223,7 @@
 .console-access-search svg { color: var(--text-muted); }
 .console-access-search input { min-width: 0; height: 46px; border: 0; outline: 0; background: transparent; color: var(--text-primary); font-size: 13px; }
 .console-access-search input::placeholder { color: var(--text-muted); }
-.console-access-search .console-primary-button { min-height: 46px; border-radius: 7px; }
+.console-access-search .ui-button { min-height: 46px; border-radius: 7px; }
 .console-access-result { display: grid; gap: 10px; padding: 15px; border: 1px solid color-mix(in srgb, var(--status-success) 18%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--status-success) 4%, transparent); }
 .console-access-result > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .console-access-result > div > span { color: var(--text-secondary); font-size: 11px; font-weight: 650; }
@@ -301,7 +297,7 @@
   .console-access-tools { grid-template-columns: 1fr; }
   .console-access-tools button { min-height: 64px; }
   .console-access-search > div { grid-template-columns: auto minmax(0, 1fr); padding: 0 12px; }
-  .console-access-search .console-primary-button { grid-column: 1 / -1; width: calc(100% + 24px); margin-left: -12px; border-radius: 0 0 8px 8px; }
+  .console-access-search .ui-button { grid-column: 1 / -1; width: calc(100% + 24px); margin-left: -12px; border-radius: 0 0 8px 8px; }
   .console-access-account { min-height: 72px; padding-inline: 12px; }
   .console-health-grid { grid-template-columns: 1fr; }
   .console-list-history-grid { padding: 10px; }

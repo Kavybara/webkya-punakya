@@ -201,7 +201,7 @@ export default function OwnerConsoleAccountAccessPage() {
               <div>
                 <Search size={17} aria-hidden="true" />
                 <input id="owner-account-access-target" value={query} onChange={(event) => { setQuery(event.target.value); setLookupError(""); }} placeholder={provider === "disney" ? "Masukkan nomor login" : "nama@domain.com"} autoComplete="off" />
-                <button type="submit" className="console-primary-button" disabled={lookupLoading}>{lookupLoading ? <RefreshCw className="animate-spin" size={16} /> : <Search size={16} />}{lookupLoading ? "Mencari..." : "Cari Kode"}</button>
+                <Button type="submit" weight="primary" disabled={lookupLoading}>{lookupLoading ? <RefreshCw className="animate-spin" size={16} /> : <Search size={16} />}{lookupLoading ? "Mencari..." : "Cari Kode"}</Button>
               </div>
             </form>
 
