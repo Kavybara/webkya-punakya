@@ -1,3 +1,21 @@
+/*
+ * The two sign-in surfaces, as one screen: a brand column that does the
+ * talking and a form column that does the work.
+ *
+ * The ground -- the aurora -- is painted once on the shell's pseudo-element
+ * in ui.css, the same place it is painted for the signed-in consoles. That
+ * matters here more than anywhere else, because this screen used to be the
+ * one place the reader arrived *before* they had seen anything else: it sets
+ * the first impression of the product, and a first impression made of a hard
+ * #08080a and a white engraved letterform is a first impression of a
+ * template.
+ *
+ * So the brand column is glass over the same aurora the consoles sit on, the
+ * form sits on a single card rather than a stack of bordered boxes, and the
+ * inputs are lit from behind rather than outlined. Nothing here is a solid
+ * colour that is not a token.
+ */
+
 .auth-shell {
   min-height: 100svh;
   display: grid;
@@ -17,7 +35,11 @@
   justify-content: space-between;
   padding: clamp(32px, 4vw, 64px);
   border-right: 1px solid var(--border);
-  background: radial-gradient(circle at 62% 52%, color-mix(in srgb, var(--accent-violet) 7%, transparent), transparent 34%), #08080a;
+  /* Translucent on purpose: this column is the largest single area on the
+     screen, and a solid fill here would cover a quarter of the aurora and
+     split the background into two unrelated halves. */
+  background: var(--surface-glass);
+  backdrop-filter: blur(var(--glass-blur)) saturate(140%);
 }
 
 .auth-brand-name,
@@ -48,9 +70,16 @@
   font-size: clamp(150px, 18vw, 260px);
   line-height: 1;
   color: var(--text-on-inverse);
-  text-shadow: -1px -1px rgba(255, 255, 255, 0.23), 1px 1px rgba(0, 0, 0, 0.8);
+  /* Cut into the surface rather than printed on it: a bright edge above and a
+     deep one below is the whole trick, and the bright half is the border
+     token rather than a hardcoded white. */
+  text-shadow: -1px -1px var(--border-strong), 1px 1px rgba(0, 0, 0, 0.8);
 }
 
+/* The mark's own pool of colour. A real `filter: blur()` here is worth its
+   cost, unlike the aurora behind the canvas: this is one small element with
+   nothing painted on top of it, and the mark has to read as *behind glass*
+   rather than as a flat wash. */
 .auth-brand-glow {
   position: absolute;
   inset: -45%;
@@ -59,57 +88,103 @@
     radial-gradient(circle at 31% 57%, color-mix(in srgb, var(--accent-magenta) 20%, transparent), transparent 28%),
     radial-gradient(circle at 52% 31%, color-mix(in srgb, var(--accent-violet) 23%, transparent), transparent 31%),
     radial-gradient(circle at 68% 67%, color-mix(in srgb, var(--accent-cyan) 16%, transparent), transparent 28%),
-    radial-gradient(circle at 50% 65%, rgba(255, 255, 255, 0.13), transparent 17%);
+    radial-gradient(circle at 50% 65%, var(--fx-aurora-ink), transparent 17%);
   filter: blur(28px);
-  animation: auth-glow 8s ease-in-out infinite alternate;
+  animation: auth-glow 8s var(--ease-out-expo) infinite alternate;
 }
 
 .auth-brand-copy { position: relative; z-index: 2; max-width: 390px; }
 .auth-brand-copy p { margin: 0 0 10px; font-size: clamp(24px, 2.2vw, 38px); line-height: 1.08; letter-spacing: 0; }
 .auth-brand-home { min-height: 44px; display: inline-flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 14px; }
 .auth-brand-home:hover { color: var(--text-primary); }
-.auth-form-side { min-width: 0; display: grid; place-items: center; padding: 48px clamp(32px, 6vw, 96px); background: var(--bg-raised); }
-.auth-form-panel { width: min(100%, 460px); }
-.auth-form-header { margin-bottom: 28px; }
+
+/* ------------------------------------------------------------------ *
+ * The form column
+ *
+ * One card, not a stack of boxes. The old screen outlined every input, the
+ * notice, the step marker and the destination line individually, which is
+ * what made a three-field form look like a form inside a form inside a
+ * panel. Now the panel is the only edge; the fields inside it are lit.
+ * ------------------------------------------------------------------ */
+
+.auth-form-side {
+  min-width: 0;
+  display: grid;
+  place-items: center;
+  padding: 48px clamp(32px, 6vw, 96px);
+  background: transparent;
+}
+
+.auth-form-panel {
+  width: min(100%, 460px);
+  padding: clamp(26px, 3.2vw, 40px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--surface-glass);
+  backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
+  box-shadow: var(--shadow-float);
+}
+
+.auth-form-header { margin-bottom: 32px; }
 .auth-form-header h1 { margin: 0; font-size: clamp(28px, 2.5vw, 38px); line-height: 1.1; font-weight: 550; letter-spacing: 0; }
 .auth-form-header p { margin: 12px 0 0; max-width: 470px; color: var(--text-secondary); font-size: 15px; line-height: 1.6; }
 .auth-mobile-brand { display: none; }
-.auth-form { display: grid; gap: 18px; }
+.auth-form { display: grid; gap: 20px; }
 .auth-field { position: relative; display: grid; gap: 8px; }
 .auth-field label,
 .auth-otp-field legend { color: var(--text-primary); font-size: 14px; font-weight: 550; }
+
 .auth-input,
 .auth-otp-row input {
   width: 100%;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   outline: none;
   background: var(--surface);
+  backdrop-filter: blur(var(--glass-blur));
   color: var(--text-primary);
-  transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+  transition: border-color var(--duration-normal) var(--ease-out-expo), background var(--duration-normal) var(--ease-out-expo), box-shadow var(--duration-normal) var(--ease-out-expo);
 }
-.auth-input { height: 48px; padding: 0 14px; font-size: 16px; }
+.auth-input { height: 50px; padding: 0 14px; font-size: 16px; }
 .auth-input::placeholder { color: var(--text-muted); opacity: 1; }
-.auth-input:hover { background: var(--surface-hover); }
+.auth-input:hover { border-color: var(--border-strong); background: var(--surface-hover); }
 .auth-input:focus,
-.auth-otp-row input:focus { border-color: color-mix(in srgb, var(--accent-cyan) 75%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-cyan) 13%, transparent); }
+.auth-otp-row input:focus { border-color: color-mix(in srgb, var(--accent-violet) 70%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-violet) 15%, transparent); }
 .auth-input.is-invalid,
 .auth-otp-row input[aria-invalid="true"] { border-color: color-mix(in srgb, var(--status-danger) 72%, transparent); }
 .auth-field small { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
 .auth-password-wrap { position: relative; }
 .auth-password-wrap .auth-input { padding-right: 48px; }
-.auth-password-toggle { position: absolute; right: 8px; top: 32px; width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.auth-password-toggle { position: absolute; right: 8px; top: 33px; width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); cursor: pointer; transition: background 200ms var(--ease-out-expo), color 200ms var(--ease-out-expo); }
 .auth-password-toggle:hover { background: var(--surface-hover); color: var(--text-primary); }
 .auth-error { margin: 0; color: var(--status-danger); font-size: 13px; line-height: 1.45; }
-.auth-notice { margin: 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 9px; background: rgba(255, 255, 255, 0.025); color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
-.auth-notice.is-success { border-color: color-mix(in srgb, var(--status-success) 25%, transparent); color: #a7f3d0; }
-.auth-general-error { margin-bottom: 18px; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--status-danger) 32%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--status-danger) 7%, transparent); }
-.auth-button { min-height: 48px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid transparent; border-radius: 999px; padding: 0 24px; background: var(--text-primary); color: var(--text-on-inverse); font-size: 14px; font-weight: 650; cursor: pointer; transition: transform 150ms ease, background-color 150ms ease, border-color 150ms ease; }
-.auth-button:hover { background: #fff; }
-.auth-button:active { transform: translateY(1px); }
+.auth-notice { margin: 0; padding: 13px 15px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-raised); backdrop-filter: blur(var(--glass-blur)); color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
+.auth-notice.is-success { border-color: color-mix(in srgb, var(--status-success) 25%, transparent); color: color-mix(in srgb, var(--status-success) 42%, var(--text-primary)); }
+.auth-general-error { margin-bottom: 18px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--status-danger) 32%, transparent); border-radius: var(--radius-md); background: color-mix(in srgb, var(--status-danger) 7%, transparent); }
+
+/* The one bright object on the screen. A lift, because it is the thing the
+   reader came here to press. */
+.auth-button {
+  min-height: 50px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  padding: 0 24px;
+  background: var(--text-primary);
+  color: var(--text-on-inverse);
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: transform var(--duration-normal) var(--ease-out-expo), background-color var(--duration-normal) var(--ease-out-expo), border-color var(--duration-normal) var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo);
+}
+.auth-button:hover { background: color-mix(in srgb, var(--text-primary) 58%, white); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.auth-button:active { transform: translateY(0); }
 .auth-button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
-.auth-button.is-secondary { border-color: var(--border); background: transparent; color: var(--text-primary); }
-.auth-button.is-secondary:hover { border-color: var(--border-strong); background: var(--surface-hover); }
+.auth-button.is-secondary { border-color: var(--border); background: var(--surface); backdrop-filter: blur(var(--glass-blur)); color: var(--text-primary); }
+.auth-button.is-secondary:hover { border-color: var(--border-strong); background: var(--surface-hover); box-shadow: var(--shadow-lift); }
 .auth-button.is-full { width: 100%; }
 .auth-inline-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .auth-inline-row a,
@@ -124,7 +199,7 @@
 .auth-footer-copy a { color: var(--text-primary); font-weight: 600; }
 .auth-form-note { margin: 14px 0 0; color: var(--text-muted); text-align: center; font-size: 12px; line-height: 1.5; }
 .auth-home-link { width: fit-content; min-height: 44px; margin: 20px auto 0; display: flex; align-items: center; gap: 7px; }
-.auth-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; padding: 0; margin: 0 0 28px; list-style: none; }
+.auth-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; padding: 0; margin: 0 0 32px; list-style: none; }
 .auth-steps li { position: relative; display: grid; justify-items: center; gap: 8px; color: var(--text-muted); font-size: 11px; text-align: center; }
 .auth-steps li:not(:last-child)::after { content: ""; position: absolute; z-index: 0; top: 14px; left: calc(50% + 18px); width: calc(100% - 36px); height: 1px; background: var(--border); }
 .auth-steps li.is-complete:not(:last-child)::after { background: color-mix(in srgb, var(--accent-violet) 55%, transparent); }
@@ -133,12 +208,12 @@
 .auth-steps li.is-active { color: var(--text-primary); }
 .auth-steps li.is-active > span { border-color: color-mix(in srgb, var(--accent-cyan) 68%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-cyan) 10%, transparent); }
 .auth-steps li.is-complete { color: var(--text-secondary); }
-.auth-steps li.is-complete > span { border-color: color-mix(in srgb, var(--accent-violet) 58%, transparent); color: #c4b5fd; }
+.auth-steps li.is-complete > span { border-color: color-mix(in srgb, var(--accent-violet) 58%, transparent); color: color-mix(in srgb, var(--accent-violet) 34%, var(--text-primary)); }
 .auth-otp-field { min-width: 0; margin: 0; padding: 0; border: 0; }
 .auth-otp-row { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
-.auth-otp-row input { min-width: 0; height: 54px; padding: 0; text-align: center; font-size: 21px; font-weight: 650; }
+.auth-otp-row input { min-width: 0; height: 56px; padding: 0; text-align: center; font-size: 21px; font-weight: 650; }
 .auth-otp-field .auth-error { margin-top: 8px; }
-.auth-destination { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
+.auth-destination { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 15px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
 .auth-destination span { color: var(--text-muted); font-size: 12px; }
 .auth-destination strong { font-size: 13px; }
 .auth-form-actions { display: flex; gap: 10px; }
@@ -153,7 +228,7 @@
 .auth-match.is-match { color: var(--status-success); }
 .auth-match.is-mismatch { color: var(--status-danger); }
 .auth-success { display: grid; justify-items: center; padding: 28px 0 8px; text-align: center; }
-.auth-success > span { width: 52px; height: 52px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--status-success) 30%, transparent); border-radius: 50%; background: color-mix(in srgb, var(--status-success) 8%, transparent); color: var(--status-success); }
+.auth-success > span { width: 52px; height: 52px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--status-success) 30%, transparent); border-radius: 50%; background: color-mix(in srgb, var(--status-success) 8%, transparent); box-shadow: 0 0 44px -12px color-mix(in srgb, var(--status-success) 60%, transparent); color: var(--status-success); }
 .auth-success h2 { margin: 20px 0 8px; font-size: 22px; font-weight: 600; }
 .auth-success p { margin: 0 0 24px; color: var(--text-secondary); font-size: 14px; line-height: 1.6; }
 
@@ -173,20 +248,23 @@ a:focus-visible,
 }
 
 @media (max-width: 767px) {
-  .auth-shell { display: block; min-height: 100svh; overflow-x: hidden; background: var(--bg-raised); }
+  .auth-shell { display: block; min-height: 100svh; overflow-x: hidden; background: var(--bg-canvas); }
   .auth-brand { display: none; }
   .auth-form-side { min-height: 100svh; display: block; padding: max(24px, env(safe-area-inset-top)) 20px max(28px, env(safe-area-inset-bottom)); }
   .auth-mobile-brand { display: block; margin-bottom: 34px; }
   .auth-mobile-brand a { display: inline-flex; align-items: center; gap: 10px; font-size: 21px; }
-  .auth-mobile-brand span { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 50%; background: var(--surface); font-size: 19px; }
-  .auth-form-panel { width: 100%; max-width: 520px; margin: 0 auto; }
+  .auth-mobile-brand span { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); font-size: 19px; }
+  /* The card goes away on a phone. There is no room to spare, and a panel
+     inset 20px from both edges turns a three-field form into a scroll. The
+     aurora is still behind it, which was the part that mattered. */
+  .auth-form-panel { width: 100%; max-width: 520px; margin: 0 auto; padding: 0; border: 0; border-radius: 0; background: transparent; backdrop-filter: none; box-shadow: none; }
   .auth-form-header { margin-bottom: 24px; }
   .auth-form-header h1 { font-size: 29px; }
   .auth-form-header p { font-size: 14px; }
   .auth-otp-row { gap: 7px; }
   .auth-otp-row input { height: 50px; font-size: 19px; }
   .auth-form-actions { flex-direction: column-reverse; }
-  .auth-button { min-height: 48px; }
+  .auth-button { min-height: 50px; }
 }
 
 @media (max-width: 380px) {

@@ -7,40 +7,47 @@
  * carries one meaning only: this is the tool that is currently armed. A
  * credential that reveals itself is the loudest thing on the page, and nothing
  * else is allowed to compete with it.
+ *
+ * That constraint is also why this page is the *least* restyled of the
+ * reseller screens. Where a value is at stake, a reader needs to find the
+ * thing that changed, so the workbench is glass and floats above the page
+ * while the results below it stay flat. The eye should land on the result.
  */
 
 .reseller-v2-access-source {
   display: inline-flex;
   gap: 4px;
-  margin-top: 14px;
+  margin-top: 16px;
   padding: 4px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--bg-raised);
 }
 .reseller-v2-access-source button {
   display: inline-flex;
-  min-height: 38px;
+  min-height: 40px;
   align-items: center;
   gap: 7px;
   padding: 0 16px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
   transition:
-    border-color 140ms ease,
-    background-color 140ms ease,
-    color 140ms ease;
+    border-color var(--duration-normal) var(--ease-out-expo),
+    background-color var(--duration-normal) var(--ease-out-expo),
+    color var(--duration-normal) var(--ease-out-expo),
+    box-shadow 260ms var(--ease-out-expo);
 }
 .reseller-v2-access-source button:hover { color: var(--text-primary); }
 .reseller-v2-access-source button.is-active {
   border-color: color-mix(in srgb, var(--accent-violet) 58%, transparent);
   background: color-mix(in srgb, var(--accent-violet) 16%, transparent);
   color: var(--text-primary);
+  box-shadow: var(--shadow-lift);
 }
 
 /* ------------------------------------------------------------------ *
@@ -48,21 +55,25 @@
  *
  * It sticks, because on a long account list the two controls a reseller
  * actually uses -- pick a tool, press Cari Akun -- should not scroll away
- * from under the result they are producing.
+ * from under the result they are producing. That is also why it gets the
+ * strong glass: a translucent bar over a scrolling list only stays legible
+ * if it is a full-strength blur, and a faint one here would smear the
+ * account rows behind it into the text sitting on top.
  * ------------------------------------------------------------------ */
 
 .reseller-v2-access-workbench {
   position: sticky;
-  top: 72px;
+  top: 76px;
   z-index: 20;
   display: grid;
   gap: 12px;
-  margin-top: 12px;
-  padding: 14px;
+  margin-top: 14px;
+  padding: 16px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--surface-glass-strong);
-  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-lift);
+  backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
 }
 .reseller-v2-access-tools {
   display: grid;
@@ -73,26 +84,32 @@
   display: grid;
   gap: 4px;
   min-width: 0;
-  padding: 11px 12px;
+  padding: 12px 13px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--bg-raised);
   color: var(--text-secondary);
   text-align: left;
   cursor: pointer;
   transition:
-    border-color 140ms ease,
-    background-color 140ms ease,
-    color 140ms ease;
+    border-color var(--duration-normal) var(--ease-out-expo),
+    background-color var(--duration-normal) var(--ease-out-expo),
+    color var(--duration-normal) var(--ease-out-expo),
+    transform var(--duration-normal) var(--ease-out-expo),
+    box-shadow var(--duration-normal) var(--ease-out-expo);
 }
 .reseller-v2-access-tools button:hover {
   border-color: var(--border-strong);
+  background: var(--surface-hover);
   color: var(--text-primary);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lift);
 }
 .reseller-v2-access-tools button.is-active {
   border-color: color-mix(in srgb, var(--accent-violet) 62%, transparent);
   background: color-mix(in srgb, var(--accent-violet) 14%, transparent);
   color: var(--text-primary);
+  box-shadow: var(--shadow-glow);
 }
 .reseller-v2-access-tools button > span {
   display: inline-flex;
@@ -117,34 +134,40 @@
 .reseller-v2-access-form > .ui-field { flex: 1; min-width: 0; }
 .reseller-v2-access-submit {
   display: inline-flex;
-  min-height: 38px;
+  min-height: 42px;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   gap: 7px;
   padding: 0 18px;
   border: 1px solid transparent;
-  border-radius: 9px;
-  background: var(--accent-violet);
-  color: #fff;
+  border-radius: var(--radius-sm);
+  background: var(--text-primary);
+  color: var(--text-on-inverse);
   font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
   cursor: pointer;
-  transition: background 150ms ease, opacity 150ms ease;
+  transition:
+    background var(--duration-normal) var(--ease-out-expo),
+    transform var(--duration-normal) var(--ease-out-expo),
+    box-shadow 260ms var(--ease-out-expo),
+    opacity var(--duration-fast) var(--ease-out-expo);
 }
 .reseller-v2-access-submit:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent-violet) 86%, #fff);
+  background: color-mix(in srgb, var(--text-primary) 58%, white);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lift);
 }
 .reseller-v2-access-submit:disabled { cursor: not-allowed; opacity: 0.5; }
 .reseller-v2-access-spin { animation: reseller-v2-access-spin 900ms linear infinite; }
 @keyframes reseller-v2-access-spin { to { transform: rotate(360deg); } }
 
 .reseller-v2-access-freshness {
-  margin: 12px 0 0;
-  padding: 10px 12px;
+  margin: 14px 0 0;
+  padding: 11px 13px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--bg-raised);
   color: var(--text-secondary);
   font-size: 12px;
@@ -161,8 +184,8 @@
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  margin-top: 12px;
-  padding: 14px 16px;
+  margin-top: 14px;
+  padding: 16px 18px;
 }
 .reseller-v2-access-identity,
 .reseller-v2-access-result-identity {
@@ -176,8 +199,8 @@
 }
 .reseller-v2-access-result-identity > span {
   display: grid;
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   flex: 0 0 auto;
   place-items: center;
   border-radius: 50%;
@@ -204,20 +227,20 @@
   line-height: 1.5;
 }
 
-.reseller-v2-access-result { margin-top: 12px; }
+.reseller-v2-access-result { margin-top: 14px; }
 .reseller-v2-access-result > header {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 14px 16px;
+  gap: 10px;
+  padding: 16px 18px;
   border-bottom: 1px solid var(--border);
 }
 .reseller-v2-access-result > header > span {
   display: grid;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   place-items: center;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--accent-violet) 14%, transparent);
   color: var(--accent-violet);
 }
@@ -226,21 +249,25 @@
   color: var(--text-primary);
   font-size: 14px;
 }
-.reseller-v2-access-result-body { padding: 16px; }
+.reseller-v2-access-result-body { padding: 18px; }
 .reseller-v2-access-result-body > p {
-  margin: 12px 0 0;
+  margin: 14px 0 0;
   color: var(--text-secondary);
   font-size: 11.5px;
   line-height: 1.5;
 }
 .reseller-v2-access-result-body > p.reseller-v2-access-result-date { margin-top: 4px; color: var(--text-muted); }
-.reseller-v2-access-meta { margin-top: 10px; }
+.reseller-v2-access-meta { margin-top: 12px; }
 
 /*
  * The credential itself. A code is set in the display face at a size that can
  * be read back over a call, and a link never prints its path at all -- the
  * host is the identity of the link, the length is the reassurance, and the
  * full string is only ever handed to the clipboard or the browser.
+ *
+ * This is the one block on the page that keeps an accent wash behind it. It is
+ * the armed thing, and the wash is how the reader finds it again after
+ * scrolling.
  */
 .reseller-v2-access-value {
   display: flex;
@@ -248,9 +275,9 @@
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
-  padding: 16px;
+  padding: 18px;
   border: 1px solid color-mix(in srgb, var(--accent-violet) 30%, transparent);
-  border-radius: 11px;
+  border-radius: var(--radius-lg);
   background: color-mix(in srgb, var(--accent-violet) 7%, transparent);
 }
 .reseller-v2-access-value > div:first-child { min-width: 0; }
@@ -265,7 +292,7 @@
 .reseller-v2-access-value strong {
   display: block;
   color: var(--text-primary);
-  font-size: 17px;
+  font-size: 18px;
   overflow-wrap: anywhere;
 }
 .reseller-v2-access-value small {
@@ -282,32 +309,40 @@
 }
 .reseller-v2-access-value-actions > a {
   display: inline-flex;
-  min-height: 38px;
+  min-height: 40px;
   align-items: center;
   gap: 7px;
-  padding: 0 15px;
+  padding: 0 16px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   background: var(--bg-raised);
+  backdrop-filter: blur(var(--glass-blur));
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 600;
   text-decoration: none;
-  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+  transition:
+    background var(--duration-normal) var(--ease-out-expo),
+    color var(--duration-normal) var(--ease-out-expo),
+    border-color var(--duration-normal) var(--ease-out-expo),
+    transform var(--duration-normal) var(--ease-out-expo),
+    box-shadow var(--duration-normal) var(--ease-out-expo);
 }
 .reseller-v2-access-value-actions > a:hover {
   border-color: var(--border-strong);
   background: var(--surface-hover);
   color: var(--text-primary);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lift);
 }
 
 /* ------------------------------------------------------------------ *
  * The identity list
  * ------------------------------------------------------------------ */
 
-.reseller-v2-access-list { margin-top: 12px; }
+.reseller-v2-access-list { margin-top: 14px; }
 .reseller-v2-access-list > header {
-  padding: 14px 16px;
+  padding: 16px 18px;
   border-bottom: 1px solid var(--border);
 }
 .reseller-v2-access-list > header h2 {
@@ -316,7 +351,7 @@
   font-size: 14px;
 }
 .reseller-v2-access-list > header p {
-  margin: 4px 0 0;
+  margin: 5px 0 0;
   color: var(--text-muted);
   font-size: 11.5px;
   line-height: 1.5;
@@ -324,17 +359,17 @@
 .reseller-v2-access-list > div > button {
   display: flex;
   width: 100%;
-  min-height: 64px;
+  min-height: 66px;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 13px 18px;
   border: 0;
   border-bottom: 1px solid var(--border);
   background: transparent;
   color: var(--text-secondary);
   text-align: left;
   cursor: pointer;
-  transition: background-color 140ms ease, color 140ms ease;
+  transition: background-color var(--duration-normal) var(--ease-out-expo), color var(--duration-normal) var(--ease-out-expo);
 }
 .reseller-v2-access-list > div > button:last-child { border-bottom: 0; }
 .reseller-v2-access-list > div > button:hover,
@@ -351,8 +386,8 @@
 .reseller-v2-access-list > div > button.is-muted { opacity: 0.72; }
 .reseller-v2-access-list-icon {
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   flex: 0 0 auto;
   place-items: center;
   border-radius: 50%;
@@ -373,7 +408,7 @@
   font-size: 11px;
 }
 .reseller-v2-access-list > div > button > svg { flex: 0 0 auto; color: var(--text-muted); }
-.reseller-v2-access-list-loading { padding: 16px; }
+.reseller-v2-access-list-loading { padding: 18px; }
 
 @media (max-width: 720px) {
   .reseller-v2-access-workbench { position: static; }

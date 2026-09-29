@@ -23,9 +23,9 @@ function statusLabel(value = "") {
 
 function statusTone(value = "") {
   const normalized = String(value || "").toLowerCase();
-  if (["paid", "completed", "sent"].includes(normalized)) return "border-emerald-400/20 bg-emerald-400/10 text-emerald-300";
-  if (["expired", "cancelled", "delivery_failed"].includes(normalized)) return "border-rose-400/20 bg-rose-400/10 text-rose-300";
-  return "border-amber-300/20 bg-amber-300/10 text-amber-200";
+  if (["paid", "completed", "sent"].includes(normalized)) return "border-[color-mix(in_srgb,var(--status-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--status-success)_12%,transparent)] text-[var(--status-success)]";
+  if (["expired", "cancelled", "delivery_failed"].includes(normalized)) return "border-[color-mix(in_srgb,var(--status-danger)_32%,transparent)] bg-[color-mix(in_srgb,var(--status-danger)_12%,transparent)] text-[var(--status-danger)]";
+  return "border-[color-mix(in_srgb,var(--status-warning)_32%,transparent)] bg-[color-mix(in_srgb,var(--status-warning)_12%,transparent)] text-[var(--status-warning)]";
 }
 
 function dateText(value = "") {
@@ -106,32 +106,32 @@ export default function OrderTrackingPage() {
     
       <main className="theme-dark min-h-screen bg-[var(--bg-canvas)] px-4 py-6 text-[var(--text-primary)] sm:px-6 sm:py-8">
         <header className="mx-auto flex max-w-5xl items-center justify-between">
-          <Link to="/" className="inline-flex min-h-11 items-center gap-3 rounded-lg font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-violet-400">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] font-serif">K</span>
+          <Link to="/" className="inline-flex min-h-11 items-center gap-3 rounded-lg font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--accent-violet)]">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface-hover)] font-serif">K</span>
             Kavya
           </Link>
-          <Link to="/products" className="inline-flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm text-zinc-400 transition-colors hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-violet-400">
+          <Link to="/products" className="inline-flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent-violet)]">
             <ArrowLeft size={16} /> Produk
           </Link>
         </header>
 
         <section className="mx-auto grid max-w-5xl gap-8 pb-16 pt-12 lg:grid-cols-[0.85fr_1.15fr] lg:items-start lg:pt-20">
           <div className="max-w-md">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-300">Pelacakan aman</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--accent-violet)]">Pelacakan aman</p>
             <h1 className="mt-4 text-4xl font-medium tracking-[-0.04em] sm:text-5xl">Lacak pesananmu.</h1>
-            <p className="mt-4 text-base leading-7 text-zinc-400">
+            <p className="mt-4 text-base leading-7 text-[var(--text-muted)]">
               Gunakan tautan tracking dari halaman pembayaran, atau verifikasi nomor pesanan dengan WhatsApp maupun email pemesan.
             </p>
-            <div className="mt-8 space-y-4 text-sm text-zinc-400">
-              <div className="flex gap-3"><ShieldCheck className="mt-0.5 text-cyan-300" size={18} /><span>Credential akun tidak pernah ditampilkan di halaman publik.</span></div>
-              <div className="flex gap-3"><Clock3 className="mt-0.5 text-violet-300" size={18} /><span>Status pembayaran dan proses ditampilkan tanpa data internal.</span></div>
+            <div className="mt-8 space-y-4 text-sm text-[var(--text-muted)]">
+              <div className="flex gap-3"><ShieldCheck className="mt-0.5 text-[var(--accent-cyan)]" size={18} /><span>Credential akun tidak pernah ditampilkan di halaman publik.</span></div>
+              <div className="flex gap-3"><Clock3 className="mt-0.5 text-[var(--accent-violet)]" size={18} /><span>Status pembayaran dan proses ditampilkan tanpa data internal.</span></div>
             </div>
           </div>
 
           <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)]" aria-live="polite" aria-busy={loading}>
-            <div className="border-b border-white/[0.09] px-5 py-5 sm:px-7">
+            <div className="border-b border-[var(--border)] px-5 py-5 sm:px-7">
               <h2 className="text-lg font-semibold">{result ? "Status pesanan" : "Temukan pesanan"}</h2>
-              <p className="mt-1 text-sm text-zinc-500">
+              <p className="mt-1 text-sm text-[var(--text-muted)]">
                 {token ? "Tautan tracking terverifikasi." : "Nomor pesanan saja tidak cukup untuk membuka status."}
               </p>
             </div>
@@ -141,13 +141,13 @@ export default function OrderTrackingPage() {
                 {!token ? (
                   <>
                     <label className="block" htmlFor="tracking-order-id">
-                      <span className="text-sm font-medium text-zinc-200">Nomor pesanan</span>
+                      <span className="text-sm font-medium text-[var(--text-secondary)]">Nomor pesanan</span>
                       <input
                         id="tracking-order-id"
                         name="orderId"
                         value={orderId}
                         onChange={(event) => setOrderId(event.target.value)}
-                        className="mt-2 h-12 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-raised)] px-4 text-sm text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15"
+                        className="mt-2 h-12 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-raised)] px-4 text-sm text-[var(--text-primary)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent-violet)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--accent-violet)_18%,transparent)]"
                         placeholder="ORD-..."
                         autoComplete="off"
                         autoCapitalize="characters"
@@ -155,13 +155,13 @@ export default function OrderTrackingPage() {
                       />
                     </label>
                     <label className="block" htmlFor="tracking-verification">
-                      <span className="text-sm font-medium text-zinc-200">WhatsApp atau email pemesan</span>
+                      <span className="text-sm font-medium text-[var(--text-secondary)]">WhatsApp atau email pemesan</span>
                       <input
                         id="tracking-verification"
                         name="verification"
                         value={verification}
                         onChange={(event) => setVerification(event.target.value)}
-                        className="mt-2 h-12 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-raised)] px-4 text-sm text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15"
+                        className="mt-2 h-12 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-raised)] px-4 text-sm text-[var(--text-primary)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent-violet)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--accent-violet)_18%,transparent)]"
                         placeholder="08... atau nama@email.com"
                         autoComplete="off"
                         spellCheck={false}
@@ -169,26 +169,26 @@ export default function OrderTrackingPage() {
                     </label>
                   </>
                 ) : (
-                  <div className="rounded-lg border border-white/[0.08] bg-white/[0.025] px-4 py-5 text-sm text-zinc-400">
+                  <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-raised)] px-4 py-5 text-sm text-[var(--text-muted)]">
                     Memeriksa tautan tracking...
                   </div>
                 )}
-                {error ? <p role="alert" className="rounded-lg border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{error}</p> : null}
+                {error ? <p role="alert" className="rounded-lg border border-[color-mix(in_srgb,var(--status-danger)_32%,transparent)] bg-[color-mix(in_srgb,var(--status-danger)_12%,transparent)] px-4 py-3 text-sm text-[var(--status-danger)]">{error}</p> : null}
                 <button
                   type="submit"
                   disabled={!canSubmit || loading}
-                  className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-white px-5 text-sm font-semibold text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-400"
+                  className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-[var(--text-primary)] px-5 text-sm font-semibold text-[var(--text-on-inverse)] transition-colors hover:bg-[color-mix(in_srgb,var(--text-primary)_58%,white)] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-violet)]"
                 >
                   <Search size={17} /> {loading ? "Memeriksa..." : "Lacak Pesanan"}
                 </button>
               </form>
             ) : (
               <div className="p-5 sm:p-7">
-                <div className="flex flex-col gap-3 border-b border-white/[0.08] pb-5 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex flex-col gap-3 border-b border-[var(--border)] pb-5 sm:flex-row sm:items-start sm:justify-between">
                   <div>
-                    <p className="font-mono text-xs text-zinc-500">{result.orderId}</p>
+                    <p className="font-mono text-xs text-[var(--text-muted)]">{result.orderId}</p>
                     <h3 className="mt-2 text-xl font-semibold">{result.product}</h3>
-                    <p className="mt-1 text-sm text-zinc-400">{result.variant || "Paket digital"}</p>
+                    <p className="mt-1 text-sm text-[var(--text-muted)]">{result.variant || "Paket digital"}</p>
                   </div>
                   <span className={`inline-flex w-fit rounded-full border px-3 py-1.5 text-xs font-semibold ${statusTone(result.orderStatus)}`}>
                     {statusLabel(result.orderStatus)}
@@ -196,18 +196,18 @@ export default function OrderTrackingPage() {
                 </div>
 
                 <dl className="grid gap-5 py-6 sm:grid-cols-2">
-                  <div><dt className="text-xs uppercase tracking-wider text-zinc-600">Pembayaran</dt><dd className="mt-2 text-sm font-medium text-zinc-200">{statusLabel(result.paymentStatus)}</dd></div>
-                  <div><dt className="text-xs uppercase tracking-wider text-zinc-600">Proses</dt><dd className="mt-2 text-sm font-medium text-zinc-200">{statusLabel(result.processStatus)}</dd></div>
-                  <div><dt className="text-xs uppercase tracking-wider text-zinc-600">Dibuat</dt><dd className="mt-2 text-sm text-zinc-300">{dateText(result.createdAt)}</dd></div>
-                  <div><dt className="text-xs uppercase tracking-wider text-zinc-600">Dibayar</dt><dd className="mt-2 text-sm text-zinc-300">{dateText(result.paidAt)}</dd></div>
-                  {result.customerContact ? <div><dt className="text-xs uppercase tracking-wider text-zinc-600">Kontak</dt><dd className="mt-2 text-sm text-zinc-300">{result.customerContact}</dd></div> : null}
+                  <div><dt className="text-xs uppercase tracking-wider text-[var(--text-muted)]">Pembayaran</dt><dd className="mt-2 text-sm font-medium text-[var(--text-secondary)]">{statusLabel(result.paymentStatus)}</dd></div>
+                  <div><dt className="text-xs uppercase tracking-wider text-[var(--text-muted)]">Proses</dt><dd className="mt-2 text-sm font-medium text-[var(--text-secondary)]">{statusLabel(result.processStatus)}</dd></div>
+                  <div><dt className="text-xs uppercase tracking-wider text-[var(--text-muted)]">Dibuat</dt><dd className="mt-2 text-sm text-[var(--text-secondary)]">{dateText(result.createdAt)}</dd></div>
+                  <div><dt className="text-xs uppercase tracking-wider text-[var(--text-muted)]">Dibayar</dt><dd className="mt-2 text-sm text-[var(--text-secondary)]">{dateText(result.paidAt)}</dd></div>
+                  {result.customerContact ? <div><dt className="text-xs uppercase tracking-wider text-[var(--text-muted)]">Kontak</dt><dd className="mt-2 text-sm text-[var(--text-secondary)]">{result.customerContact}</dd></div> : null}
                 </dl>
 
-                <div className="flex flex-col gap-3 border-t border-white/[0.08] pt-5 sm:flex-row">
-                  <button type="button" onClick={() => track()} disabled={loading} className="inline-flex min-h-11 items-center justify-center rounded-lg bg-white px-5 text-sm font-semibold text-black hover:bg-zinc-200 disabled:opacity-50">
+                <div className="flex flex-col gap-3 border-t border-[var(--border)] pt-5 sm:flex-row">
+                  <button type="button" onClick={() => track()} disabled={loading} className="inline-flex min-h-11 items-center justify-center rounded-lg bg-[var(--text-primary)] px-5 text-sm font-semibold text-[var(--text-on-inverse)] transition-colors hover:bg-[color-mix(in_srgb,var(--text-primary)_58%,white)] disabled:opacity-50">
                     {loading ? "Memperbarui..." : "Perbarui Status"}
                   </button>
-                  <Link to="/login" className="inline-flex min-h-11 items-center justify-center rounded-lg border border-white/10 px-5 text-sm font-semibold text-zinc-200 hover:border-white/20 hover:bg-white/[0.04]">
+                  <Link to="/login" className="inline-flex min-h-11 items-center justify-center rounded-lg border border-[var(--border)] px-5 text-sm font-semibold text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]">
                     Masuk Dashboard
                   </Link>
                 </div>
@@ -216,7 +216,7 @@ export default function OrderTrackingPage() {
           </div>
         </section>
 
-        <footer className="mx-auto flex max-w-5xl items-center gap-2 border-t border-white/[0.08] py-6 text-sm text-zinc-500">
+        <footer className="mx-auto flex max-w-5xl items-center gap-2 border-t border-[var(--border)] py-6 text-sm text-[var(--text-muted)]">
           <Headphones size={16} /> Butuh bantuan? Hubungi owner dan sertakan nomor pesanan.
         </footer>
       </main>

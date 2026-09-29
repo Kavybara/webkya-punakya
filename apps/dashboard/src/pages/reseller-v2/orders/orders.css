@@ -7,12 +7,14 @@
  *
  * Colours come from the tokens in `src/styles/tokens.css`. Nothing here names
  * a hex value -- a page that spells one out is a page the palette cannot move.
+ * The one exception is the QRIS plate, and it is a token too: `--fx-scan-plate`
+ * exists for exactly one job, which is to stay opaque white in a dark console.
  */
 
 .reseller-v2-orders {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
 }
 
 /* --- the transaction reference ------------------------------------------ */
@@ -37,7 +39,7 @@
 .reseller-v2-orders-total {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
 }
 
@@ -73,7 +75,7 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 7px;
+  gap: 8px;
 }
 
 /* --- the pending-payments drawer ---------------------------------------- */
@@ -81,13 +83,13 @@
 .reseller-v2-orders-pending {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .reseller-v2-orders-pending-card {
-  padding: 14px;
+  padding: 16px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
 }
 
@@ -105,7 +107,7 @@
 .reseller-v2-orders-template > header > div {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
 }
 
@@ -126,7 +128,7 @@
 
 .reseller-v2-orders-pending-card .reseller-v2-orders-actions {
   justify-content: flex-start;
-  margin-top: 12px;
+  margin-top: 14px;
 }
 
 /* --- the QRIS dialog ----------------------------------------------------- */
@@ -134,7 +136,7 @@
 .reseller-v2-orders-qris {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 
 /*
@@ -143,17 +145,18 @@
  * A QR code is read by contrast between dark and light modules, and a dark
  * console's near-black ground turns the code's own light modules into
  * something a phone camera has to work for. The plate does not follow the
- * theme for that reason alone.
+ * theme for that reason alone -- which is why it is a token with one job
+ * rather than a colour typed into this file.
  */
 .reseller-v2-orders-qr {
   display: block;
   align-self: center;
   width: 240px;
   height: 240px;
-  padding: 10px;
+  padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  background: #fff;
+  border-radius: var(--radius-md);
+  background: var(--fx-scan-plate);
 }
 
 /* --- the delivery drawer ------------------------------------------------- */
@@ -161,28 +164,28 @@
 .reseller-v2-orders-delivery {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 14px;
+  gap: 14px;
+  padding: 16px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
 }
 
 .reseller-v2-orders-template {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding-top: 12px;
+  gap: 12px;
+  padding-top: 14px;
   border-top: 1px solid var(--border);
 }
 
 .reseller-v2-orders-template pre {
   max-height: 320px;
   margin: 0;
-  padding: 14px;
+  padding: 16px;
   overflow: auto;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-secondary);
   font-family: inherit;
@@ -203,7 +206,7 @@
   gap: 0;
   margin: 0;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 
@@ -212,7 +215,7 @@
   align-items: baseline;
   justify-content: space-between;
   gap: 14px;
-  padding: 9px 12px;
+  padding: 10px 14px;
   border-top: 1px solid var(--border);
 }
 

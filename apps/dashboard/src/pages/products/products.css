@@ -1,0 +1,216 @@
+/*
+ * The public catalogue's own surfaces.
+ *
+ * The rest of this page is Tailwind utilities against tokens, which is the
+ * right tool for spacing and type. It is the wrong tool for the four things
+ * below, because each needs a value the arbitrary-value syntax has to encode
+ * by hand: a backdrop blur, an elevation, a hover that has to move the tile
+ * without moving anything inside it, and a focus ring that survives on top of
+ * a per-product gradient.
+ */
+
+/* The product card.
+ *
+ * This was `bg-white` with a `shadow-sm` and a `border-gray-100` -- a card
+ * from a template, on a page whose own header was a different template. The
+ * page is dark like the rest of the product now, so the card is glass like the
+ * rest of the product: a translucent sheet the aurora continues through, with
+ * the border carrying only what the blur does not.
+ *
+ * It lifts, because the whole tile is the click target -- the product expands
+ * its variants when you press it. That is the rule the redesign settled on:
+ * a lift is a promise the thing can be pressed, so only things that can be
+ * pressed get one. */
+.catalog-card {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-lift);
+  backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+  transition:
+    border-color var(--duration-normal) var(--ease-out-expo),
+    background var(--duration-normal) var(--ease-out-expo),
+    box-shadow var(--duration-normal) var(--ease-out-expo);
+}
+
+.catalog-card:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+  box-shadow: var(--shadow-float);
+}
+
+/* The expanded state. A selected tile is not a different colour, it is the
+   same tile with its edge lit -- the accent says "this one" without repainting
+   the product's own artwork. */
+.catalog-card.is-expanded {
+  border-color: color-mix(in srgb, var(--accent-violet) 46%, transparent);
+  box-shadow: var(--shadow-glow);
+}
+
+/* The art area.
+ *
+ * The one surface on the card that is not glass, and cannot be: this is the
+ * product's own gradient, arriving from `productBrandAssets`. It is a fixed
+ * dark image in both themes, so the chips and the logo plate sitting on it are
+ * declared as `--fx-art-*` rather than themed -- a product's own mark does not
+ * invert when the product does. */
+.catalog-art {
+  position: relative;
+  display: flex;
+  height: 176px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.catalog-logo-plate {
+  position: relative;
+  display: flex;
+  height: 80px;
+  width: 80px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-lg);
+  background: var(--fx-art-plate);
+  color: var(--fx-art-plate-ink);
+  box-shadow: 0 24px 48px -20px var(--fx-art-drop);
+  backdrop-filter: blur(8px) saturate(140%);
+}
+
+/* The two price buttons in the duration picker.
+ *
+ * The cheapest way to press is a plate; the rest are quiet until hovered. This
+ * is the same split the category pills above use, which is why both are written
+ * as one pair rather than as two independent states. */
+.catalog-duration {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-primary);
+  text-align: left;
+  transition:
+    border-color var(--duration-fast) var(--ease-out-expo),
+    background var(--duration-fast) var(--ease-out-expo),
+    transform var(--duration-fast) var(--ease-out-expo);
+}
+
+.catalog-duration:hover {
+  border-color: color-mix(in srgb, var(--accent-violet) 34%, transparent);
+  background: color-mix(in srgb, var(--accent-violet) 7%, transparent);
+  transform: translateY(-1px);
+}
+
+.catalog-duration.is-selected {
+  border-color: color-mix(in srgb, var(--accent-violet) 46%, transparent);
+  background: color-mix(in srgb, var(--accent-violet) 11%, transparent);
+  color: var(--text-primary);
+}
+
+.catalog-duration.is-selected:hover {
+  border-color: color-mix(in srgb, var(--accent-violet) 46%, transparent);
+  background: color-mix(in srgb, var(--accent-violet) 13%, transparent);
+}
+
+/* A variant row. Same material as the duration button, one step quieter
+   because a variant row is a longer list and lifting all of them at once
+   would be noise rather than an invitation. */
+.catalog-variant {
+  display: grid;
+  width: 100%;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: 12px;
+  text-align: left;
+  transition:
+    border-color var(--duration-fast) var(--ease-out-expo),
+    background var(--duration-fast) var(--ease-out-expo);
+}
+
+.catalog-variant:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.catalog-variant.is-selected {
+  border-color: color-mix(in srgb, var(--accent-violet) 46%, transparent);
+  background: color-mix(in srgb, var(--accent-violet) 9%, transparent);
+}
+
+/* The category pill. Selected is the primary plate, matching every other
+   selected control in the product; unselected is glass. */
+.catalog-filter {
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  transition:
+    border-color var(--duration-fast) var(--ease-out-expo),
+    background var(--duration-fast) var(--ease-out-expo),
+    color var(--duration-fast) var(--ease-out-expo);
+}
+
+.catalog-filter:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.catalog-filter.is-selected {
+  border-color: transparent;
+  background: var(--text-primary);
+  color: var(--text-on-inverse);
+}
+
+.catalog-filter.is-selected:hover {
+  background: color-mix(in srgb, var(--text-primary) 58%, white);
+  color: var(--text-on-inverse);
+}
+
+/* The tile that opens the variants. Not a button element -- the art area is a
+   div with `role="button"`, because the whole card has to stay one press
+   target -- so the focus ring lives here rather than on a real control. */
+.catalog-trigger:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: -2px;
+}
+
+/* "Pesan Sekarang". The same near-white plate the sign-in button, the owner
+ * console's save row and the reseller's top-up use, and it hovers the same
+ * way. It is stated here rather than shared with the landing page's `.home-cta`
+ * because a page's stylesheet is the boundary for that page's surfaces; the
+ * thing the two have in common is the token, not the rule. */
+.catalog-primary {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--text-primary);
+  color: var(--text-on-inverse);
+  font-size: 14px;
+  font-weight: 700;
+  transition:
+    background var(--duration-normal) var(--ease-out-expo),
+    transform var(--duration-normal) var(--ease-out-expo),
+    box-shadow 260ms var(--ease-out-expo);
+}
+
+.catalog-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-primary) 58%, white);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lift);
+}
+
+.catalog-primary:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 3px;
+}

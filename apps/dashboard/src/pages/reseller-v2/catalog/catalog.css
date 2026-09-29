@@ -6,10 +6,17 @@
  * white card on a cream canvas. The brand gradient on a product tile is the
  * one thing that stays a Tailwind class: it comes from `productBrandAssets`
  * and is a per-product colour the catalogue has no other way to know.
+ *
+ * The grid is the screen's whole reason to exist, so it gets the most
+ * negative space on the page -- 18px between tiles, 20px inside them -- and
+ * each tile is glass with a lift on hover, because a tile here is a thing you
+ * press to open a purchase flow. The art area is the one place a surface is
+ * deliberately NOT glass: it is the product's own image, and a blur over it
+ * would be blurring the thing being sold.
  */
 
 .reseller-v2-catalog-panel {
-  margin-top: 14px;
+  margin-top: 18px;
 }
 
 /* The header the legacy page centred above the grid. It is a panel header, so
@@ -20,37 +27,40 @@
 
 .reseller-v2-catalog-head p {
   max-width: 62ch;
-  margin: 7px 0 0;
+  margin: 8px 0 0;
   color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: 12.5px;
+  line-height: 1.6;
 }
 
 .reseller-v2-catalog-toolbar {
   display: grid;
   gap: 12px;
-  padding: 14px;
+  padding: 18px;
   border-bottom: 1px solid var(--border);
 }
 
 .reseller-v2-catalog-search {
   display: flex;
-  min-height: 44px;
+  min-height: 46px;
   align-items: center;
   gap: 9px;
-  padding: 0 12px;
+  padding: 0 14px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   background: var(--bg-raised);
+  backdrop-filter: blur(var(--glass-blur));
   color: var(--text-muted);
   transition:
-    border-color 150ms ease,
-    background 150ms ease;
+    border-color var(--duration-normal) var(--ease-out-expo),
+    background var(--duration-normal) var(--ease-out-expo),
+    box-shadow 260ms var(--ease-out-expo);
 }
 
 .reseller-v2-catalog-search:focus-within {
-  border-color: var(--accent-violet);
-  background: var(--surface);
+  border-color: color-mix(in srgb, var(--accent-violet) 62%, transparent);
+  background: var(--surface-hover);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-violet) 12%, transparent);
 }
 
 /* The kit styles an input inside a Field, and this one sits inside a wrapper
@@ -79,34 +89,55 @@
 .reseller-v2-catalog-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-  padding: 16px;
+  gap: 18px;
+  padding: 20px;
 }
 
 .reseller-v2-catalog-skeleton {
-  min-height: 260px;
-  padding: 16px;
+  min-height: 280px;
+  padding: 20px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
 }
+
+/* ------------------------------------------------------------------ *
+ * The tile
+ *
+ * A tile is glass, because the grid already sits inside a glass panel and a
+ * second opaque plate inside it would read as a hole. It lifts, because the
+ * whole tile is a button -- `.reseller-v2-catalog-card > button` below fills
+ * it -- and a pressable thing that does not move is a thing you cannot find.
+ * ------------------------------------------------------------------ */
 
 .reseller-v2-catalog-card {
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
+  backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+  box-shadow: var(--shadow-lift);
   transition:
-    border-color 160ms ease,
-    box-shadow 160ms ease;
+    border-color var(--duration-normal) var(--ease-out-expo),
+    background var(--duration-normal) var(--ease-out-expo),
+    transform var(--duration-normal) var(--ease-out-expo),
+    box-shadow var(--duration-normal) var(--ease-out-expo);
+}
+
+.reseller-v2-catalog-card:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-float);
 }
 
 /* Expansion is a state the reader can lose track of in a grid of cards, so
-   the open one is marked with an edge rather than only a size change. */
+   the open one is marked with a lit edge rather than only a size change. */
 .reseller-v2-catalog-card.is-expanded {
   border-color: color-mix(in srgb, var(--accent-violet) 52%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-violet) 22%, transparent);
+  background: var(--surface-hover);
+  box-shadow: var(--shadow-glow);
 }
 
 .reseller-v2-catalog-card > button {
@@ -125,10 +156,12 @@
   outline-offset: -2px;
 }
 
+/* The one surface on the page that is not glass, and cannot be: this is the
+   product's own artwork. */
 .reseller-v2-catalog-art {
   position: relative;
   display: flex;
-  height: 150px;
+  height: 168px;
   align-items: center;
   justify-content: center;
   background-color: var(--bg-raised);
@@ -136,34 +169,39 @@
 
 .reseller-v2-catalog-art .ui-badge {
   position: absolute;
-  top: 11px;
-  left: 11px;
+  top: 12px;
+  left: 12px;
 }
 
+/* The chip reads as glass over the artwork, so it blurs what is behind it
+   rather than sitting on an opaque lozenge. Its plate and ink come from the
+   one token family that deliberately ignores the theme -- the artwork is a
+   fixed light image either way. */
 .reseller-v2-catalog-chip {
   position: absolute;
   display: inline-flex;
-  min-height: 22px;
+  min-height: 24px;
   align-items: center;
   gap: 4px;
-  padding: 0 9px;
+  padding: 0 10px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.9);
-  color: #1f2937;
+  backdrop-filter: blur(8px) saturate(140%);
+  background: var(--fx-art-plate);
+  color: var(--fx-art-plate-ink);
   font-size: 10px;
   font-weight: 700;
   line-height: 1;
 }
 
 .reseller-v2-catalog-chip.is-dark {
-  background: rgba(0, 0, 0, 0.7);
-  color: #fff;
+  background: var(--fx-art-scrim);
+  color: var(--fx-art-scrim-ink);
 }
 
 .reseller-v2-catalog-chip.is-toggle {
   top: auto;
-  right: 11px;
-  bottom: 11px;
+  right: 12px;
+  bottom: 12px;
 }
 
 /* The code is the fallback identity when the brand has no logo, so the tile
@@ -172,21 +210,21 @@
 .reseller-v2-catalog-mark {
   position: relative;
   display: grid;
-  width: 74px;
-  height: 74px;
+  width: 76px;
+  height: 76px;
   place-items: center;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 18px 40px rgba(2, 6, 23, 0.45);
+  border-radius: 20px;
+  background: var(--fx-art-plate);
+  box-shadow: 0 18px 40px var(--fx-art-drop);
 }
 
 /* The monogram is dark ink on a deliberately fixed light plate -- a brand tile
    that changed colour with the theme would no longer look like the product's
-   own logo. `--text-inverse` is exactly that ink, and in the console's dark
-   shell it resolves to the same near-black that used to be typed out here. */
+   own logo, so this is one of the few places in the app that opts out of the
+   palette on purpose. tokens.css says so once, where the exception lives. */
 .reseller-v2-catalog-mark span {
   padding: 0 8px;
-  color: var(--text-inverse);
+  color: var(--fx-art-plate-ink);
   font-size: 11px;
   font-weight: 800;
   line-height: 1.25;
@@ -202,7 +240,7 @@
 }
 
 .reseller-v2-catalog-body {
-  padding: 15px 16px 17px;
+  padding: 17px 18px 19px;
 }
 
 .reseller-v2-catalog-body h3 {
@@ -214,10 +252,10 @@
 
 .reseller-v2-catalog-body p {
   min-height: 42px;
-  margin: 7px 0 0;
+  margin: 8px 0 0;
   color: var(--text-secondary);
   font-size: 12px;
-  line-height: 1.55;
+  line-height: 1.6;
 }
 
 .reseller-v2-catalog-facts {
@@ -225,7 +263,7 @@
   align-items: flex-end;
   justify-content: space-between;
   gap: 12px;
-  margin-top: 14px;
+  margin-top: 16px;
 }
 
 .reseller-v2-catalog-facts span,
@@ -259,12 +297,12 @@
  * ------------------------------------------------------------------ */
 
 .reseller-v2-catalog-variants {
-  padding: 15px 16px 17px;
+  padding: 17px 18px 19px;
   border-top: 1px solid var(--border);
 }
 
 .reseller-v2-catalog-variants-title {
-  margin: 0 0 10px;
+  margin: 0 0 11px;
   color: var(--text-muted);
   font-size: 10px;
   font-weight: 750;
@@ -274,39 +312,44 @@
 
 .reseller-v2-catalog-variant-list {
   display: grid;
-  gap: 7px;
+  gap: 8px;
 }
 
 .reseller-v2-catalog-variant {
   display: grid;
   min-width: 0;
-  min-height: 58px;
+  min-height: 60px;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 11px;
-  padding: 10px 11px;
+  padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--bg-raised);
   color: var(--text-secondary);
   text-align: left;
   cursor: pointer;
   transition:
-    border-color 150ms ease,
-    background-color 150ms ease,
-    color 150ms ease;
+    border-color var(--duration-normal) var(--ease-out-expo),
+    background-color var(--duration-normal) var(--ease-out-expo),
+    color var(--duration-normal) var(--ease-out-expo),
+    transform var(--duration-normal) var(--ease-out-expo),
+    box-shadow var(--duration-normal) var(--ease-out-expo);
 }
 
 .reseller-v2-catalog-variant:hover:not(:disabled) {
   border-color: var(--border-strong);
   background: var(--surface-hover);
   color: var(--text-primary);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lift);
 }
 
 .reseller-v2-catalog-variant.is-selected {
   border-color: color-mix(in srgb, var(--accent-violet) 58%, transparent);
   background: color-mix(in srgb, var(--accent-violet) 12%, transparent);
   color: var(--text-primary);
+  box-shadow: var(--shadow-glow);
 }
 
 .reseller-v2-catalog-variant:disabled {
@@ -328,7 +371,7 @@
 .reseller-v2-catalog-variant.is-selected .reseller-v2-catalog-variant-mark {
   border-color: transparent;
   background: var(--accent-violet);
-  color: #fff;
+  color: var(--text-on-inverse);
 }
 
 .reseller-v2-catalog-variant-copy {
@@ -385,26 +428,27 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px;
-  margin-top: 15px;
+  margin-top: 16px;
   padding: 4px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--bg-raised);
 }
 
 .reseller-v2-catalog-duration-mode {
   min-height: 38px;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 650;
   cursor: pointer;
   transition:
-    border-color 150ms ease,
-    background-color 150ms ease,
-    color 150ms ease;
+    border-color var(--duration-normal) var(--ease-out-expo),
+    background-color var(--duration-normal) var(--ease-out-expo),
+    color var(--duration-normal) var(--ease-out-expo),
+    box-shadow 260ms var(--ease-out-expo);
 }
 
 .reseller-v2-catalog-duration-mode:hover {
@@ -415,42 +459,48 @@
   border-color: var(--border-strong);
   background: var(--surface-hover);
   color: var(--text-primary);
+  box-shadow: var(--shadow-lift);
 }
 
 .reseller-v2-catalog-duration-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
-  gap: 8px;
+  gap: 9px;
   margin-top: 14px;
 }
 
 .reseller-v2-catalog-duration-option {
   min-width: 0;
-  min-height: 62px;
+  min-height: 64px;
   overflow: hidden;
-  padding: 9px 10px;
+  padding: 10px 11px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--bg-raised);
   color: var(--text-secondary);
   text-align: left;
   cursor: pointer;
   transition:
-    border-color 150ms ease,
-    background-color 150ms ease,
-    color 150ms ease;
+    border-color var(--duration-normal) var(--ease-out-expo),
+    background var(--duration-normal) var(--ease-out-expo),
+    color var(--duration-normal) var(--ease-out-expo),
+    transform var(--duration-normal) var(--ease-out-expo),
+    box-shadow var(--duration-normal) var(--ease-out-expo);
 }
 
 .reseller-v2-catalog-duration-option:hover {
   border-color: var(--border-strong);
   background: var(--surface-hover);
   color: var(--text-primary);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lift);
 }
 
 .reseller-v2-catalog-duration-option.is-selected {
   border-color: color-mix(in srgb, var(--accent-violet) 62%, transparent);
   background: color-mix(in srgb, var(--accent-violet) 11%, transparent);
   color: var(--text-primary);
+  box-shadow: var(--shadow-glow);
 }
 
 .reseller-v2-catalog-duration-label,
@@ -477,23 +527,29 @@
 .reseller-v2-catalog-checkout {
   display: flex;
   width: 100%;
-  min-height: 44px;
+  min-height: 46px;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  margin-top: 14px;
+  margin-top: 16px;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   background: var(--text-primary);
   color: var(--text-on-inverse);
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
-  transition: background-color 150ms ease, opacity 150ms ease;
+  transition:
+    background-color var(--duration-normal) var(--ease-out-expo),
+    transform var(--duration-normal) var(--ease-out-expo),
+    box-shadow 260ms var(--ease-out-expo),
+    opacity var(--duration-fast) var(--ease-out-expo);
 }
 
-.reseller-v2-catalog-checkout:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent-violet) 70%, var(--text-primary));
+.reseller-v2-catalog-checkout:hover:not(:disabled):not(.is-pending) {
+  background: color-mix(in srgb, var(--text-primary) 58%, white);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lift);
 }
 
 .reseller-v2-catalog-checkout:disabled {
@@ -502,7 +558,9 @@
 }
 
 /* The same button in its pre-selection state says something different, so it
-   cannot borrow the busy styling: this one was never actionable. */
+   cannot borrow the busy styling: this one was never actionable. That is also
+   why the hover above excludes it -- a pending button should not light up as
+   though it were waiting to be pressed. */
 .reseller-v2-catalog-checkout.is-pending {
   cursor: not-allowed;
   opacity: 1;
@@ -525,12 +583,12 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 11px 12px;
+  padding: 12px 14px;
   border: 1px solid var(--border-strong);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   background: var(--surface-glass-strong);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.42);
-  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-float);
+  backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
 }
 
 .reseller-v2-catalog-mobile-bar > div {
@@ -564,14 +622,25 @@
   flex: 0 0 auto;
   align-items: center;
   gap: 7px;
-  padding: 0 15px;
+  padding: 0 16px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--text-primary);
   color: var(--text-on-inverse);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
+  transition:
+    background var(--duration-normal) var(--ease-out-expo),
+    transform var(--duration-normal) var(--ease-out-expo),
+    box-shadow 260ms var(--ease-out-expo),
+    opacity var(--duration-fast) var(--ease-out-expo);
+}
+
+.reseller-v2-catalog-mobile-bar button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-primary) 58%, white);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lift);
 }
 
 .reseller-v2-catalog-mobile-bar button:disabled {
@@ -589,6 +658,19 @@
   }
 }
 
+/* Tiles arrive as the reader scrolls rather than all at once. Wrapped so a
+   browser without scroll-timelines gets no rule at all and every tile is
+   simply there. */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .reseller-v2-catalog-card {
+      animation: ui-reveal linear both;
+      animation-timeline: view();
+      animation-range: entry 2% cover 16%;
+    }
+  }
+}
+
 @media (max-width: 1180px) {
   .reseller-v2-catalog-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -598,13 +680,18 @@
 @media (max-width: 767px) {
   .reseller-v2-catalog-grid {
     grid-template-columns: minmax(0, 1fr);
-    padding: 13px;
+    gap: 14px;
+    padding: 14px;
   }
 
   .reseller-v2-catalog-toolbar,
   .reseller-v2-catalog-body,
   .reseller-v2-catalog-variants {
-    padding-inline: 13px;
+    padding-inline: 14px;
+  }
+
+  .reseller-v2-catalog-art {
+    height: 148px;
   }
 
   .reseller-v2-catalog-body p {

@@ -75,8 +75,12 @@ function page(Component: ComponentType) {
   return (
     <Suspense
       fallback={
+        // The canvas token, not a colour. This was the last cream hex in the
+        // app -- the loading flash a route change shows, which meant every
+        // navigation started by flashing a different product than the one the
+        // visitor was on.
         <div
-          className="min-h-screen bg-[#f4eee5]"
+          className="theme-dark min-h-screen bg-[var(--bg-canvas)]"
           aria-label="Memuat halaman"
         />
       }

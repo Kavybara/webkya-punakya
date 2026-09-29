@@ -13,6 +13,7 @@ import { api, type CatalogProduct } from "../../lib/api";
 import { productBrandAsset, productLogoUrl } from "../../lib/productBrandAssets";
 import { ownerWhatsappLink } from "../../lib/ownerContact";
 import ProductCatalog from "./components/ProductCatalog";
+import "./home.css";
 
 const whatsappUrl = ownerWhatsappLink();
 const revealViewport = { once: true, amount: 0.16 };
@@ -127,10 +128,10 @@ function HeroSection() {
                 Produk digital dengan stok, pembayaran, dan pengiriman yang tersusun dalam satu alur.
               </motion.p>
               <motion.div variants={revealItem} className="mt-8 flex flex-col gap-3 min-[430px]:flex-row">
-                <motion.a href="#produk" whileHover={reduceMotion ? undefined : { y: -2 }} whileTap={reduceMotion ? undefined : { y: 1, scale: 0.985 }} className="inline-flex min-h-12 items-center justify-center rounded-full bg-[var(--text-primary)] px-6 text-[15px] font-extrabold text-[var(--bg-canvas)] transition-colors hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">
+                <motion.a href="#produk" whileHover={reduceMotion ? undefined : { y: -2 }} whileTap={reduceMotion ? undefined : { y: 1, scale: 0.985 }} className="home-cta">
                   Lihat Produk
                 </motion.a>
-                <Link to="/order-tracking" className="inline-flex min-h-12 items-center justify-center rounded-full border border-[var(--border)] px-6 text-[15px] font-bold text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">
+                <Link to="/order-tracking" className="home-cta-ghost">
                   Lacak Pesanan
                 </Link>
               </motion.div>
@@ -195,8 +196,8 @@ function SpotlightCard({ children, className = "" }: { children: ReactNode; clas
   };
 
   return (
-    <motion.article onPointerMove={onPointerMove} onPointerLeave={() => opacity.set(0)} whileHover={reduceMotion ? undefined : { y: -2, borderColor: "var(--border-strong)" }} className={`relative overflow-hidden rounded-[10px] border border-[rgba(255,255,255,0.11)] bg-[#080808] ${className}`}>
-      <motion.div className="pointer-events-none absolute inset-0" style={{ backgroundImage: spotlight, opacity }} aria-hidden="true" />
+    <motion.article onPointerMove={onPointerMove} onPointerLeave={() => opacity.set(0)} className={`home-bento-card ${className}`}>
+      <motion.div className="home-spotlight" style={{ backgroundImage: spotlight, opacity }} aria-hidden="true" />
       <div className="relative h-full">{children}</div>
     </motion.article>
   );
@@ -239,7 +240,7 @@ function BentoSection() {
                 <div className="relative mt-9 flex flex-1 flex-col justify-center sm:mt-12">
                   <motion.div
                     aria-hidden="true"
-                    className="absolute bottom-8 left-[17px] top-8 w-px origin-top bg-[linear-gradient(to_bottom,var(--accent-violet),var(--accent-cyan),rgba(255,255,255,0.35))]"
+                    className="absolute bottom-8 left-[17px] top-8 w-px origin-top bg-[linear-gradient(to_bottom,var(--accent-violet),var(--accent-cyan),var(--border-strong))]"
                     initial={reduceMotion ? false : { scaleY: 0, opacity: 0 }}
                     whileInView={{ scaleY: 1, opacity: 1 }}
                     viewport={{ once: true, amount: 0.6 }}
@@ -255,7 +256,7 @@ function BentoSection() {
                         viewport={{ once: true, amount: 0.7 }}
                         transition={{ duration: 0.45, delay: index * 0.1, ease: [0.22, 1, 0.36, 1] }}
                       >
-                        <span className="relative z-10 flex h-9 w-9 items-center justify-center rounded-full border border-[rgba(255,255,255,0.16)] bg-[#0d0d0f]" aria-hidden="true">
+                        <span className="home-stage-node" aria-hidden="true">
                           <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: stage.tone }} />
                         </span>
                         <div>
@@ -310,7 +311,7 @@ function BentoSection() {
                   {stockRows.map((row, index) => (
                     <div key={row.label} className="grid grid-cols-[112px_1fr] items-center gap-4 sm:grid-cols-[128px_1fr]">
                       <span className="text-sm font-medium text-[var(--text-secondary)]">{row.label}</span>
-                      <div className="h-2.5 overflow-hidden rounded-full bg-[rgba(255,255,255,0.08)]">
+                      <div className="h-2.5 overflow-hidden rounded-full bg-[var(--bg-raised)]">
                         <motion.span
                           className="block h-full origin-left rounded-full bg-[var(--accent-cyan)]"
                           style={{ width: row.width, opacity: 0.82 - index * 0.12 }}
@@ -361,7 +362,7 @@ function FinalCtaSection() {
       <Reveal className="relative mx-auto max-w-3xl px-4 text-center sm:px-6">
         <motion.p variants={revealItem} className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">Kavya</motion.p>
         <motion.h2 variants={revealItem} className="mt-4 text-3xl font-medium leading-tight tracking-[-0.03em] sm:text-4xl">Temukan layanan digitalmu di Kavya.</motion.h2>
-        <motion.div variants={revealItem} className="mt-7 flex flex-col justify-center gap-3 sm:flex-row"><a href="#produk" className="inline-flex min-h-12 items-center justify-center rounded-full bg-[var(--text-primary)] px-6 text-sm font-extrabold text-[var(--bg-canvas)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">Lihat Produk</a><Link to="/register" className="inline-flex min-h-12 items-center justify-center rounded-full border border-[var(--border)] px-6 text-sm font-bold hover:bg-[var(--surface-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">Daftar Reseller</Link></motion.div>
+        <motion.div variants={revealItem} className="mt-7 flex flex-col justify-center gap-3 sm:flex-row"><a href="#produk" className="home-cta">Lihat Produk</a><Link to="/register" className="home-cta-ghost">Daftar Reseller</Link></motion.div>
       </Reveal>
     </section>
   );

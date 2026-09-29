@@ -1,5 +1,5 @@
 /*
- * The design tokens. Every colour, and the shape scale, in one place.
+ * The design tokens. Every colour, every shape, every duration, in one place.
  *
  * Before this file existed the app had four private vocabularies --
  * `--kavya-*` in index.css, `--console-*`, `--auth-*` and `--reseller-*` in
@@ -17,8 +17,7 @@
  * palette changes, the component is untouched.
  *
  * Two themes:
- *   - `:root` is the public light surface (warm paper, cream), which is what
- *     the body has always been.
+ *   - `:root` is the public light surface.
  *   - The dark palette is applied to the four dark roots the app already
  *     had. It is declared once, in one selector list, so there is no second
  *     copy to drift.
@@ -27,26 +26,49 @@
  * resolves to nothing in the other and the property silently falls back to
  * `unset`, which is how `bg-[var(--surface)]` ends up rendering as a
  * transparent box with a currentColor border. Keep the two lists in step.
+ *
+ * -----------------------------------------------------------------------
+ * WHY THE DARK PALETTE IS TRANSLUCENT RATHER THAN SOLID
+ *
+ * The consoles were drawn as opaque slabs: a solid near-black card, a solid
+ * near-black rail, a 1px white line between them. Every one of those panels
+ * was doing the same job -- saying "this region holds data" -- by being a
+ * slightly different shade of the same colour, which is why the result read
+ * as a template rather than a product: a template is distinguished by its
+ * borders, and this one was all borders.
+ *
+ * So the surfaces stop being colours and become *layers of light*. A panel
+ * is now a translucent sheet over the canvas, separated by what is behind it
+ * rather than by a line drawn around it. `--surface` carries a 4% white wash,
+ * `--border` drops from 9% to 7.5% because the edge of a lit surface is
+ * carried by the blur behind it, and the aurora below is what there is to
+ * see through to. That is the whole trick: depth comes from a background with
+ * something in it, not from stacking greys.
+ *
+ * `design-tokens.test.mjs` holds the two lists in step, so the one thing that
+ * must never happen here is a token added to one block and forgotten in the
+ * other. Light gets the same treatment, weaker: paper is already a light, so
+ * its "aurora" is a faint wash and its glass is white at high opacity.
  */
 
 :root {
-  /* --- the warm paper the public site sits on --- */
-  --bg-canvas: #fff9f5;
-  --bg-raised: #f2ece2;
-  --surface: #f8fafc;
-  --surface-hover: #f1ede7;
-  --surface-glass: rgba(242, 236, 226, 0.95);
-  --surface-glass-strong: rgba(248, 250, 252, 0.92);
+  /* --- the light canvas --- */
+  --bg-canvas: #f6f5fa;
+  --bg-raised: rgba(255, 255, 255, 0.7);
+  --surface: rgba(255, 255, 255, 0.74);
+  --surface-hover: rgba(255, 255, 255, 0.95);
+  --surface-glass: rgba(255, 255, 255, 0.66);
+  --surface-glass-strong: rgba(255, 255, 255, 0.86);
 
   --text-primary: #0f172a;
   --text-secondary: #475569;
   --text-muted: #64748b;
   --text-inverse: #f8fafc;
   /* The ink for a button whose ground is the primary text colour. */
-  --text-on-inverse: #fff9f5;
+  --text-on-inverse: #ffffff;
 
-  --border: #e2e8f0;
-  --border-strong: #cbd5e1;
+  --border: rgba(15, 23, 42, 0.1);
+  --border-strong: rgba(15, 23, 42, 0.19);
 
   /*
    * Accents and status colours are the same in both themes -- they are
@@ -61,6 +83,81 @@
   --status-warning: #fbbf24;
   --status-danger: #fb7185;
   --status-info: #60a5fa;
+
+  /* --- shape --- */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 26px;
+  --radius-pill: 999px;
+
+  /* --- rhythm: the space between things, not inside them --- */
+  --space-card: 20px;
+  --space-gutter: 32px;
+  --space-section: 72px;
+
+  /* --- glass --- */
+  --glass-blur: 22px;
+  --glass-blur-strong: 34px;
+
+  /* --- motion --- */
+  --duration-fast: 150ms;
+  --duration-normal: 280ms;
+  --duration-slow: 620ms;
+  /* The one curve. Anything that enters, lifts, or settles uses it, so the
+     whole product decelerates the same way instead of in four dialects. */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* --- elevation ---
+     Two shadows, not one. `--shadow-lift` is the contact shadow that says an
+     object is off the page; `--shadow-glow` is the coloured bloom that says
+     it is *live*, and it is deliberately the only place an accent casts
+     light rather than being lit. */
+  --shadow-lift: 0 18px 44px -20px rgba(15, 23, 42, 0.32), 0 2px 6px -3px rgba(15, 23, 42, 0.14);
+  --shadow-float: 0 34px 76px -26px rgba(15, 23, 42, 0.4), 0 4px 12px -6px rgba(15, 23, 42, 0.16);
+  --shadow-glow: 0 0 0 1px rgba(139, 92, 246, 0.28), 0 14px 40px -12px rgba(139, 92, 246, 0.5);
+
+  /* --- the aurora ---
+     Three coloured pools and one white one, painted as fixed radial
+     gradients behind the canvas and blurred into each other. These are the
+     only saturated values on the page: everything else is a grey with an
+     alpha. Concentrated at the top-left and bottom-right so the pools pull
+     in opposite directions and the middle of the page stays quiet enough to
+     read a table in. */
+  --fx-aurora-violet: rgba(139, 92, 246, 0.16);
+  --fx-aurora-cyan: rgba(56, 189, 248, 0.13);
+  --fx-aurora-magenta: rgba(236, 72, 153, 0.1);
+  --fx-aurora-ink: rgba(255, 255, 255, 0.028);
+
+  /* --- over brand art ---
+     The one family of surfaces on the page that must NOT follow the theme.
+     A product's logo plate and its category chip sit on a per-product
+     gradient that arrives from `productBrandAssets` and is a fixed light
+     image in both themes. Ink-on-white is what makes those read as the
+     product's own mark; a dark theme that inverted them would make the
+     monogram look like a hole in the tile.
+
+     So these are declared once and deliberately identical in both palettes.
+     Putting them here rather than inlining them in the catalogue means the
+     exception is stated in the one file whose job is stating exceptions, and
+     a reader of the catalogue sees four tokens instead of four magic numbers
+     that each had to be re-decided. */
+  --fx-art-plate: rgba(255, 255, 255, 0.92);
+  --fx-art-plate-ink: #0b0e1a;
+  --fx-art-scrim: rgba(0, 0, 0, 0.7);
+  --fx-art-scrim-ink: #f2f5ff;
+  --fx-art-drop: rgba(2, 6, 23, 0.45);
+  /* The QRIS code's plate. Same reasoning, harder requirement: a scanner
+     resolves the code from the contrast between its dark and light modules,
+     so this one cannot even be translucent. Opaque, in both themes. */
+  --fx-scan-plate: #ffffff;
+
+  /* Ink for text sitting on a fully-saturated accent plate -- the cyan count
+     badge in the rail, the stock dot on a product tile. The plate is the same
+     colour in both palettes, so its ink is too; and it is near-black because
+     white on a light cyan is the one pairing in the whole system that fails
+     contrast outright. */
+  --text-on-accent: #04121a;
 }
 
 /*
@@ -72,25 +169,69 @@
  * called `.kavya-public-dark`, which named a theme hook after the product, so a
  * reader could not tell from the class name that it was generic. `.auth-shell`
  * and `.ui-shell` are the same idea bound to the two components that need it.
+ *
+ * The canvas is midnight rather than black: `#05060b` keeps a trace of blue in
+ * it, which is what stops the aurora from looking like dirt on a dark screen
+ * and what makes a 4% white surface read as *lit* rather than as grey.
  */
 .theme-dark,
 .auth-shell,
 .ui-shell {
-  --bg-canvas: #070708;
-  --bg-raised: #0c0c0f;
-  --surface: #111216;
-  --surface-hover: #17181d;
-  --surface-glass: rgba(8, 8, 9, 0.78);
-  --surface-glass-strong: rgba(13, 13, 15, 0.72);
+  --bg-canvas: #05060b;
+  --bg-raised: rgba(255, 255, 255, 0.028);
+  --surface: rgba(255, 255, 255, 0.042);
+  --surface-hover: rgba(255, 255, 255, 0.072);
+  --surface-glass: rgba(10, 12, 24, 0.58);
+  --surface-glass-strong: rgba(9, 11, 22, 0.78);
 
-  --text-primary: #f4f4f5;
-  --text-secondary: #a1a1aa;
-  --text-muted: #71717a;
-  --text-inverse: #0f172a;
-  --text-on-inverse: #09090b;
+  --text-primary: #f2f5ff;
+  --text-secondary: #a5adc7;
+  --text-muted: #7c86a3;
+  --text-inverse: #0b0e1a;
+  --text-on-inverse: #f2f5ff;
 
-  --border: rgba(255, 255, 255, 0.09);
-  --border-strong: rgba(255, 255, 255, 0.17);
+  --border: rgba(255, 255, 255, 0.075);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 26px;
+  --radius-pill: 999px;
+
+  --space-card: 20px;
+  --space-gutter: 32px;
+  --space-section: 72px;
+
+  --glass-blur: 22px;
+  --glass-blur-strong: 34px;
+
+  --duration-fast: 150ms;
+  --duration-normal: 280ms;
+  --duration-slow: 620ms;
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Shadows on a near-black ground cannot be black -- a black shadow is
+     invisible on black. They are therefore built from the canvas colour and
+     an inner rim light, which is what actually reads as a raised edge. */
+  --shadow-lift: 0 18px 44px -20px rgba(0, 0, 0, 0.72), 0 1px 0 0 rgba(255, 255, 255, 0.045) inset;
+  --shadow-float: 0 34px 80px -28px rgba(0, 0, 0, 0.85), 0 1px 0 0 rgba(255, 255, 255, 0.07) inset;
+  --shadow-glow: 0 0 0 1px rgba(139, 92, 246, 0.34), 0 16px 44px -14px rgba(139, 92, 246, 0.55);
+
+  --fx-aurora-violet: rgba(139, 92, 246, 0.3);
+  --fx-aurora-cyan: rgba(56, 189, 248, 0.2);
+  --fx-aurora-magenta: rgba(236, 72, 153, 0.17);
+  --fx-aurora-ink: rgba(255, 255, 255, 0.045);
+
+  /* Unchanged on purpose -- see the light block's note. A product's own logo
+     does not invert when the product does. */
+  --fx-art-plate: rgba(255, 255, 255, 0.92);
+  --fx-art-plate-ink: #0b0e1a;
+  --fx-art-scrim: rgba(0, 0, 0, 0.7);
+  --fx-art-scrim-ink: #f2f5ff;
+  --fx-art-drop: rgba(2, 6, 23, 0.45);
+  --fx-scan-plate: #ffffff;
+  --text-on-accent: #04121a;
 }
 
 /*

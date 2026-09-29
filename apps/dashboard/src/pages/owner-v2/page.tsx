@@ -220,12 +220,13 @@ export default function OwnerConsoleOverviewPage() {
             <div className="console-chart-wrap" aria-label="Grafik pendapatan tujuh hari">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={revenueSeries} margin={{ top: 12, right: 8, left: -8, bottom: 0 }}>
-                  <defs><linearGradient id="consoleRevenueFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.34} /><stop offset="100%" stopColor="#8b5cf6" stopOpacity={0.01} /></linearGradient></defs>
-                  <CartesianGrid vertical={false} stroke="rgba(255,255,255,.06)" />
-                  <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#71717a", fontSize: 12 }} />
-                  <YAxis axisLine={false} tickLine={false} tick={{ fill: "#71717a", fontSize: 12 }} tickFormatter={(value) => formatRupiahCompact(Number(value))} width={58} />
-                  <Tooltip formatter={(value) => formatRupiah(Number(value))} contentStyle={{ background: "var(--surface)", border: "1px solid var(--border-strong)", borderRadius: 10, color: "var(--text-primary)" }} labelStyle={{ color: "var(--text-secondary)" }} />
-                  <Area type="monotone" dataKey="revenue" stroke="#8b5cf6" strokeWidth={2.2} fill="url(#consoleRevenueFill)" />
+                  {/* Every colour here is a token, including the two that used to be hex. Recharts hands these straight to SVG `stroke`/`stopColor`, which browsers parse as CSS values -- so `var()` resolves, and the chart follows the palette instead of pinning itself to the violet and the zinc it was written against. The tick fill was `#71717a`, which was never any of the app's greys. */}
+                  <defs><linearGradient id="consoleRevenueFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--accent-violet)" stopOpacity={0.34} /><stop offset="100%" stopColor="var(--accent-violet)" stopOpacity={0.01} /></linearGradient></defs>
+                  <CartesianGrid vertical={false} stroke="var(--border)" />
+                  <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "var(--text-muted)", fontSize: 12 }} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fill: "var(--text-muted)", fontSize: 12 }} tickFormatter={(value) => formatRupiahCompact(Number(value))} width={58} />
+                  <Tooltip formatter={(value) => formatRupiah(Number(value))} contentStyle={{ background: "var(--surface-glass-strong)", border: "1px solid var(--border-strong)", borderRadius: 10, color: "var(--text-primary)" }} labelStyle={{ color: "var(--text-secondary)" }} />
+                  <Area type="monotone" dataKey="revenue" stroke="var(--accent-violet)" strokeWidth={2.2} fill="url(#consoleRevenueFill)" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>

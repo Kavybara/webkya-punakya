@@ -3,24 +3,26 @@
    nothing else. Shared surfaces (panel frame, metric row, field, detail row,
    badge, notice, state) come from the design kit, which is already loaded by
    the shell -- so the rules here are the spacing and the two or three pieces of
-   this page's own shape, not a second skin for the same components. */
+   this page's own shape, not a second skin for the same components.
+
+   The one structural change: the claim form's submit button was the last place
+   in the app where a primary action was a saturated violet fill. It is now the
+   same near-white plate every other primary button uses, so "this is the thing
+   you press" means one thing across the product. */
 
 .reseller-v2-warranty-loading {
-  margin-top: 12px;
+  margin-top: 14px;
   padding: 22px;
   border: 1px solid var(--border);
-  border-radius: 11px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
 }
 
-/* The one line that says what pressing the button will act on. It is the
-   cheapest possible way to stop a claim being filed against the wrong account
-   after a select changes, so it sits above the form rather than inside it. */
 .reseller-v2-warranty-target {
-  margin: 12px 0 0;
-  padding: 10px 13px;
+  margin: 14px 0 0;
+  padding: 11px 14px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   background: var(--bg-raised);
   color: var(--text-secondary);
   font-size: 12px;
@@ -33,7 +35,7 @@
 }
 
 .reseller-v2-warranty-panel {
-  margin-top: 12px;
+  margin-top: 14px;
 }
 
 .reseller-v2-warranty-panel > header {
@@ -54,24 +56,24 @@
 
 .reseller-v2-warranty-panel-note {
   margin: 0;
-  padding: 12px 18px;
+  padding: 14px 20px;
   border-bottom: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--bg-raised);
   color: var(--text-secondary);
   font-size: 12px;
-  line-height: 1.55;
+  line-height: 1.6;
 }
 
 .reseller-v2-warranty-form {
   display: grid;
-  gap: 16px;
-  padding: 18px;
+  gap: 18px;
+  padding: 20px;
 }
 
 .reseller-v2-warranty-selected {
-  padding: 15px;
+  padding: 17px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--bg-raised);
 }
 
@@ -80,7 +82,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 13px;
+  margin-bottom: 15px;
 }
 
 .reseller-v2-warranty-selected-head > div {
@@ -110,7 +112,7 @@
 .reseller-v2-warranty-details {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  column-gap: 24px;
+  column-gap: 26px;
   margin: 0;
 }
 
@@ -124,7 +126,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 8px 0 0;
+  margin: 9px 0 0;
   color: var(--text-secondary);
   font-size: 11px;
   line-height: 1.5;
@@ -138,9 +140,9 @@
 
 .reseller-v2-warranty-evidence input[type="file"]::file-selector-button {
   margin-right: 11px;
-  padding: 0 13px;
+  padding: 0 14px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text-primary);
   font: inherit;
@@ -148,40 +150,48 @@
   font-weight: 700;
   cursor: pointer;
   transition:
-    border-color 150ms ease,
-    background-color 150ms ease;
+    border-color var(--duration-normal) var(--ease-out-expo),
+    background var(--duration-normal) var(--ease-out-expo),
+    transform var(--duration-normal) var(--ease-out-expo),
+    box-shadow 260ms var(--ease-out-expo);
 }
 
 .reseller-v2-warranty-evidence input[type="file"]::file-selector-button:hover {
   border-color: var(--border-strong);
   background: var(--surface-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lift);
 }
 
 .reseller-v2-warranty-submit {
   display: inline-flex;
-  min-height: 48px;
+  min-height: 50px;
   align-items: center;
   justify-content: center;
   gap: 9px;
   border: 0;
-  border-radius: 10px;
-  background: var(--accent-violet);
-  color: #fff;
+  border-radius: var(--radius-sm);
+  background: var(--text-primary);
+  color: var(--text-on-inverse);
   font: inherit;
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
   transition:
-    background-color 150ms ease,
-    transform 150ms ease;
+    background-color var(--duration-normal) var(--ease-out-expo),
+    transform var(--duration-normal) var(--ease-out-expo),
+    box-shadow 260ms var(--ease-out-expo),
+    opacity var(--duration-fast) var(--ease-out-expo);
 }
 
 .reseller-v2-warranty-submit:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent-violet) 86%, #fff);
+  background: color-mix(in srgb, var(--text-primary) 58%, white);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lift);
 }
 
 .reseller-v2-warranty-submit:active:not(:disabled) {
-  transform: translateY(0.5px);
+  transform: translateY(0);
 }
 
 .reseller-v2-warranty-submit:disabled {
@@ -200,7 +210,7 @@
 }
 
 .reseller-v2-warranty-history {
-  margin-top: 12px;
+  margin-top: 14px;
 }
 
 .reseller-v2-warranty-claims {
@@ -212,7 +222,7 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 14px;
-  padding: 15px 18px;
+  padding: 16px 20px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -238,19 +248,19 @@
   margin-top: 5px;
   color: var(--text-muted);
   font-size: 11px;
-  line-height: 1.5;
+  line-height: 1.55;
   overflow-wrap: anywhere;
 }
 
 .reseller-v2-warranty-claim-note {
-  margin: 8px 0 0;
-  padding: 9px 11px;
+  margin: 9px 0 0;
+  padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--bg-raised);
   color: var(--text-secondary);
   font-size: 11.5px;
-  line-height: 1.55;
+  line-height: 1.6;
 }
 
 .reseller-v2-warranty-claim-note b {
@@ -261,7 +271,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 8px 0 0;
+  margin: 9px 0 0;
   color: var(--text-muted);
   font-size: 10.5px;
 }
@@ -274,7 +284,7 @@
 
   .reseller-v2-warranty-form,
   .reseller-v2-warranty-panel-note {
-    padding: 15px;
+    padding: 16px;
   }
 
   .reseller-v2-warranty-details {

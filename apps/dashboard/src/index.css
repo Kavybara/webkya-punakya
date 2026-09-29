@@ -1,3 +1,18 @@
+/*
+ * The document defaults, and nothing else.
+ *
+ * Everything a page is made of lives in the kit -- `components/ui/ui.css` for
+ * the vocabulary, `components/ui/shell.css` for the signed-in frame,
+ * `styles/tokens.css` for the palette. What stays here is the handful of
+ * things that have to be true before any of that loads: the reset, the font
+ * stack, the scroll offset for anchor links, the 44px touch-target floor on
+ * a phone, and the motion opt-out.
+ *
+ * The keyframes at the bottom are the ones the public marketing pages
+ * reference by name; the kit has its own, and the two sets do not overlap on
+ * purpose so a rename in one file cannot silently stop the other.
+ */
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -196,11 +211,6 @@ textarea {
     transform: translate(-50%, -18px);
   }
 }
-
-
-
-
-
 
 
 

@@ -41,11 +41,11 @@ function SpotlightProductCard({ children }: { children: ReactNode }) {
       variants={productCardVariants}
       onPointerMove={onPointerMove}
       onPointerLeave={() => opacity.set(0)}
-      whileHover={reduceMotion ? undefined : { y: -4, borderColor: "var(--border-strong)" }}
-      className="relative overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface)] [contain:layout_paint_style] [content-visibility:auto] [contain-intrinsic-size:360px]"
+      whileHover={reduceMotion ? undefined : { y: -4 }}
+      className="home-product-card"
       data-product-shop
     >
-      <motion.div className="pointer-events-none absolute inset-0" style={{ backgroundImage: spotlight, opacity }} aria-hidden="true" />
+      <motion.div className="home-spotlight" style={{ backgroundImage: spotlight, opacity }} aria-hidden="true" />
       <div className="relative">{children}</div>
     </motion.article>
   );
@@ -114,7 +114,7 @@ export default function ProductCatalog() {
         ) : loadError ? (
           <div role="alert" className="flex max-w-2xl flex-col gap-4 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-raised)] text-[var(--text-secondary)]"><WifiOff size={18} aria-hidden="true" /></span><div><h3 className="font-extrabold text-[var(--text-primary)]">Katalog belum tersedia</h3><p className="mt-1 text-sm leading-5 text-[var(--text-secondary)]">{loadError}</p></div></div>
-            <button type="button" onClick={() => { setLoading(true); setRefreshKey((value) => value + 1); }} className="min-h-11 shrink-0 rounded-full bg-[var(--text-primary)] px-5 text-sm font-extrabold text-[var(--bg-canvas)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">Coba Lagi</button>
+            <button type="button" onClick={() => { setLoading(true); setRefreshKey((value) => value + 1); }} className="home-cta min-h-11 shrink-0 text-sm">Coba Lagi</button>
           </div>
         ) : readyProducts.length ? (
           <motion.div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4" variants={catalogGridVariants} initial={reduceMotion ? false : "hidden"} animate="visible">
@@ -137,7 +137,7 @@ export default function ProductCatalog() {
                    <div className="p-5">
                      <h3 className="text-lg font-extrabold text-[var(--text-primary)]">{product.name}</h3>
                      <div className="mt-5"><p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Mulai dari</p><p className="mt-1 text-xl font-black text-[var(--text-primary)]">{price ? formatRupiah(price) : "Belum diatur"}</p></div>
-                     {isReady ? <Link to={resellerCatalogLoginPath} className="group mt-5 flex min-h-11 items-center justify-center gap-2 rounded-full bg-[var(--text-primary)] text-sm font-extrabold text-[var(--bg-canvas)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">Lihat Paket<ArrowRight size={16} className="transition-transform group-hover:translate-x-[3px]" aria-hidden="true" /></Link> : <button type="button" disabled className="mt-5 flex min-h-11 w-full cursor-not-allowed items-center justify-center rounded-full border border-[var(--border)] text-sm font-bold text-[var(--text-muted)]">Stok Habis</button>}
+                     {isReady ? <Link to={resellerCatalogLoginPath} className="home-cta group mt-5 min-h-11 w-full text-sm">Lihat Paket<ArrowRight size={16} className="transition-transform group-hover:translate-x-[3px]" aria-hidden="true" /></Link> : <button type="button" disabled className="home-cta-ghost mt-5 min-h-11 w-full cursor-not-allowed text-sm text-[var(--text-muted)]">Stok Habis</button>}
                   </div>
                 </SpotlightProductCard>
               );
@@ -147,7 +147,7 @@ export default function ProductCatalog() {
           <div className="flex max-w-2xl items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-5"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-raised)] text-[var(--text-secondary)]"><Archive size={18} aria-hidden="true" /></span><div><h3 className="font-extrabold">Belum ada produk aktif</h3><p className="mt-1 text-sm leading-5 text-[var(--text-secondary)]">Produk akan muncul setelah diaktifkan dari dashboard.</p></div></div>
         )}
 
-        <div className="mt-7"><Link to={resellerCatalogLoginPath} className="group inline-flex min-h-11 items-center gap-2 rounded-full border border-[var(--border)] px-5 text-sm font-bold text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">Lihat semua produk<ArrowRight size={16} className="transition-transform group-hover:translate-x-[3px]" aria-hidden="true" /></Link></div>
+        <div className="mt-7"><Link to={resellerCatalogLoginPath} className="home-cta-ghost group min-h-11 text-sm">Lihat semua produk<ArrowRight size={16} className="transition-transform group-hover:translate-x-[3px]" aria-hidden="true" /></Link></div>
       </div>
     </section>
   );

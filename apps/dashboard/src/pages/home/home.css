@@ -1,0 +1,166 @@
+/*
+ * The landing page's own surfaces.
+ *
+ * Everything else on this page is Tailwind utilities against tokens, which is
+ * the right tool for spacing and type. It is the wrong tool for the four
+ * things below, because each needs a value the arbitrary-value syntax has to
+ * encode by hand: a backdrop blur, an elevation, a gradient that mixes two
+ * tokens, and a pair of button states that have to agree with every other
+ * primary button in the product. Those are the reasons this file exists and
+ * the reasons nothing else from the page moved into it.
+ */
+
+/* The bento tile.
+ *
+ * This was `#080808` with a hand-written `rgba(255,255,255,0.11)` border --
+ * an opaque black box on a near-black page, which is the single reason the
+ * marketing page read as a template even though the marketing page was the
+ * part that already had a grid overlay and a spotlight. It is glass now, so the
+ * aurora the shell paints behind the whole document continues *through* it
+ * and the bento stops being a set of tiles laid on the background. */
+.home-bento-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-lift);
+  backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+  transition:
+    border-color var(--duration-normal) var(--ease-out-expo),
+    background var(--duration-normal) var(--ease-out-expo),
+    box-shadow var(--duration-normal) var(--ease-out-expo);
+}
+
+.home-bento-card:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+  box-shadow: var(--shadow-float);
+}
+
+/* The pointer-following wash. Kept as its own element because it is driven by
+   two motion values written from a pointer handler, not by a class change. */
+.home-spotlight {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* The product card.
+ *
+ * Same material as the bento tile, and it needs its own rule rather than a
+ * shared one for a performance reason: a `backdrop-filter` is a per-element
+ * surface read, and the bento's three large tiles are far cheaper to blur than
+ * a four-up grid of small ones is to keep correct while the list scrolls.
+
+   It also drops the `content-visibility: auto` and its `contain-intrinsic-size`
+   that used to sit on this element. The list is sliced to four products before
+   it renders, so there was never a long list for the browser to skip past --
+   the declarations were reserving space for content that could not arrive. */
+.home-product-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-glass);
+  box-shadow: var(--shadow-lift);
+  backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+  transition:
+    border-color var(--duration-normal) var(--ease-out-expo),
+    background var(--duration-normal) var(--ease-out-expo),
+    box-shadow var(--duration-normal) var(--ease-out-expo);
+}
+
+.home-product-card:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+  box-shadow: var(--shadow-float);
+}
+
+/* A node on the order timeline.
+ *
+ * It sits on top of a gradient line and has to be opaque in the middle or the
+ * line shows through its face. `--bg-canvas` is the only opaque fill the
+ * public pages have, and using it here reads as a cut-out in the line rather
+ * than as a second card. */
+.home-stage-node {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  height: 36px;
+  width: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--bg-canvas);
+}
+
+/* The two calls to action.
+ *
+ * The primary is the same near-white plate the sign-in button, the owner
+ * console's save row and the reseller's top-up all use, and it hovers the
+ * same way. That consistency is the entire argument for this block existing:
+ * before it, the landing page's primary button went to literal white on hover
+ * while every other primary in the product went somewhere else. */
+.home-cta {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 24px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--text-primary);
+  color: var(--bg-canvas);
+  font-size: 15px;
+  font-weight: 800;
+  text-decoration: none;
+  transition:
+    background-color var(--duration-normal) var(--ease-out-expo),
+    transform var(--duration-normal) var(--ease-out-expo),
+    box-shadow 260ms var(--ease-out-expo);
+}
+
+.home-cta:hover {
+  background: color-mix(in srgb, var(--text-primary) 58%, white);
+  color: var(--bg-canvas);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lift);
+}
+
+.home-cta-ghost {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+  backdrop-filter: blur(var(--glass-blur));
+  transition:
+    background-color var(--duration-normal) var(--ease-out-expo),
+    border-color var(--duration-normal) var(--ease-out-expo),
+    transform var(--duration-normal) var(--ease-out-expo),
+    box-shadow 260ms var(--ease-out-expo);
+}
+
+.home-cta-ghost:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lift);
+}
+
+.home-cta:focus-visible,
+.home-cta-ghost:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 3px;
+}

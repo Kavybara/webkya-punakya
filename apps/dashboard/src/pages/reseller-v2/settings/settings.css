@@ -6,20 +6,26 @@
  * kit, so what is here is the arrangement this page needs and the four
  * affordances the kit does not ship: a section tab rail, a read-only
  * field treatment, a save row, and the current-session line.
+ *
+ * The save button is the third and last place that still filled itself
+ * with the violet accent. It is now the same near-white plate as every
+ * other primary action in the product, which is the whole point of doing
+ * this pass: a reader who has pressed Save in one console should not have
+ * to learn a new colour in the next.
  * ------------------------------------------------------------------ */
 
 .reseller-v2-settings-layout {
   display: grid;
-  grid-template-columns: 272px minmax(0, 1fr);
+  grid-template-columns: 280px minmax(0, 1fr);
   align-items: start;
-  gap: 16px;
-  margin-top: 16px;
+  gap: 18px;
+  margin-top: 18px;
 }
 
 .reseller-v2-settings-content {
   display: grid;
   min-width: 0;
-  gap: 16px;
+  gap: 18px;
 }
 
 /* ------------------------------------------------------------------ *
@@ -28,8 +34,8 @@
 
 .reseller-v2-settings-aside {
   position: sticky;
-  top: 24px;
-  padding: 10px;
+  top: 28px;
+  padding: 12px;
 }
 
 .reseller-v2-settings-identity {
@@ -37,9 +43,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 11px 12px;
+  padding: 12px 13px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   background: var(--bg-raised);
 }
 .reseller-v2-settings-identity > div { min-width: 0; }
@@ -65,16 +71,16 @@
 .reseller-v2-settings-tabs {
   display: grid;
   gap: 3px;
-  margin-top: 8px;
+  margin-top: 10px;
 }
 .reseller-v2-settings-tabs button {
   display: flex;
   min-height: 44px;
   align-items: center;
   gap: 10px;
-  padding: 0 12px;
-  border: 0;
-  border-radius: 9px;
+  padding: 0 13px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--text-secondary);
   font: inherit;
@@ -83,8 +89,9 @@
   text-align: left;
   cursor: pointer;
   transition:
-    background-color 140ms ease,
-    color 140ms ease;
+    background-color var(--duration-normal) var(--ease-out-expo),
+    color var(--duration-normal) var(--ease-out-expo),
+    box-shadow 260ms var(--ease-out-expo);
 }
 .reseller-v2-settings-tabs button:hover {
   background: var(--surface-hover);
@@ -93,6 +100,7 @@
 .reseller-v2-settings-tabs button.is-active {
   background: color-mix(in srgb, var(--accent-violet) 16%, transparent);
   color: var(--text-primary);
+  box-shadow: var(--shadow-lift);
 }
 .reseller-v2-settings-tabs button:focus-visible {
   outline: 2px solid var(--accent-cyan);
@@ -106,17 +114,17 @@
 .reseller-v2-settings-panel header > div { min-width: 0; }
 .reseller-v2-settings-panel header h2 { color: var(--text-primary); }
 .reseller-v2-settings-panel header p {
-  margin: 5px 0 0;
+  margin: 6px 0 0;
   color: var(--text-secondary);
   font-size: 11.5px;
-  line-height: 1.5;
+  line-height: 1.55;
 }
 .reseller-v2-settings-panel header > i {
   display: inline-flex;
   flex: 0 0 auto;
   color: var(--accent-violet);
 }
-.reseller-v2-settings-panel-body { padding: 18px; }
+.reseller-v2-settings-panel-body { padding: 20px; }
 
 /* The identity form reads as a record first and an editor second; a
    locked field that looks like an editable one invites a click that
@@ -127,11 +135,11 @@
   cursor: default;
 }
 
-.reseller-v2-settings-form { display: grid; gap: 16px; }
+.reseller-v2-settings-form { display: grid; gap: 18px; }
 .reseller-v2-settings-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 16px;
 }
 .reseller-v2-settings-form-grid.is-single { grid-template-columns: minmax(0, 1fr); }
 
@@ -139,18 +147,18 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
 }
 
 .reseller-v2-settings-button {
   display: inline-flex;
-  min-height: 38px;
+  min-height: 42px;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 0 15px;
+  padding: 0 16px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   background: var(--bg-raised);
   color: var(--text-secondary);
   font: inherit;
@@ -158,13 +166,18 @@
   font-weight: 700;
   cursor: pointer;
   transition:
-    background-color 140ms ease,
-    border-color 140ms ease,
-    color 140ms ease;
+    background-color var(--duration-normal) var(--ease-out-expo),
+    border-color var(--duration-normal) var(--ease-out-expo),
+    color var(--duration-normal) var(--ease-out-expo),
+    transform var(--duration-normal) var(--ease-out-expo),
+    box-shadow 260ms var(--ease-out-expo);
 }
 .reseller-v2-settings-button:hover:not(:disabled) {
   border-color: var(--border-strong);
+  background: var(--surface-hover);
   color: var(--text-primary);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lift);
 }
 .reseller-v2-settings-button:disabled { cursor: not-allowed; opacity: 0.55; }
 .reseller-v2-settings-button:focus-visible {
@@ -172,17 +185,17 @@
   outline-offset: 2px;
 }
 .reseller-v2-settings-button.is-primary {
-  border-color: var(--accent-violet);
-  background: var(--accent-violet);
-  color: #150f2e;
+  border-color: transparent;
+  background: var(--text-primary);
+  color: var(--text-on-inverse);
 }
 .reseller-v2-settings-button.is-primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent-violet) 86%, #fff);
+  background: color-mix(in srgb, var(--text-primary) 58%, white);
 }
 .reseller-v2-settings-button.is-danger {
   border-color: color-mix(in srgb, var(--status-danger) 42%, transparent);
   background: color-mix(in srgb, var(--status-danger) 12%, transparent);
-  color: color-mix(in srgb, var(--status-danger) 72%, var(--text-primary));
+  color: color-mix(in srgb, var(--status-danger) 42%, var(--text-primary));
 }
 .reseller-v2-settings-button.is-danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--status-danger) 20%, transparent);
@@ -190,24 +203,26 @@
 
 .reseller-v2-settings-icon-button {
   display: inline-grid;
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   flex: 0 0 auto;
   place-items: center;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   background: var(--bg-raised);
   color: var(--text-secondary);
   cursor: pointer;
   transition:
-    background-color 140ms ease,
-    border-color 140ms ease,
-    color 140ms ease;
+    background-color var(--duration-normal) var(--ease-out-expo),
+    border-color var(--duration-normal) var(--ease-out-expo),
+    color var(--duration-normal) var(--ease-out-expo),
+    transform var(--duration-normal) var(--ease-out-expo);
 }
 .reseller-v2-settings-icon-button:hover {
   border-color: color-mix(in srgb, var(--accent-violet) 58%, transparent);
   background: color-mix(in srgb, var(--accent-violet) 16%, transparent);
   color: var(--text-primary);
+  transform: translateY(-1px);
 }
 .reseller-v2-settings-icon-button:focus-visible {
   outline: 2px solid var(--accent-cyan);
@@ -225,9 +240,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 13px 14px;
+  padding: 15px 16px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--bg-raised);
 }
 .reseller-v2-settings-session > div {
@@ -267,7 +282,7 @@
 
 @media (max-width: 640px) {
   .reseller-v2-settings-form-grid { grid-template-columns: minmax(0, 1fr); }
-  .reseller-v2-settings-panel-body { padding: 15px; }
+  .reseller-v2-settings-panel-body { padding: 16px; }
   .reseller-v2-settings-actions > .reseller-v2-settings-button { flex: 1; }
 }
 

@@ -1,11 +1,40 @@
+/*
+ * The reseller console.
+ *
+ * This is the screen that was hardest to like. It was a set of grey boxes
+ * with 11px corners and 1px lines between them, packed at 12px, carrying a
+ * great deal of real data -- and the density is not the problem. The problem
+ * is that every region of the page announced itself with an outline, so the
+ * reader's eye had to sort twelve equally-loud boxes instead of finding the
+ * two that mattered. It read as a template because that is what a template
+ * is: a grid, outlined.
+ *
+ * Three changes, all in service of one idea -- the reader should be able to
+ * tell what is a *region* from what is a *control*:
+ *
+ *   1. Panels are glass. `.reseller-v2-panel` and `.reseller-v2-metric` are
+ *      translucent sheets over the aurora, separated by what is behind them
+ *      rather than by a line. Line spacing is at 18px where it was 12, and
+ *      the metric tiles are 20px inside rather than 16, because once the
+ *      edges stop carrying the structure the interior has to.
+ *   2. Only things you can press move. A metric tile that navigates lifts
+ *      and casts a shadow; a metric tile that is a label does not. Getting
+ *      that distinction right is most of what separates a control surface
+ *      from a dashboard.
+ *   3. Accents are earned. The violet that was a fixed `#a78bfa` eyebrow
+ *      colour is now the token, and it only appears where something is
+ *      selected, live, or new.
+ */
+
 .reseller-v2-side-balance {
   display: grid;
   gap: 8px;
-  margin: 14px;
-  padding: 13px;
+  margin: 16px;
+  padding: 15px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--surface);
+  backdrop-filter: blur(var(--glass-blur));
 }.reseller-v2-side-balance > span {
   display: flex;
   align-items: center;
@@ -14,35 +43,38 @@
   font-size: 11px;
 }.reseller-v2-side-balance strong {
   overflow: hidden;
-  font-size: 17px;
+  font-size: 18px;
   text-overflow: ellipsis;
 }.reseller-v2-side-balance .reseller-v2-balance-link {
   color: var(--text-primary);
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 750;
   text-decoration: none;
 }.reseller-v2-side-balance > button {
   display: flex;
-  min-height: 34px;
+  min-height: 36px;
   align-items: center;
   justify-content: center;
   gap: 5px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: var(--text-primary);
   color: var(--text-on-inverse);
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
-}.reseller-v2-topup {
+  transition: background 200ms var(--ease-out-expo), transform 200ms var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo);
+}
+.reseller-v2-side-balance > button:hover { background: color-mix(in srgb, var(--text-primary) 58%, white); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.reseller-v2-topup {
   display: inline-flex;
   height: 40px;
   flex: 0 0 auto;
   align-items: center;
   gap: 5px;
-  padding: 0 14px;
+  padding: 0 15px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--text-primary);
   color: var(--text-on-inverse);
   font-size: 11px;
@@ -51,153 +83,191 @@
   text-decoration: none;
   white-space: nowrap;
   cursor: pointer;
-}.reseller-v2-top-balance {
+  transition: background 200ms var(--ease-out-expo), transform 200ms var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo);
+}
+.reseller-v2-topup:hover { background: color-mix(in srgb, var(--text-primary) 58%, white); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.reseller-v2-top-balance {
   display: inline-flex;
   min-height: 38px;
   align-items: center;
   gap: 6px;
-  padding: 0 10px;
+  padding: 0 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  backdrop-filter: blur(var(--glass-blur));
   color: var(--text-secondary);
   font-size: 11px;
   font-weight: 650;
   white-space: nowrap;
-}.reseller-v2-panel header > span,
+}
+.reseller-v2-panel header > span,
 .reseller-v2-panel header div > span {
   margin: 0 0 7px;
-  color: #a78bfa;
+  color: var(--accent-violet);
   font-size: 9px;
   font-weight: 750;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-}.reseller-v2-greeting {
-  margin-bottom: 18px;
+}
+.reseller-v2-greeting {
+  margin-bottom: 24px;
 }.reseller-v2-greeting span {
   color: var(--text-primary);
   font-size: 14px;
   font-weight: 650;
-}.reseller-v2-greeting p {
+}
+.reseller-v2-greeting p {
   margin: 3px 0 0;
   color: var(--text-muted);
   font-size: 11px;
-}.reseller-v2-summary-grid {
+}
+.reseller-v2-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}.reseller-v2-metric {
+  gap: 16px;
+}
+.reseller-v2-metric {
   display: block;
   min-width: 0;
-  min-height: 128px;
-  padding: 16px;
+  min-height: 134px;
+  padding: 20px;
   border: 1px solid var(--border);
-  border-radius: 11px;
-  background: var(--surface);
+  border-radius: var(--radius-lg);
+  background: var(--surface-glass);
+  backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
+  box-shadow: var(--shadow-lift);
   color: inherit;
   text-align: left;
-}.reseller-v2-metric.is-interactive {
+  transition: transform var(--duration-normal) var(--ease-out-expo), border-color var(--duration-normal) var(--ease-out-expo), background var(--duration-normal) var(--ease-out-expo), box-shadow var(--duration-normal) var(--ease-out-expo);
+}
+/* Only the tiles you can click move. The rest get a still frame, so a hover
+   across the row tells the reader which four numbers are links. */
+.reseller-v2-metric.is-interactive {
   cursor: pointer;
-  transition:
-    transform 160ms ease,
-    border-color 160ms ease,
-    background 160ms ease;
-}.reseller-v2-metric.is-interactive:hover {
-  transform: translateY(-2px);
+}
+.reseller-v2-metric.is-interactive:hover {
+  transform: translateY(-3px);
   border-color: var(--border-strong);
   background: var(--surface-hover);
-}.reseller-v2-metric > strong {
+  box-shadow: var(--shadow-float);
+}
+.reseller-v2-metric.is-interactive:active { transform: translateY(-1px); }
+.reseller-v2-metric > strong {
   display: block;
-  margin-top: 15px;
-  font-size: 23px;
+  margin-top: 18px;
+  font-size: 24px;
   line-height: 1;
-}.reseller-v2-metric > small {
+}
+.reseller-v2-metric > small {
   display: block;
-  margin-top: 9px;
+  margin-top: 10px;
   color: var(--text-muted);
   font-size: 10px;
-}.reseller-v2-overview-grid {
+}
+.reseller-v2-overview-grid {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 12px;
-}.reseller-v2-panel {
+  gap: 18px;
+  margin-top: 18px;
+}
+.reseller-v2-panel {
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 11px;
-  background: var(--surface);
-}.reseller-v2-account-summary {
+  border-radius: var(--radius-lg);
+  background: var(--surface-glass);
+  backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
+  box-shadow: var(--shadow-lift);
+}
+.reseller-v2-account-summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 12px;
-}.reseller-v2-account-summary article {
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.reseller-v2-account-summary article {
   display: grid;
-  min-height: 112px;
+  min-height: 118px;
   grid-template-columns: auto 1fr;
   align-items: center;
   gap: 8px 10px;
-  padding: 17px;
+  padding: 20px;
   border: 1px solid var(--border);
-  border-radius: 11px;
-  background: var(--surface);
-}.reseller-v2-account-summary article svg {
+  border-radius: var(--radius-lg);
+  background: var(--surface-glass);
+  backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
+  box-shadow: var(--shadow-lift);
+  transition: border-color var(--duration-normal) var(--ease-out-expo), background var(--duration-normal) var(--ease-out-expo), box-shadow var(--duration-normal) var(--ease-out-expo);
+}
+.reseller-v2-account-summary article:hover { border-color: var(--border-strong); background: var(--surface-hover); box-shadow: var(--shadow-float); }
+.reseller-v2-account-summary article svg {
   color: var(--accent-cyan);
-}.reseller-v2-account-summary article span {
+}
+.reseller-v2-account-summary article span {
   color: var(--text-secondary);
   font-size: 12px;
-}.reseller-v2-account-summary article strong {
+}
+.reseller-v2-account-summary article strong {
   grid-column: 1 / -1;
-  font-size: 25px;
-}.reseller-v2-accounts-toolbar {
+  font-size: 26px;
+}
+.reseller-v2-accounts-toolbar {
   display: grid;
   gap: 12px;
-  padding: 14px;
+  padding: 18px;
   border-bottom: 1px solid var(--border);
-}.reseller-v2-accounts-toolbar label {
+}
+.reseller-v2-accounts-toolbar label {
   display: flex;
   min-height: 44px;
   align-items: center;
   gap: 9px;
-  padding: 0 12px;
+  padding: 0 13px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   background: var(--bg-raised);
+  backdrop-filter: blur(var(--glass-blur));
   color: var(--text-muted);
-}.reseller-v2-accounts-toolbar input {
+  transition: border-color var(--duration-normal) var(--ease-out-expo), background var(--duration-normal) var(--ease-out-expo);
+}
+.reseller-v2-accounts-toolbar label:focus-within { border-color: var(--border-strong); background: var(--surface-hover); }
+.reseller-v2-accounts-toolbar input {
   width: 100%;
   border: 0;
   outline: 0;
   background: transparent;
   color: var(--text-primary);
-}.reseller-v2-account-view-tabs {
+}
+.reseller-v2-account-view-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-}.reseller-v2-account-view-tabs button {
+}
+.reseller-v2-account-view-tabs button {
   display: inline-flex;
   min-height: 36px;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 0 12px;
+  padding: 0 13px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-pill);
   background: var(--bg-raised);
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 750;
   cursor: pointer;
-  transition:
-    border-color 140ms ease,
-    background-color 140ms ease,
-    color 140ms ease;
-}.reseller-v2-account-view-tabs button:hover,
+  transition: border-color var(--duration-normal) var(--ease-out-expo), background-color var(--duration-normal) var(--ease-out-expo), color var(--duration-normal) var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo);
+}
+.reseller-v2-account-view-tabs button:hover,
 .reseller-v2-account-view-tabs button.is-active {
   border-color: color-mix(in srgb, var(--accent-violet) 58%, transparent);
   background: color-mix(in srgb, var(--accent-violet) 16%, transparent);
   color: var(--text-primary);
-}.reseller-v2-account-view-tabs button span {
+}
+.reseller-v2-account-view-tabs button.is-active { box-shadow: var(--shadow-glow); }
+.reseller-v2-account-view-tabs button span {
   display: inline-flex;
   min-width: 22px;
   min-height: 22px;
@@ -205,23 +275,27 @@
   justify-content: center;
   padding: 0 7px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-raised);
   color: inherit;
   font-size: 11px;
-}.reseller-v2-accounts-loading {
+}
+.reseller-v2-accounts-loading {
   padding: 22px;
-}.reseller-v2-accounts-freshness {
+}
+.reseller-v2-accounts-freshness {
   margin: 0;
-  padding: 10px 12px;
+  padding: 11px 13px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--bg-raised);
   color: var(--text-secondary);
   font-size: 12px;
   line-height: 1.5;
-}.reseller-v2-account-list {
+}
+.reseller-v2-account-list {
   display: grid;
-}.reseller-v2-account-list-head {
+}
+.reseller-v2-account-list-head {
   display: grid;
   grid-template-columns:
     minmax(210px, 1.25fr)
@@ -230,18 +304,19 @@
     minmax(190px, 0.85fr)
     minmax(180px, auto);
   gap: 16px;
-  padding: 12px 16px;
+  padding: 13px 18px;
   border-bottom: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--bg-raised);
   color: var(--text-muted);
   font-size: 10px;
   font-weight: 800;
   text-transform: uppercase;
 }.reseller-v2-account-list-head span:last-child {
   text-align: right;
-}.reseller-v2-account-list > button {
+}
+.reseller-v2-account-list > button {
   display: grid;
-  min-height: 72px;
+  min-height: 74px;
   grid-template-columns:
     minmax(210px, 1.25fr)
     minmax(190px, 1fr)
@@ -250,224 +325,274 @@
     minmax(180px, auto);
   align-items: center;
   gap: 16px;
-  padding: 13px 16px;
+  padding: 14px 18px;
   border: 0;
   border-bottom: 1px solid var(--border);
   background: transparent;
   color: var(--text-secondary);
   text-align: left;
   cursor: pointer;
-}.reseller-v2-account-list > button:hover {
+  transition: background 200ms var(--ease-out-expo);
+}
+.reseller-v2-account-list > button:hover {
   background: var(--surface-hover);
-}.reseller-v2-account-list > button > span {
+}
+.reseller-v2-account-list > button > span {
   min-width: 0;
   overflow-wrap: anywhere;
   line-height: 1.45;
-}.reseller-v2-account-list > button:last-child {
+}
+.reseller-v2-account-list > button:last-child {
   border-bottom: 0;
-}.reseller-v2-account-list strong,
+}
+.reseller-v2-account-list strong,
 .reseller-v2-account-list small {
   display: block;
-}.reseller-v2-account-list strong {
+}
+.reseller-v2-account-list strong {
   color: var(--text-primary);
   font-size: 13px;
-}.reseller-v2-account-badges {
+}
+.reseller-v2-account-badges {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
   flex-wrap: wrap;
-}.reseller-v2-new-badge {
+}
+.reseller-v2-new-badge {
   display: inline-flex;
   margin-left: 7px;
-  padding: 2px 6px;
+  padding: 2px 7px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent-violet) 18%, transparent);
-  color: #c4b5fd;
+  color: color-mix(in srgb, var(--accent-violet) 34%, var(--text-primary));
   font-size: 9px;
   font-style: normal;
   font-weight: 750;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-}.reseller-v2-purchase-banner {
+}
+.reseller-v2-purchase-banner {
   display: flex;
-  min-height: 64px;
+  min-height: 68px;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 14px 16px;
+  padding: 16px 18px;
   border: 1px solid color-mix(in srgb, var(--status-success) 22%, transparent);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: color-mix(in srgb, var(--status-success) 6%, transparent);
-}.reseller-v2-purchase-banner div,
+}
+.reseller-v2-purchase-banner div,
 .reseller-v2-purchase-banner span {
   display: block;
-}.reseller-v2-purchase-banner strong {
+}
+.reseller-v2-purchase-banner strong {
   color: var(--text-primary);
   font-size: 14px;
-}.reseller-v2-purchase-banner span {
+}
+.reseller-v2-purchase-banner span {
   margin-top: 4px;
   color: var(--text-secondary);
   font-size: 13px;
-}.reseller-v2-purchase-banner a {
+}
+.reseller-v2-purchase-banner a {
   display: inline-flex;
   min-height: 44px;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
-  background: #fff;
-  padding: 0 16px;
+  border-radius: var(--radius-sm);
+  background: var(--text-primary);
+  padding: 0 17px;
   color: var(--text-on-inverse);
   font-size: 13px;
   font-weight: 700;
-}@media (max-width: 560px) {
+  text-decoration: none;
+  transition: background 200ms var(--ease-out-expo), transform 200ms var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo);
+}
+.reseller-v2-purchase-banner a:hover { background: color-mix(in srgb, var(--text-primary) 58%, white); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+@media (max-width: 560px) {
   .reseller-v2-purchase-banner {
     align-items: stretch;
     flex-direction: column;
   }
-}.reseller-v2-account-list small {
+}
+.reseller-v2-account-list small {
   margin-top: 4px;
   color: var(--text-muted);
   font-size: 10px;
-}.reseller-v2-account-detail dl {
+}
+.reseller-v2-account-detail dl {
   display: grid;
   gap: 0;
   margin: 0;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   overflow: hidden;
-}.reseller-v2-detail-tabs {
+}
+.reseller-v2-detail-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 4px;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
   padding: 4px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   background: var(--bg-raised);
-}.reseller-v2-detail-tabs button {
+}
+.reseller-v2-detail-tabs button {
   min-height: 42px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 650;
-}.reseller-v2-detail-tabs button.is-active {
+  transition: background 200ms var(--ease-out-expo), color 200ms var(--ease-out-expo);
+}
+.reseller-v2-detail-tabs button.is-active {
   background: var(--surface-hover);
   color: var(--text-primary);
-}.reseller-v2-delivery-template {
+}
+.reseller-v2-delivery-template {
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   background: var(--bg-raised);
-}.reseller-v2-delivery-template > header {
+}
+.reseller-v2-delivery-template > header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 13px;
+  padding: 14px;
   border-bottom: 1px solid var(--border);
-}.reseller-v2-delivery-template > header span,
+}
+.reseller-v2-delivery-template > header span,
 .reseller-v2-delivery-template > header small { display: block; }.reseller-v2-delivery-template > header span { color: var(--text-primary); font-size: 12px; font-weight: 700; }.reseller-v2-delivery-template > header small { margin-top: 3px; color: var(--text-muted); font-size: 10px; }.reseller-v2-delivery-template > header button {
   display: inline-flex;
   min-height: 40px;
   align-items: center;
   gap: 7px;
-  padding: 0 12px;
+  padding: 0 13px;
   border: 0;
-  border-radius: 8px;
-  background: white;
-  color: black;
+  border-radius: var(--radius-sm);
+  background: var(--text-primary);
+  color: var(--text-on-inverse);
   font-size: 11px;
   font-weight: 750;
-}.reseller-v2-delivery-template pre {
+  cursor: pointer;
+  transition: background 200ms var(--ease-out-expo), transform 200ms var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo);
+}
+.reseller-v2-delivery-template > header button:hover { background: color-mix(in srgb, var(--text-primary) 58%, white); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.reseller-v2-delivery-template pre {
   max-height: min(58svh, 520px);
   margin: 0;
   overflow: auto;
-  padding: 16px;
+  padding: 18px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--text-secondary);
   font: 12px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}.reseller-v2-account-detail dl > div {
+}
+.reseller-v2-account-detail dl > div {
   display: grid;
   grid-template-columns: 145px 1fr;
   gap: 12px;
-  padding: 11px 13px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--border);
-}.reseller-v2-account-detail dl > div:last-child {
+}
+.reseller-v2-account-detail dl > div:last-child {
   border-bottom: 0;
-}.reseller-v2-account-detail dt {
+}
+.reseller-v2-account-detail dt {
   color: var(--text-muted);
   font-size: 11px;
-}.reseller-v2-account-detail dd {
+}
+.reseller-v2-account-detail dd {
   margin: 0;
   color: var(--text-primary);
   font-size: 12px;
   overflow-wrap: anywhere;
-}.reseller-v2-credential-block {
+}
+.reseller-v2-credential-block {
   margin-top: 16px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   background: var(--bg-raised);
-}.reseller-v2-credential-block > header {
-  padding: 13px;
+}
+.reseller-v2-credential-block > header {
+  padding: 14px;
   border-bottom: 1px solid var(--border);
-}.reseller-v2-credential-block > header span,
+}
+.reseller-v2-credential-block > header span,
 .reseller-v2-credential-block > header strong,
 .reseller-v2-credential-block > header small {
   display: block;
-}.reseller-v2-credential-block > header span {
+}
+.reseller-v2-credential-block > header span {
   color: var(--text-primary);
   font-weight: 700;
-}.reseller-v2-credential-block > header strong,
+}
+.reseller-v2-credential-block > header strong,
 .reseller-v2-credential-block > header small {
   margin-top: 3px;
   color: var(--text-muted);
   font-size: 10px;
   font-weight: 500;
-}.reseller-v2-credential-block > p {
+}
+.reseller-v2-credential-block > p {
   margin: 0;
-  padding: 12px 13px;
+  padding: 13px 14px;
   color: var(--text-muted);
   font-size: 10px;
-}.reseller-v2-credential-row {
+}
+.reseller-v2-credential-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  padding: 13px;
+  padding: 14px;
   border-bottom: 1px solid var(--border);
-}.reseller-v2-credential-row > div:first-child {
+}
+.reseller-v2-credential-row > div:first-child {
   min-width: 0;
-}.reseller-v2-credential-row span,
+}
+.reseller-v2-credential-row span,
 .reseller-v2-credential-row code {
   display: block;
-}.reseller-v2-credential-row span {
+}
+.reseller-v2-credential-row span {
   margin-bottom: 5px;
   color: var(--text-muted);
   font-size: 10px;
-}.reseller-v2-credential-row code {
+}
+.reseller-v2-credential-row code {
   color: var(--text-primary);
   overflow-wrap: anywhere;
-}.reseller-v2-credential-row > div:last-child {
+}
+.reseller-v2-credential-row > div:last-child {
   display: flex;
   gap: 6px;
-}.reseller-v2-credential-row button {
+}
+.reseller-v2-credential-row button {
   display: inline-flex;
   min-height: 36px;
   align-items: center;
   gap: 5px;
-  padding: 0 9px;
+  padding: 0 10px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text-secondary);
   cursor: pointer;
-}.reseller-v2-notification-dot {
+  transition: border-color 200ms var(--ease-out-expo), background 200ms var(--ease-out-expo), color 200ms var(--ease-out-expo);
+}
+.reseller-v2-credential-row button:hover { border-color: var(--border-strong); background: var(--surface-hover); color: var(--text-primary); }
+.reseller-v2-notification-dot {
   position: absolute;
   top: -5px;
   right: -5px;
@@ -479,273 +604,369 @@
   border: 2px solid var(--bg-canvas);
   border-radius: 999px;
   background: var(--status-danger);
-  color: white;
+  color: var(--text-inverse);
   font-size: 9px;
   font-weight: 750;
-}.reseller-v2-topup-overlay {
+}
+.reseller-v2-topup-overlay {
   position: fixed;
   inset: 0;
   z-index: 100;
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgba(0, 0, 0, 0.72);
-  backdrop-filter: blur(7px);
-}.reseller-v2-topup-dialog {
+  background: color-mix(in srgb, var(--bg-canvas) 76%, transparent);
+  backdrop-filter: blur(10px) saturate(120%);
+}
+.reseller-v2-topup-dialog {
   width: min(100%, 520px);
   max-height: min(760px, calc(100svh - 40px));
   overflow: auto;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--bg-raised);
+  border-radius: var(--radius-lg);
+  background: var(--surface-glass);
+  backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
+  box-shadow: var(--shadow-float);
   color: var(--text-primary);
-}.reseller-v2-topup-dialog > header {
+  animation: ui-toast-in 240ms var(--ease-out-expo) both;
+}
+.reseller-v2-topup-dialog > header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  padding: 18px 20px;
+  padding: 20px 22px;
   border-bottom: 1px solid var(--border);
-}.reseller-v2-topup-dialog > header span {
-  color: #a78bfa;
+}
+.reseller-v2-topup-dialog > header span {
+  color: var(--accent-violet);
   font-size: 9px;
   font-weight: 750;
   letter-spacing: 0.15em;
   text-transform: uppercase;
-}.reseller-v2-topup-dialog > header h2 {
+}
+.reseller-v2-topup-dialog > header h2 {
   margin: 5px 0 0;
   font-size: 20px;
-}.reseller-v2-topup-dialog > header p {
+}
+.reseller-v2-topup-dialog > header p {
   margin: 6px 0 0;
   color: var(--text-secondary);
   font-size: 11px;
-}.reseller-v2-topup-dialog > header button {
+}
+.reseller-v2-topup-dialog > header button {
   display: grid;
   width: 36px;
   height: 36px;
   place-items: center;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
+  backdrop-filter: blur(var(--glass-blur));
   color: var(--text-secondary);
   cursor: pointer;
-}.reseller-v2-topup-body {
+  transition: border-color 200ms var(--ease-out-expo), background 200ms var(--ease-out-expo), color 200ms var(--ease-out-expo), transform 200ms var(--ease-out-expo);
+}
+.reseller-v2-topup-dialog > header button:hover { border-color: var(--border-strong); background: var(--surface-hover); color: var(--text-primary); transform: translateY(-1px); }
+.reseller-v2-topup-body {
   display: grid;
   gap: 15px;
-  padding: 20px;
-}.reseller-v2-topup-body label > span {
+  padding: 22px;
+}
+.reseller-v2-topup-body label > span {
   display: block;
   margin-bottom: 7px;
   color: var(--text-secondary);
   font-size: 11px;
   font-weight: 650;
-}.reseller-v2-topup-body label em {
+}
+.reseller-v2-topup-body label em {
   color: var(--text-muted);
   font-style: normal;
   font-weight: 400;
-}.reseller-v2-topup-body :is(input,
+}
+.reseller-v2-topup-body :is(input,
 select,
 textarea) {
   width: 100%;
   min-height: 44px;
-  padding: 10px 12px;
+  padding: 10px 13px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   outline: 0;
   background: var(--surface);
+  backdrop-filter: blur(var(--glass-blur));
   color: var(--text-primary);
-}.reseller-v2-topup-instruction {
+  transition: border-color var(--duration-normal) var(--ease-out-expo), background var(--duration-normal) var(--ease-out-expo);
+}
+.reseller-v2-topup-body :is(input,
+select,
+textarea):focus { border-color: color-mix(in srgb, var(--accent-violet) 70%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-violet) 14%, transparent); }
+.reseller-v2-topup-instruction {
   display: grid;
   gap: 6px;
-  padding: 13px;
+  padding: 14px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
-}.reseller-v2-topup-instruction :is(p,
+}
+.reseller-v2-topup-instruction :is(p,
 span) {
   margin: 0;
   color: var(--text-secondary);
   font-size: 11px;
   line-height: 1.5;
-}.reseller-v2-topup-instruction img,
+}
+.reseller-v2-topup-instruction img,
 .reseller-v2-topup-qr img {
   display: block;
   max-width: 240px;
   width: 100%;
   margin: 8px auto 0;
-  border-radius: 8px;
-}.reseller-v2-topup-actions {
+  border-radius: var(--radius-sm);
+}
+.reseller-v2-topup-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-}.reseller-v2-topup-actions :is(button,
+}
+.reseller-v2-topup-actions :is(button,
 a) {
   display: inline-flex;
   min-height: 42px;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 0 14px;
+  padding: 0 15px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text-secondary);
   text-decoration: none;
   cursor: pointer;
-}.reseller-v2-topup-actions .is-primary,
+  transition: background 200ms var(--ease-out-expo), border-color 200ms var(--ease-out-expo), color 200ms var(--ease-out-expo), transform 200ms var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo);
+}
+/* The hover is stated per element rather than through the same `:is()` list
+   the base rule uses. A `:is(...)` base and a `:is(...):hover` are the same
+   subject to the cascade check, so a combined rule would look like an
+   override of the values above rather than a layer on top of them -- which
+   is also how the primary button ended up taking the muted hover wash. */
+.reseller-v2-topup-actions button:hover { border-color: var(--border-strong); background: var(--surface-hover); color: var(--text-primary); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.reseller-v2-topup-actions .is-primary,
 .reseller-v2-topup-actions a {
   border-color: transparent;
   background: var(--text-primary);
   color: var(--text-on-inverse);
   font-weight: 700;
-}.reseller-v2-topup-error {
+}
+.reseller-v2-topup-actions .is-primary:hover,
+.reseller-v2-topup-actions a:hover { border-color: transparent; background: color-mix(in srgb, var(--text-primary) 58%, white); color: var(--text-on-inverse); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.reseller-v2-topup-error {
   margin: 0;
-  padding: 11px;
+  padding: 12px;
   border: 1px solid color-mix(in srgb, var(--status-danger) 30%, transparent);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--status-danger) 8%, transparent);
-  color: #fda4af;
+  color: color-mix(in srgb, var(--status-danger) 42%, var(--text-primary));
   font-size: 11px;
-}.reseller-v2-topup-success,
+}
+.reseller-v2-topup-success,
 .reseller-v2-topup-success-message {
   color: var(--status-success);
-}.reseller-v2-topup-success {
+}
+.reseller-v2-topup-success {
   display: flex;
   gap: 9px;
-  padding: 12px;
+  padding: 13px;
   border: 1px solid color-mix(in srgb, var(--status-success) 25%, transparent);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--status-success) 7%, transparent);
-}.reseller-v2-topup-success span {
+}
+.reseller-v2-topup-success span {
   display: block;
   margin-top: 3px;
   color: var(--text-secondary);
   font-size: 11px;
-}.reseller-v2-topup-loading,
+}
+.reseller-v2-topup-loading,
 .reseller-v2-topup-notice {
   color: var(--text-secondary);
   font-size: 12px;
-}.reseller-v2-topup-details {
+}
+.reseller-v2-topup-details {
   display: grid;
   gap: 8px;
   margin: 0;
-}.reseller-v2-topup-details > div {
+}
+.reseller-v2-topup-details > div {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 0;
+  padding: 11px 0;
   border-bottom: 1px solid var(--border);
-}.reseller-v2-topup-details dt {
+}
+.reseller-v2-topup-details dt {
   color: var(--text-muted);
   font-size: 11px;
-}.reseller-v2-topup-details dd {
+}
+.reseller-v2-topup-details dd {
   margin: 0;
   color: var(--text-primary);
   font-size: 11px;
   font-weight: 650;
-}.reseller-v2-quick-panel {
+}
+.reseller-v2-quick-panel {
   grid-column: span 5;
-  padding: 18px;
+  padding: 20px;
 }.reseller-v2-panel header {
   display: flex;
+  min-height: 68px;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  padding: 17px 18px;
+  padding: 18px 22px;
   border-bottom: 1px solid var(--border);
 }.reseller-v2-panel header span {
   display: block;
 }.reseller-v2-panel header h2 {
   margin: 0;
   font-size: 14px;
-}.reseller-v2-panel header a {
+}
+.reseller-v2-panel header a {
   color: var(--text-secondary);
   font-size: 10px;
   text-decoration: none;
-}.reseller-v2-action-grid {
+}
+.reseller-v2-action-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 14px;
-}.reseller-v2-active-orders {
+  gap: 10px;
+  margin-top: 16px;
+}
+.reseller-v2-active-orders {
   grid-column: span 7;
   min-height: 260px;
-}.reseller-v2-expiry-panel {
+}
+.reseller-v2-expiry-panel {
   grid-column: span 5;
   min-height: 260px;
-}.reseller-v2-compact-list {
+}
+.reseller-v2-compact-list {
   display: grid;
-}.reseller-v2-compact-list > a {
+}
+.reseller-v2-compact-list > a {
   display: flex;
-  min-height: 61px;
+  min-height: 62px;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 9px 18px;
+  padding: 10px 20px;
   border-bottom: 1px solid var(--border);
   color: inherit;
   text-decoration: none;
-}.reseller-v2-compact-list > a:last-child {
+  transition: background 200ms var(--ease-out-expo);
+}
+.reseller-v2-compact-list > a:last-child {
   border-bottom: 0;
-}.reseller-v2-compact-list > a:hover {
+}
+.reseller-v2-compact-list > a:hover {
   background: var(--surface-hover);
-}.reseller-v2-compact-list strong,
+}
+.reseller-v2-compact-list strong,
 .reseller-v2-compact-list small {
   display: block;
-}.reseller-v2-compact-list strong {
+}
+.reseller-v2-compact-list strong {
   font-size: 11px;
-}.reseller-v2-compact-list small {
+}
+.reseller-v2-compact-list small {
   margin-top: 4px;
   color: var(--text-muted);
   font-size: 9px;
-}.reseller-v2-recent {
-  margin-top: 12px;
-}.reseller-v2-order-head,
+}
+.reseller-v2-recent {
+  margin-top: 18px;
+}
+.reseller-v2-order-head,
 .reseller-v2-order-row {
   display: grid;
   grid-template-columns: 1.2fr 1fr 0.7fr 0.8fr 0.8fr;
   align-items: center;
   gap: 12px;
-}.reseller-v2-order-head {
-  min-height: 35px;
-  padding: 0 18px;
+}
+.reseller-v2-order-head {
+  min-height: 38px;
+  padding: 0 20px;
   border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
   color: var(--text-muted);
   font-size: 9px;
   text-transform: uppercase;
-}.reseller-v2-order-row {
-  min-height: 62px;
-  padding: 8px 18px;
+}
+.reseller-v2-order-row {
+  min-height: 64px;
+  padding: 9px 20px;
   border-bottom: 1px solid var(--border);
   color: var(--text-secondary);
   font-size: 10px;
   text-decoration: none;
-}.reseller-v2-order-row:hover {
+  transition: background 200ms var(--ease-out-expo);
+}
+.reseller-v2-order-row:hover {
   background: var(--surface-hover);
-}.reseller-v2-order-row:last-child {
+}
+.reseller-v2-order-row:last-child {
   border-bottom: 0;
-}.reseller-v2-order-row > div strong,
+}
+.reseller-v2-order-row > div strong,
 .reseller-v2-order-row > div small {
   display: block;
-}.reseller-v2-order-row > div strong {
+}
+.reseller-v2-order-row > div strong {
   color: var(--text-primary);
   font-size: 10px;
-}.reseller-v2-order-row > div small {
+}
+.reseller-v2-order-row > div small {
   margin-top: 3px;
   color: var(--text-muted);
   font-size: 9px;
-}.reseller-v2-order-row > span:last-child {
+}
+.reseller-v2-order-row > span:last-child {
   display: flex;
   align-items: center;
   gap: 5px;
-}@media (max-width: 1100px) {
+}
+
+/* ------------------------------------------------------------------ *
+ * Scroll reveal
+ *
+ * The same rule the shared kit uses, applied to this screen's own regions
+ * rather than to a generic class, because a screen that is one long scroll
+ * of equally-important panels should not have all of them announce
+ * themselves at once. Inside `@supports` and behind a motion preference, so
+ * a browser without scroll-timelines simply renders everything in place.
+ * ------------------------------------------------------------------ */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .reseller-v2-overview-grid > *,
+    .reseller-v2-summary-grid > *,
+    .reseller-guide-layout > * {
+      animation: ui-reveal linear both;
+      animation-timeline: view();
+      animation-range: entry 4% cover 20%;
+    }
+  }
+}
+
+@media (max-width: 1100px) {
   .reseller-v2-top-balance {
     display: none;
   }
   .reseller-v2-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-}@media (max-width: 900px) {
+}
+@media (max-width: 900px) {
   .reseller-v2-overview-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -760,7 +981,8 @@ a) {
   .reseller-v2-order-list {
     min-width: 760px;
   }
-}@media (max-width: 767px) {
+}
+@media (max-width: 767px) {
   .reseller-v2-topup {
     display: none;
   }
@@ -770,10 +992,10 @@ a) {
   .reseller-v2-summary-grid,
   .reseller-v2-overview-grid {
     grid-template-columns: 1fr;
-    gap: 9px;
+    gap: 12px;
   }
   .reseller-v2-metric {
-    min-height: 120px;
+    min-height: 124px;
   }
   .reseller-v2-active-orders,
   .reseller-v2-expiry-panel {
@@ -793,7 +1015,7 @@ a) {
     min-height: 122px;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
-    padding: 13px;
+    padding: 14px;
   }
   .reseller-v2-order-row > span:nth-child(2),
   .reseller-v2-order-row > strong {
@@ -803,20 +1025,23 @@ a) {
     grid-column: 1 / -1;
   }
   .reseller-v2-panel header {
-    padding: 15px;
+    padding: 16px;
   }
   .reseller-v2-compact-list > a {
     min-height: 68px;
-    padding-inline: 15px;
+    padding-inline: 16px;
   }
-}/* Reseller guides */.reseller-guide-intro {
+}
+
+/* Reseller guides */
+.reseller-guide-intro {
   display: flex;
   align-items: center;
   gap: 15px;
   margin-bottom: 18px;
-  padding: 18px 20px;
+  padding: 20px 22px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background:
     radial-gradient(circle at 0 50%, color-mix(in srgb, var(--accent-violet) 12%, transparent), transparent 34%),
     var(--surface);
@@ -827,10 +1052,11 @@ a) {
   flex: 0 0 auto;
   place-items: center;
   border: 1px solid color-mix(in srgb, var(--accent-violet) 28%, transparent);
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--accent-violet) 10%, transparent);
-  color: #c4b5fd;
-}.reseller-guide-intro p,
+  color: color-mix(in srgb, var(--accent-violet) 34%, var(--text-primary));
+}
+.reseller-guide-intro p,
 .reseller-guide-player-title p {
   margin: 0 0 4px;
   color: var(--text-muted);
@@ -838,102 +1064,121 @@ a) {
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-}.reseller-guide-intro h2,
+}
+.reseller-guide-intro h2,
 .reseller-guide-player-title h2 {
   margin: 0;
   color: var(--text-primary);
   font-size: 18px;
   font-weight: 680;
   letter-spacing: 0;
-}.reseller-guide-intro > div:last-child > span {
+}
+.reseller-guide-intro > div:last-child > span {
   display: block;
   margin-top: 5px;
   color: var(--text-secondary);
   font-size: 13px;
   line-height: 1.55;
-}.reseller-guide-layout {
+}
+.reseller-guide-layout {
   display: grid;
   grid-template-columns: minmax(260px, 0.34fr) minmax(0, 1fr);
   align-items: start;
   gap: 18px;
-}.reseller-guide-selector {
+}
+.reseller-guide-selector {
   display: grid;
-  gap: 8px;
-}.reseller-guide-selector > button {
+  gap: 10px;
+}
+.reseller-guide-selector > button {
   display: grid;
-  min-height: 92px;
+  min-height: 94px;
   grid-template-columns: auto auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
-  padding: 13px;
+  padding: 14px;
   border: 1px solid var(--border);
-  border-radius: 9px;
-  background: var(--surface);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
   color: var(--text-secondary);
   text-align: left;
   cursor: pointer;
-  transition:
-    border-color 160ms ease,
-    background-color 160ms ease,
-    color 160ms ease;
-}.reseller-guide-selector > button:hover {
+  transition: border-color var(--duration-normal) var(--ease-out-expo), background-color var(--duration-normal) var(--ease-out-expo), color var(--duration-normal) var(--ease-out-expo), transform var(--duration-normal) var(--ease-out-expo), box-shadow var(--duration-normal) var(--ease-out-expo);
+}
+.reseller-guide-selector > button:hover {
   border-color: var(--border-strong);
   background: var(--surface-hover);
   color: var(--text-primary);
-}.reseller-guide-selector > button.is-active {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lift);
+}
+.reseller-guide-selector > button.is-active {
   border-color: color-mix(in srgb, var(--accent-violet) 48%, transparent);
   background: color-mix(in srgb, var(--accent-violet) 9%, transparent);
   color: var(--text-primary);
-}.reseller-guide-selector > button:focus-visible,
+}
+.reseller-guide-selector > button:focus-visible,
 .reseller-guide-player-panel a:focus-visible {
   outline: 2px solid var(--accent-cyan);
   outline-offset: 2px;
-}.reseller-guide-selector-number {
+}
+.reseller-guide-selector-number {
   color: var(--text-muted);
   font-size: 10px;
   font-weight: 700;
-}.reseller-guide-selector-icon,
+}
+.reseller-guide-selector-icon,
 .reseller-guide-player-title > span {
   display: grid;
   width: 36px;
   height: 36px;
   place-items: center;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--bg-raised);
-  color: #c4b5fd;
-}.reseller-guide-selector-copy {
+  color: color-mix(in srgb, var(--accent-violet) 34%, var(--text-primary));
+}
+.reseller-guide-selector-copy {
   min-width: 0;
-}.reseller-guide-selector-copy strong,
+}
+.reseller-guide-selector-copy strong,
 .reseller-guide-selector-copy small {
   display: block;
-}.reseller-guide-selector-copy strong {
+}
+.reseller-guide-selector-copy strong {
   color: inherit;
   font-size: 13px;
-}.reseller-guide-selector-copy small {
+}
+.reseller-guide-selector-copy small {
   overflow: hidden;
   margin-top: 5px;
   color: var(--text-muted);
   font-size: 11px;
   line-height: 1.45;
-}.reseller-guide-player-panel {
+}
+.reseller-guide-player-panel {
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 11px;
-  background: var(--surface);
-}.reseller-guide-player-panel > header {
+  border-radius: var(--radius-lg);
+  background: var(--surface-glass);
+  backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
+  box-shadow: var(--shadow-lift);
+}
+.reseller-guide-player-panel > header {
   display: flex;
   min-height: 70px;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 14px 17px;
+  padding: 16px 20px;
   border-bottom: 1px solid var(--border);
-}.reseller-guide-player-title {
+}
+.reseller-guide-player-title {
   display: flex;
   align-items: center;
   gap: 11px;
-}.reseller-guide-duration,
+}
+.reseller-guide-duration,
 .reseller-guide-demo-label {
   display: inline-flex;
   align-items: center;
@@ -941,94 +1186,110 @@ a) {
   color: var(--text-secondary);
   font-size: 11px;
   font-weight: 650;
-}.reseller-guide-video-wrap {
+}
+.reseller-guide-video-wrap {
   position: relative;
   aspect-ratio: 16 / 9;
   overflow: hidden;
   background: var(--bg-canvas);
-}.reseller-guide-video-wrap video {
+}
+.reseller-guide-video-wrap video {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
   background: var(--bg-canvas);
-}/* The pill takes its colour from the group above, like the duration chip next
-   to it. It used to hardcode #d4d4d8 here, which meant a dark theme change
-   would have left this one label stranded. */.reseller-guide-demo-label {
+}
+/* The pill takes its colour from the group above, like the duration chip next
+   to it. It used to hardcode a grey here, which meant a dark theme change
+   would have left this one label stranded. */
+.reseller-guide-demo-label {
   position: absolute;
   top: 12px;
   left: 12px;
-  padding: 6px 9px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
   border-radius: 999px;
-  background: rgba(7, 7, 8, 0.82);
+  background: color-mix(in srgb, var(--bg-canvas) 78%, transparent);
   pointer-events: none;
-  backdrop-filter: blur(8px);
-}.reseller-guide-detail {
+  backdrop-filter: blur(8px) saturate(140%);
+}
+.reseller-guide-detail {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(210px, 0.34fr);
   gap: 18px;
-  padding: 18px;
+  padding: 20px;
   border-top: 1px solid var(--border);
-}.reseller-guide-detail h3 {
+}
+.reseller-guide-detail h3 {
   margin: 0 0 13px;
   color: var(--text-primary);
   font-size: 14px;
-}.reseller-guide-detail ol {
+}
+.reseller-guide-detail ol {
   display: grid;
   gap: 9px;
   margin: 0;
   padding: 0;
   list-style: none;
-}.reseller-guide-detail li {
+}
+.reseller-guide-detail li {
   display: grid;
   grid-template-columns: 26px minmax(0, 1fr);
   align-items: start;
   gap: 10px;
-}.reseller-guide-detail li > span {
+}
+.reseller-guide-detail li > span {
   display: grid;
   width: 26px;
   height: 26px;
   place-items: center;
   border: 1px solid var(--border);
   border-radius: 50%;
-  color: #c4b5fd;
+  color: color-mix(in srgb, var(--accent-violet) 34%, var(--text-primary));
   font-size: 10px;
   font-weight: 700;
-}.reseller-guide-detail li p,
+}
+.reseller-guide-detail li p,
 .reseller-guide-detail aside p {
   margin: 2px 0 0;
   color: var(--text-secondary);
   font-size: 12px;
   line-height: 1.55;
-}.reseller-guide-detail aside {
+}
+.reseller-guide-detail aside {
   align-self: start;
-  padding: 15px;
+  padding: 16px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   background: var(--bg-raised);
-}.reseller-guide-detail aside > span {
+}
+.reseller-guide-detail aside > span {
   display: flex;
   align-items: center;
   gap: 7px;
   color: var(--status-success);
   font-size: 11px;
   font-weight: 700;
-}.reseller-guide-detail aside a {
+}
+.reseller-guide-detail aside a {
   display: inline-flex;
   min-height: 44px;
   align-items: center;
   justify-content: center;
   gap: 6px;
   margin-top: 15px;
-  padding: 0 15px;
-  border-radius: 8px;
+  padding: 0 16px;
+  border-radius: var(--radius-sm);
   background: var(--text-primary);
   color: var(--text-on-inverse);
   font-size: 12px;
   font-weight: 750;
   text-decoration: none;
-}@media (max-width: 1050px) {
+  transition: background 200ms var(--ease-out-expo), transform 200ms var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo);
+}
+.reseller-guide-detail aside a:hover { background: color-mix(in srgb, var(--text-primary) 58%, white); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+@media (max-width: 1050px) {
   .reseller-guide-layout {
     grid-template-columns: 1fr;
   }
@@ -1036,10 +1297,11 @@ a) {
   .reseller-guide-selector {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-}@media (max-width: 767px) {
+}
+@media (max-width: 767px) {
   .reseller-guide-intro {
     align-items: flex-start;
-    padding: 15px;
+    padding: 16px;
   }
 
   .reseller-guide-intro h2,
@@ -1065,9 +1327,10 @@ a) {
 
   .reseller-guide-detail {
     grid-template-columns: 1fr;
-    padding: 15px;
+    padding: 16px;
   }
-}@media (max-width: 900px) {
+}
+@media (max-width: 900px) {
   .reseller-v2-account-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1088,7 +1351,8 @@ a) {
     font-weight: 800;
     text-transform: uppercase;
   }
-}@media (max-width: 767px) {
+}
+@media (max-width: 767px) {
   .reseller-v2-panel > header {
     align-items: flex-start;
     flex-direction: column;
@@ -1098,7 +1362,7 @@ a) {
     grid-template-columns: 1fr;
   }
   .reseller-v2-account-summary article {
-    min-height: 92px;
+    min-height: 96px;
   }
   .reseller-v2-account-list > button {
     min-height: 88px;
@@ -1134,7 +1398,7 @@ a) {
     border-right: 0;
     border-bottom: 0;
     border-left: 0;
-    border-radius: 14px 14px 0 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   }
   .reseller-v2-topup-actions :is(button, a) {
     min-height: 46px;

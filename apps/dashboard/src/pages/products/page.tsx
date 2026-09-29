@@ -10,6 +10,7 @@ import type { CheckoutField } from "../../lib/types";
 import { formatRupiah } from "../../lib/format";
 import { useQrisQr } from "../../lib/useQrisQr";
 import { qrisPayloadFrom } from "../../lib/qrisQr";
+import "./products.css";
 
 type CheckoutStep = "catalog" | "details" | "payment" | "process" | "done";
 
@@ -143,10 +144,10 @@ function paymentStatusLabel(status = "") {
 
 function paymentStatusTone(status = "") {
   const normalized = String(status || "").toLowerCase();
-  if (normalized === "paid") return "border-emerald-400/20 bg-emerald-400/10 text-emerald-300";
-  if (["expired", "cancelled", "failed"].includes(normalized)) return "border-rose-400/20 bg-rose-400/10 text-rose-300";
-  if (normalized === "checking") return "border-cyan-300/20 bg-cyan-300/10 text-cyan-200";
-  return "border-amber-300/20 bg-amber-300/10 text-amber-200";
+  if (normalized === "paid") return "border-[color-mix(in_srgb,var(--status-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--status-success)_12%,transparent)] text-[var(--status-success)]";
+  if (["expired", "cancelled", "failed"].includes(normalized)) return "border-[color-mix(in_srgb,var(--status-danger)_32%,transparent)] bg-[color-mix(in_srgb,var(--status-danger)_12%,transparent)] text-[var(--status-danger)]";
+  if (normalized === "checking") return "border-[color-mix(in_srgb,var(--accent-cyan)_32%,transparent)] bg-[color-mix(in_srgb,var(--accent-cyan)_12%,transparent)] text-[var(--accent-cyan)]";
+  return "border-[color-mix(in_srgb,var(--status-warning)_32%,transparent)] bg-[color-mix(in_srgb,var(--status-warning)_12%,transparent)] text-[var(--status-warning)]";
 }
 
 function isTerminalCheckoutState(order: ApiOrder | null, payment: ApiPayment | null, now = Date.now()) {
@@ -987,18 +988,18 @@ export default function ProductsPage() {
           <section className="mx-auto mt-16 max-w-xl rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 text-center">
             {error ? (
               <>
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-rose-400/20 bg-rose-400/10 text-rose-300">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--status-danger)_32%,transparent)] bg-[color-mix(in_srgb,var(--status-danger)_12%,transparent)] text-[var(--status-danger)]">
                   <TriangleAlert size={20} aria-hidden="true" />
                 </div>
                 <h1 className="mt-4 text-lg font-semibold">Checkout tidak tersedia</h1>
                 <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">{error}</p>
-                <button type="button" onClick={backToCatalog} className="mt-5 inline-flex min-h-11 items-center justify-center rounded-lg bg-white px-4 text-sm font-semibold text-black transition-colors hover:bg-zinc-200">
+                <button type="button" onClick={backToCatalog} className="mt-5 inline-flex min-h-11 items-center justify-center rounded-lg bg-[var(--text-primary)] px-4 text-sm font-semibold text-[var(--text-on-inverse)] transition-colors hover:bg-[color-mix(in_srgb,var(--text-primary)_58%,white)]">
                   Pilih Produk Lain
                 </button>
               </>
             ) : (
               <>
-                <div className="mx-auto h-12 w-12 animate-spin rounded-full border-2 border-white/10 border-t-[var(--accent-cyan)]" />
+                <div className="mx-auto h-12 w-12 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--accent-cyan)]" />
                 <h1 className="mt-4 text-lg font-semibold">Menyiapkan checkout</h1>
                 <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">Menyiapkan paket order dari katalog reseller.</p>
               </>
@@ -1014,11 +1015,11 @@ export default function ProductsPage() {
       
         <main className="theme-dark min-h-screen bg-[var(--bg-canvas)] px-4 py-6 text-[var(--text-primary)] sm:px-6 sm:py-8">
           <header className="mx-auto flex max-w-6xl items-center justify-between">
-            <button type="button" onClick={backToCatalog} className="inline-flex min-h-11 items-center gap-3 rounded-lg font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-violet-400">
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] font-serif">K</span>
+            <button type="button" onClick={backToCatalog} className="inline-flex min-h-11 items-center gap-3 rounded-lg font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent-violet)]">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface-hover)] font-serif">K</span>
               <span>Kavya</span>
             </button>
-            <Link to={isResellerCheckout ? "/reseller-v2/catalog" : "/"} className="inline-flex min-h-11 items-center rounded-lg border border-white/10 px-4 text-sm font-medium text-zinc-300 transition-colors hover:border-white/20 hover:bg-white/[0.04] hover:text-white">
+            <Link to={isResellerCheckout ? "/reseller-v2/catalog" : "/"} className="inline-flex min-h-11 items-center rounded-lg border border-[var(--border)] px-4 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]">
               {isResellerCheckout ? "Katalog" : "Beranda"}
             </Link>
           </header>
@@ -1026,36 +1027,36 @@ export default function ProductsPage() {
           <div aria-label="Tahap checkout" className="mx-auto mt-8 grid max-w-xl grid-cols-3 gap-2 px-1 text-xs sm:mt-10 sm:flex sm:items-center sm:justify-center sm:gap-4">
             {steps.map((item, index) => (
               <div key={item.id} className="flex min-w-0 flex-col items-center gap-2 sm:flex-row sm:gap-4" aria-current={index === activeStep ? "step" : undefined}>
-                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-xs font-semibold ${index <= activeStep ? "border-white bg-white text-black" : "border-white/10 bg-white/[0.03] text-zinc-600"}`}>
+                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-xs font-semibold ${index <= activeStep ? "border-[var(--border-strong)] bg-[var(--text-primary)] text-[var(--text-on-inverse)]" : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)]"}`}>
                   {index + 1}
                 </div>
-                <span className={`${index <= activeStep ? "font-semibold text-zinc-100" : "text-zinc-600"} text-center text-[11px] leading-4 sm:whitespace-nowrap sm:text-xs`}>{item.label}</span>
-                {index < steps.length - 1 ? <span className={`hidden h-px w-14 shrink-0 sm:block ${index < activeStep ? "bg-white/50" : "bg-white/10"}`} /> : null}
+                <span className={`${index <= activeStep ? "font-semibold text-[var(--text-primary)]" : "text-[var(--text-muted)]"} text-center text-[11px] leading-4 sm:whitespace-nowrap sm:text-xs`}>{item.label}</span>
+                {index < steps.length - 1 ? <span className={`hidden h-px w-14 shrink-0 sm:block ${index < activeStep ? "bg-[color-mix(in_srgb,var(--text-primary)_50%,transparent)]" : "bg-[var(--border)]"}`} /> : null}
               </div>
             ))}
           </div>
 
           <section className="mx-auto mt-8 max-w-6xl overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)]">
-            <div className="border-b border-white/[0.09] px-5 py-4 sm:px-7">
-              <h1 className="text-base font-semibold text-white">
+            <div className="border-b border-[var(--border)] px-5 py-4 sm:px-7">
+              <h1 className="text-base font-semibold text-[var(--text-primary)]">
                 {step === "payment" ? "Selesaikan pembayaran" : step === "done" ? "Pembayaran berhasil" : step === "process" ? "Pesanan sedang diproses" : `Pesan ${selection?.product.name || "Produk"}`}
               </h1>
             </div>
 
             {step === "details" ? (
-              <div className="grid gap-6 p-5 text-zinc-200 sm:p-7 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.72fr)] lg:items-start">
+              <div className="grid gap-6 p-5 text-[var(--text-secondary)] sm:p-7 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.72fr)] lg:items-start">
                 <div className="min-w-0 space-y-6">
                   {isAuthenticatedResellerCheckout ? (
-                    <div className="rounded-lg border border-white/[0.08] bg-white/[0.025] p-4">
+                    <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-raised)] p-4">
                       <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-semibold text-white">Data reseller</p>
-                        <span className="rounded-full border border-violet-400/20 bg-violet-400/10 px-2.5 py-1 text-[11px] font-semibold text-violet-200">
+                        <p className="text-sm font-semibold text-[var(--text-primary)]">Data reseller</p>
+                        <span className="rounded-full border border-[color-mix(in_srgb,var(--accent-violet)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-violet)_10%,transparent)] px-2.5 py-1 text-[11px] font-semibold text-[var(--accent-violet)]">
                           Terisi dari akun reseller
                         </span>
                       </div>
                       <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
-                        <div><dt className="text-xs text-zinc-500">Username</dt><dd className="mt-1 text-zinc-200">{resellerUser.username || "-"}</dd></div>
-                        <div><dt className="text-xs text-zinc-500">Email akun</dt><dd className="mt-1 break-all text-zinc-200">{resellerUser.email || "-"}</dd></div>
+                        <div><dt className="text-xs text-[var(--text-muted)]">Username</dt><dd className="mt-1 text-[var(--text-secondary)]">{resellerUser.username || "-"}</dd></div>
+                        <div><dt className="text-xs text-[var(--text-muted)]">Email akun</dt><dd className="mt-1 break-all text-[var(--text-secondary)]">{resellerUser.email || "-"}</dd></div>
                       </dl>
                     </div>
                   ) : null}
@@ -1063,8 +1064,8 @@ export default function ProductsPage() {
                   <div className="grid gap-4">
                     <label className="block">
                       <span className="flex items-center justify-between gap-3 text-sm font-medium">
-                        <span>Nama reseller <span className="text-rose-400">*</span></span>
-                        {resellerNameLocked ? <span className="text-[11px] font-normal text-zinc-500">Terisi dari akun reseller</span> : null}
+                        <span>Nama reseller <span className="text-[var(--status-danger)]">*</span></span>
+                        {resellerNameLocked ? <span className="text-[11px] font-normal text-[var(--text-muted)]">Terisi dari akun reseller</span> : null}
                       </span>
                       <input
                         value={customer}
@@ -1073,10 +1074,10 @@ export default function ProductsPage() {
                         readOnly={resellerNameLocked}
                         aria-invalid={Boolean((touched.customer || submitAttempted) && fieldErrors.customer)}
                         aria-describedby={fieldErrors.customer ? "checkout-customer-error" : undefined}
-                        className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-[var(--bg-raised)] px-4 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15 read-only:cursor-not-allowed read-only:border-white/[0.06] read-only:bg-white/[0.025] read-only:text-zinc-400"
+                        className="mt-2 h-12 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-raised)] px-4 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--accent-violet)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--accent-violet)_18%,transparent)] read-only:cursor-not-allowed read-only:border-[var(--border)] read-only:bg-[var(--bg-raised)] read-only:text-[var(--text-muted)]"
                         placeholder="Masukkan nama reseller"
                       />
-                      {(touched.customer || submitAttempted) && fieldErrors.customer ? <span id="checkout-customer-error" className="mt-2 block text-xs text-rose-300">{fieldErrors.customer}</span> : null}
+                      {(touched.customer || submitAttempted) && fieldErrors.customer ? <span id="checkout-customer-error" className="mt-2 block text-xs text-[var(--status-danger)]">{fieldErrors.customer}</span> : null}
                     </label>
 
                     {activeCheckoutFields.map((field) => {
@@ -1086,7 +1087,7 @@ export default function ProductsPage() {
                       return <label className="block" key={field.key}>
                         <span className="text-sm font-medium">
                           {field.label}
-                          {field.required ? <span className="text-rose-400"> *</span> : null}
+                          {field.required ? <span className="text-[var(--status-danger)]"> *</span> : null}
                         </span>
                         {field.type === "select" ? (
                           <select
@@ -1095,7 +1096,7 @@ export default function ProductsPage() {
                             onBlur={() => setTouched((current) => ({ ...current, customerData: true }))}
                             aria-invalid={showError}
                             aria-describedby={showError ? `${fieldId}-error` : field.helperText ? `${fieldId}-help` : undefined}
-                            className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-[var(--bg-raised)] px-4 text-sm text-white outline-none focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15"
+                            className="mt-2 h-12 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-raised)] px-4 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent-violet)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--accent-violet)_18%,transparent)]"
                           >
                             <option value="">Pilih {field.label.toLowerCase()}</option>
                             {(field.options || []).map((option) => <option key={option} value={option}>{option}</option>)}
@@ -1109,24 +1110,24 @@ export default function ProductsPage() {
                             onBlur={() => setTouched((current) => ({ ...current, customerData: true }))}
                             aria-invalid={showError}
                             aria-describedby={showError ? `${fieldId}-error` : field.helperText ? `${fieldId}-help` : undefined}
-                            className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-[var(--bg-raised)] px-4 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15"
+                            className="mt-2 h-12 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-raised)] px-4 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--accent-violet)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--accent-violet)_18%,transparent)]"
                             placeholder={field.placeholder}
                           />
                         )}
                         {showError ? (
-                          <span id={`${fieldId}-error`} className="mt-2 block text-xs text-rose-300">{fieldError}</span>
+                          <span id={`${fieldId}-error`} className="mt-2 block text-xs text-[var(--status-danger)]">{fieldError}</span>
                         ) : field.helperText ? (
-                          <span id={`${fieldId}-help`} className="mt-2 block text-xs leading-5 text-zinc-500">{field.helperText}</span>
+                          <span id={`${fieldId}-help`} className="mt-2 block text-xs leading-5 text-[var(--text-muted)]">{field.helperText}</span>
                         ) : null}
                       </label>;
                     })}
                     {!hasStructuredCheckoutMetadata && !activeCheckoutFields.length && activeCheckoutRules.customerField === "optional" ? (
                       <label className="block">
-                        <span className="text-sm font-medium">{activeCheckoutRules.label} <span className="font-normal text-zinc-500">(opsional)</span></span>
+                        <span className="text-sm font-medium">{activeCheckoutRules.label} <span className="font-normal text-[var(--text-muted)]">(opsional)</span></span>
                         <input
                           value={email}
                           onChange={(event) => setEmail(event.target.value)}
-                          className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-[var(--bg-raised)] px-4 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15"
+                          className="mt-2 h-12 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-raised)] px-4 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--accent-violet)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--accent-violet)_18%,transparent)]"
                           placeholder={activeCheckoutRules.placeholder}
                         />
                       </label>
@@ -1134,8 +1135,8 @@ export default function ProductsPage() {
 
                     <label className="block">
                       <span className="flex items-center justify-between gap-3 text-sm font-medium">
-                        <span>WhatsApp reseller <span className="text-rose-400">*</span></span>
-                        {resellerWhatsappLocked ? <span className="text-[11px] font-normal text-zinc-500">Terisi dari akun reseller</span> : null}
+                        <span>WhatsApp reseller <span className="text-[var(--status-danger)]">*</span></span>
+                        {resellerWhatsappLocked ? <span className="text-[11px] font-normal text-[var(--text-muted)]">Terisi dari akun reseller</span> : null}
                       </span>
                       <input
                         value={whatsapp}
@@ -1144,19 +1145,19 @@ export default function ProductsPage() {
                         readOnly={resellerWhatsappLocked}
                         aria-invalid={Boolean((touched.whatsapp || submitAttempted) && fieldErrors.whatsapp)}
                         aria-describedby={fieldErrors.whatsapp ? "checkout-whatsapp-error" : resellerCheck.message ? "checkout-whatsapp-status" : undefined}
-                        className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-[var(--bg-raised)] px-4 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15 read-only:cursor-not-allowed read-only:border-white/[0.06] read-only:bg-white/[0.025] read-only:text-zinc-400"
+                        className="mt-2 h-12 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-raised)] px-4 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--accent-violet)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--accent-violet)_18%,transparent)] read-only:cursor-not-allowed read-only:border-[var(--border)] read-only:bg-[var(--bg-raised)] read-only:text-[var(--text-muted)]"
                         placeholder="08123456789"
                       />
-                      {(touched.whatsapp || submitAttempted) && fieldErrors.whatsapp ? <span id="checkout-whatsapp-error" className="mt-2 block text-xs text-rose-300">{fieldErrors.whatsapp}</span> : null}
+                      {(touched.whatsapp || submitAttempted) && fieldErrors.whatsapp ? <span id="checkout-whatsapp-error" className="mt-2 block text-xs text-[var(--status-danger)]">{fieldErrors.whatsapp}</span> : null}
                       {resellerCheck.message && !fieldErrors.whatsapp ? (
                         <span
                           id="checkout-whatsapp-status"
                           className={`mt-2 block rounded-md border px-3 py-2 text-xs font-medium ${
                             resellerCheck.status === "valid"
-                              ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-300"
+                              ? "border-[color-mix(in_srgb,var(--status-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--status-success)_12%,transparent)] text-[var(--status-success)]"
                               : resellerCheck.status === "checking"
-                                ? "border-white/10 bg-white/[0.03] text-zinc-400"
-                                : "border-rose-400/20 bg-rose-400/10 text-rose-300"
+                                ? "border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)]"
+                                : "border-[color-mix(in_srgb,var(--status-danger)_32%,transparent)] bg-[color-mix(in_srgb,var(--status-danger)_12%,transparent)] text-[var(--status-danger)]"
                           }`}
                         >
                           {resellerCheck.message}
@@ -1165,171 +1166,171 @@ export default function ProductsPage() {
                     </label>
 
                     <label className="block">
-                      <span className="text-sm font-medium">Catatan <span className="font-normal text-zinc-500">(opsional)</span></span>
-                      <textarea value={note} onChange={(event) => setNote(event.target.value.slice(0, 500))} className="mt-2 h-24 w-full resize-none rounded-lg border border-white/10 bg-[var(--bg-raised)] px-4 py-3 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-2 focus:ring-violet-400/15" placeholder="Catatan tambahan untuk pesanan..." />
-                      <span className="mt-1 block text-right text-xs text-zinc-600">{note.length}/500</span>
+                      <span className="text-sm font-medium">Catatan <span className="font-normal text-[var(--text-muted)]">(opsional)</span></span>
+                      <textarea value={note} onChange={(event) => setNote(event.target.value.slice(0, 500))} className="mt-2 h-24 w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--bg-raised)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--accent-violet)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--accent-violet)_18%,transparent)]" placeholder="Catatan tambahan untuk pesanan..." />
+                      <span className="mt-1 block text-right text-xs text-[var(--text-muted)]">{note.length}/500</span>
                     </label>
                   </div>
                 </div>
 
-                <aside className="rounded-lg border border-white/[0.09] bg-[var(--bg-raised)] p-5 lg:sticky lg:top-6">
+                <aside className="rounded-lg border border-[var(--border)] bg-[var(--bg-raised)] p-5 lg:sticky lg:top-6">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Ringkasan pesanan</p>
-                      <h2 className="mt-3 text-lg font-semibold text-white">{selection?.product.name || "Produk"}</h2>
-                      <p className="mt-1 text-sm text-zinc-400">{selection?.variant.name || "-"}</p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Ringkasan pesanan</p>
+                      <h2 className="mt-3 text-lg font-semibold text-[var(--text-primary)]">{selection?.product.name || "Produk"}</h2>
+                      <p className="mt-1 text-sm text-[var(--text-muted)]">{selection?.variant.name || "-"}</p>
                     </div>
-                    <button type="button" onClick={backToCatalog} className="min-h-11 shrink-0 rounded-lg border border-white/10 px-3 text-xs font-semibold text-zinc-300 hover:border-white/20 hover:bg-white/[0.04]">
+                    <button type="button" onClick={backToCatalog} className="min-h-11 shrink-0 rounded-lg border border-[var(--border)] px-3 text-xs font-semibold text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]">
                       Ganti
                     </button>
                   </div>
 
-                  <dl className="mt-5 space-y-3 border-y border-white/[0.08] py-5 text-sm">
-                    <div className="flex items-center justify-between gap-3"><dt className="text-zinc-500">Durasi</dt><dd className="font-medium text-zinc-200">{selection?.duration || "-"}</dd></div>
-                    <div className="flex items-center justify-between gap-3"><dt className="text-zinc-500">Harga per akun</dt><dd className="font-medium text-zinc-200">{formatRupiah(selection?.price || 0)}</dd></div>
-                    <div className="flex items-center justify-between gap-3"><dt className="text-zinc-500">Stok tersedia</dt><dd className="font-medium text-zinc-200">{selection?.variant.stockCount || 0}</dd></div>
+                  <dl className="mt-5 space-y-3 border-y border-[var(--border)] py-5 text-sm">
+                    <div className="flex items-center justify-between gap-3"><dt className="text-[var(--text-muted)]">Durasi</dt><dd className="font-medium text-[var(--text-secondary)]">{selection?.duration || "-"}</dd></div>
+                    <div className="flex items-center justify-between gap-3"><dt className="text-[var(--text-muted)]">Harga per akun</dt><dd className="font-medium text-[var(--text-secondary)]">{formatRupiah(selection?.price || 0)}</dd></div>
+                    <div className="flex items-center justify-between gap-3"><dt className="text-[var(--text-muted)]">Stok tersedia</dt><dd className="font-medium text-[var(--text-secondary)]">{selection?.variant.stockCount || 0}</dd></div>
                   </dl>
 
                   <div className="mt-5 flex items-center justify-between gap-4">
                     <div>
-                      <p className="text-sm font-medium text-zinc-200">Jumlah akun</p>
-                      <p className="mt-1 text-xs text-zinc-500">Maksimal sesuai stok aktif.</p>
+                      <p className="text-sm font-medium text-[var(--text-secondary)]">Jumlah akun</p>
+                      <p className="mt-1 text-xs text-[var(--text-muted)]">Maksimal sesuai stok aktif.</p>
                     </div>
-                    <div className="inline-flex h-11 items-center overflow-hidden rounded-lg border border-white/10 bg-black/20">
-                      <button type="button" onClick={() => changeQuantity(quantity - 1)} disabled={quantity <= 1} className="flex h-11 w-11 items-center justify-center text-zinc-400 hover:bg-white/[0.05] hover:text-white disabled:cursor-not-allowed disabled:text-zinc-700" aria-label="Kurangi jumlah akun">
+                    <div className="inline-flex h-11 items-center overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-canvas)]">
+                      <button type="button" onClick={() => changeQuantity(quantity - 1)} disabled={quantity <= 1} className="flex h-11 w-11 items-center justify-center text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:text-[var(--text-muted)]" aria-label="Kurangi jumlah akun">
                         <Minus size={15} aria-hidden="true" />
                       </button>
-                      <input value={quantity} onChange={(event) => changeQuantity(Number(event.target.value))} className="h-11 w-12 border-x border-white/10 bg-transparent text-center text-sm font-semibold text-white outline-none focus-visible:relative focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-400/70" inputMode="numeric" aria-label="Jumlah akun" />
-                      <button type="button" onClick={() => changeQuantity(quantity + 1)} disabled={quantity >= (selection?.variant.stockCount || 1)} className="flex h-11 w-11 items-center justify-center text-zinc-400 hover:bg-white/[0.05] hover:text-white disabled:cursor-not-allowed disabled:text-zinc-700" aria-label="Tambah jumlah akun">
+                      <input value={quantity} onChange={(event) => changeQuantity(Number(event.target.value))} className="h-11 w-12 border-x border-[var(--border)] bg-transparent text-center text-sm font-semibold text-[var(--text-primary)] outline-none focus-visible:relative focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent-violet)]" inputMode="numeric" aria-label="Jumlah akun" />
+                      <button type="button" onClick={() => changeQuantity(quantity + 1)} disabled={quantity >= (selection?.variant.stockCount || 1)} className="flex h-11 w-11 items-center justify-center text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:text-[var(--text-muted)]" aria-label="Tambah jumlah akun">
                         <Plus size={15} aria-hidden="true" />
                       </button>
                     </div>
                   </div>
 
-                  <div className="mt-5 flex items-end justify-between gap-4 border-t border-white/[0.08] pt-5">
-                    <span className="text-sm text-zinc-400">Total pembayaran</span>
-                    <strong className="text-2xl font-semibold tracking-tight text-white">{formatRupiah((selection?.price || 0) * quantity)}</strong>
+                  <div className="mt-5 flex items-end justify-between gap-4 border-t border-[var(--border)] pt-5">
+                    <span className="text-sm text-[var(--text-muted)]">Total pembayaran</span>
+                    <strong className="text-2xl font-semibold tracking-tight text-[var(--text-primary)]">{formatRupiah((selection?.price || 0) * quantity)}</strong>
                   </div>
 
-                  {error ? <div role="alert" className="mt-4 rounded-lg border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{error}</div> : null}
+                  {error ? <div role="alert" className="mt-4 rounded-lg border border-[color-mix(in_srgb,var(--status-danger)_32%,transparent)] bg-[color-mix(in_srgb,var(--status-danger)_12%,transparent)] px-4 py-3 text-sm text-[var(--status-danger)]">{error}</div> : null}
 
                   <button
                     type="button"
                     onClick={submitOrder}
                     disabled={submitting || !selection || resellerCheck.status === "checking" || resellerCheck.status === "invalid"}
-                    className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-white px-4 text-sm font-semibold text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500"
+                    className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[var(--text-primary)] px-4 text-sm font-semibold text-[var(--text-on-inverse)] transition-colors hover:bg-[color-mix(in_srgb,var(--text-primary)_58%,white)] disabled:cursor-not-allowed disabled:bg-[var(--bg-raised)] disabled:text-[var(--text-muted)]"
                   >
-                    {submitting ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-black/20 border-t-black" aria-hidden="true" /> : <ArrowRight size={16} aria-hidden="true" />}
+                    {submitting ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-[color-mix(in_srgb,var(--text-on-inverse)_22%,transparent)] border-t-[var(--text-on-inverse)]" aria-hidden="true" /> : <ArrowRight size={16} aria-hidden="true" />}
                     {submitting ? "Memproses pesanan..." : "Lanjut ke Pembayaran"}
                   </button>
-                  <p className="mt-3 text-center text-xs leading-5 text-zinc-600">Tombol dikunci selama proses agar pesanan tidak dibuat dua kali.</p>
+                  <p className="mt-3 text-center text-xs leading-5 text-[var(--text-muted)]">Tombol dikunci selama proses agar pesanan tidak dibuat dua kali.</p>
                 </aside>
               </div>
             ) : null}
 
             {step === "payment" ? (
               <div className="grid gap-6 p-5 sm:p-7 md:grid-cols-[0.92fr_1.08fr]">
-                <div className="rounded-lg border border-white/[0.08] bg-[var(--bg-raised)] p-5">
-                  <p className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-600">Ringkasan pesanan</p>
-                  <h2 className="mt-4 text-xl font-semibold text-white">{createdOrder?.product}</h2>
-                  <p className="mt-1 text-sm leading-6 text-zinc-400">
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-raised)] p-5">
+                  <p className="text-xs font-semibold uppercase tracking-[0.15em] text-[var(--text-muted)]">Ringkasan pesanan</p>
+                  <h2 className="mt-4 text-xl font-semibold text-[var(--text-primary)]">{createdOrder?.product}</h2>
+                  <p className="mt-1 text-sm leading-6 text-[var(--text-muted)]">
                     {createdOrder?.variant} / {createdOrder?.duration} / {createdOrder?.qty || 1} akun
                   </p>
-                  <div className="mt-5 text-3xl font-semibold tracking-tight text-white">{formatRupiah(createdOrder?.total || 0)}</div>
-                  <dl className="mt-6 space-y-3 border-t border-white/[0.08] pt-5 text-sm">
+                  <div className="mt-5 text-3xl font-semibold tracking-tight text-[var(--text-primary)]">{formatRupiah(createdOrder?.total || 0)}</div>
+                  <dl className="mt-6 space-y-3 border-t border-[var(--border)] pt-5 text-sm">
                       {depositUsed > 0 ? (
-                        <div className="flex items-center justify-between gap-3 text-zinc-500">
+                        <div className="flex items-center justify-between gap-3 text-[var(--text-muted)]">
                           <dt>Deposit dipakai</dt>
-                          <dd className="font-medium text-zinc-200">{formatRupiah(depositUsed)}</dd>
+                          <dd className="font-medium text-[var(--text-secondary)]">{formatRupiah(depositUsed)}</dd>
                         </div>
                       ) : null}
-                      <div className="flex items-center justify-between gap-3 text-zinc-500">
+                      <div className="flex items-center justify-between gap-3 text-[var(--text-muted)]">
                         <dt>Nominal</dt>
-                        <dd className="font-medium text-zinc-200">{formatRupiah(qrisNominal || paymentDue)}</dd>
+                        <dd className="font-medium text-[var(--text-secondary)]">{formatRupiah(qrisNominal || paymentDue)}</dd>
                       </div>
                       {qrisCustomerFee > 0 ? (
-                        <div className="flex items-center justify-between gap-3 text-zinc-500">
+                        <div className="flex items-center justify-between gap-3 text-[var(--text-muted)]">
                           <dt>Biaya admin</dt>
-                          <dd className="font-medium text-zinc-200">{formatRupiah(qrisCustomerFee)}</dd>
+                          <dd className="font-medium text-[var(--text-secondary)]">{formatRupiah(qrisCustomerFee)}</dd>
                         </div>
                       ) : null}
-                      <div className="flex items-center justify-between gap-3 border-t border-white/[0.08] pt-3 text-zinc-300">
+                      <div className="flex items-center justify-between gap-3 border-t border-[var(--border)] pt-3 text-[var(--text-secondary)]">
                         <dt>Total pembayaran</dt>
-                        <dd className="font-semibold text-white">{formatRupiah(qrisTotal || paymentDue)}</dd>
+                        <dd className="font-semibold text-[var(--text-primary)]">{formatRupiah(qrisTotal || paymentDue)}</dd>
                       </div>
                   </dl>
-                  <dl className="mt-6 space-y-3 border-t border-white/[0.08] pt-5 text-sm">
+                  <dl className="mt-6 space-y-3 border-t border-[var(--border)] pt-5 text-sm">
                     <div>
-                      <dt className="text-xs uppercase tracking-wider text-zinc-600">Nomor pesanan</dt>
+                      <dt className="text-xs uppercase tracking-wider text-[var(--text-muted)]">Nomor pesanan</dt>
                       <dd className="mt-2 flex min-w-0 items-center gap-2">
-                        <span className="min-w-0 break-all font-mono text-xs text-zinc-300">{createdOrder?.id}</span>
-                        <button type="button" onClick={() => copyCheckoutValue("order", createdOrder?.id || "")} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 text-zinc-400 hover:border-white/20 hover:text-white" aria-label="Salin nomor pesanan">
-                          {copiedValue === "order" ? <Check size={15} className="text-emerald-300" aria-hidden="true" /> : <Copy size={15} aria-hidden="true" />}
+                        <span className="min-w-0 break-all font-mono text-xs text-[var(--text-secondary)]">{createdOrder?.id}</span>
+                        <button type="button" onClick={() => copyCheckoutValue("order", createdOrder?.id || "")} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]" aria-label="Salin nomor pesanan">
+                          {copiedValue === "order" ? <Check size={15} className="text-[var(--status-success)]" aria-hidden="true" /> : <Copy size={15} aria-hidden="true" />}
                         </button>
                       </dd>
                     </div>
-                    <div><dt className="text-xs uppercase tracking-wider text-zinc-600">Metode pembayaran</dt><dd className="mt-1 text-zinc-300">{payment?.paymentMethod || createdOrder?.paymentMethod || "QRIS"}</dd></div>
-                    <div><dt className="text-xs uppercase tracking-wider text-zinc-600">Status pembayaran</dt><dd className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${paymentStatusTone(currentPaymentStatus)}`}>{paymentStatusLabel(currentPaymentStatus)}</dd></div>
-                    <div><dt className="text-xs uppercase tracking-wider text-zinc-600">Batas pembayaran</dt><dd className="mt-1 text-zinc-300">{formatCheckoutDate(createdOrder?.paymentExpiresAt || payment?.expiresAt || "")}</dd></div>
+                    <div><dt className="text-xs uppercase tracking-wider text-[var(--text-muted)]">Metode pembayaran</dt><dd className="mt-1 text-[var(--text-secondary)]">{payment?.paymentMethod || createdOrder?.paymentMethod || "QRIS"}</dd></div>
+                    <div><dt className="text-xs uppercase tracking-wider text-[var(--text-muted)]">Status pembayaran</dt><dd className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${paymentStatusTone(currentPaymentStatus)}`}>{paymentStatusLabel(currentPaymentStatus)}</dd></div>
+                    <div><dt className="text-xs uppercase tracking-wider text-[var(--text-muted)]">Batas pembayaran</dt><dd className="mt-1 text-[var(--text-secondary)]">{formatCheckoutDate(createdOrder?.paymentExpiresAt || payment?.expiresAt || "")}</dd></div>
                   </dl>
                 </div>
 
-                <div className="rounded-lg border border-white/[0.08] bg-[var(--bg-raised)] p-5 text-center">
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-raised)] p-5 text-center">
                   <div className="flex items-center justify-between gap-3 text-left">
                     <div>
-                      <p className="text-base font-semibold text-white">{paymentStatusLabel(currentPaymentStatus)}</p>
-                      <p className="mt-1 text-sm text-zinc-500">Status pembayaran akan diperbarui secara otomatis.</p>
+                      <p className="text-base font-semibold text-[var(--text-primary)]">{paymentStatusLabel(currentPaymentStatus)}</p>
+                      <p className="mt-1 text-sm text-[var(--text-muted)]">Status pembayaran akan diperbarui secara otomatis.</p>
                     </div>
-                    <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${countdown.expired ? "border-rose-400/20 bg-rose-400/10 text-rose-300" : "border-cyan-300/20 bg-cyan-300/10 text-cyan-200"}`}>
+                    <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${countdown.expired ? "border-[color-mix(in_srgb,var(--status-danger)_32%,transparent)] bg-[color-mix(in_srgb,var(--status-danger)_12%,transparent)] text-[var(--status-danger)]" : "border-[color-mix(in_srgb,var(--accent-cyan)_32%,transparent)] bg-[color-mix(in_srgb,var(--accent-cyan)_12%,transparent)] text-[var(--accent-cyan)]"}`}>
                       {countdown.label}
                     </span>
                   </div>
                   {qrSrc ? (
-                    <button type="button" onClick={() => setQrExpanded(true)} className="mx-auto mt-5 flex aspect-square w-full max-w-[280px] items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-white p-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-violet-400 sm:max-w-[300px]" aria-label="Perbesar QRIS">
+                    <button type="button" onClick={() => setQrExpanded(true)} className="mx-auto mt-5 flex aspect-square w-full max-w-[280px] items-center justify-center overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--fx-scan-plate)] p-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--accent-violet)] sm:max-w-[300px]" aria-label="Perbesar QRIS">
                       <img src={qrSrc} alt="QRIS pembayaran Kavya" className="h-full w-full object-contain" />
                     </button>
                   ) : (
-                    <div className="mx-auto mt-5 flex aspect-square w-full max-w-[280px] items-center justify-center rounded-lg border border-white/10 bg-white/[0.025] p-4 text-sm text-zinc-500">
+                    <div className="mx-auto mt-5 flex aspect-square w-full max-w-[280px] items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--bg-raised)] p-4 text-sm text-[var(--text-muted)]">
                       QRIS belum tersedia. Coba periksa status.
                     </div>
                   )}
-                  {qrSrc ? <p className="mt-2 text-xs text-zinc-600">Tekan QRIS untuk memperbesar.</p> : null}
+                  {qrSrc ? <p className="mt-2 text-xs text-[var(--text-muted)]">Tekan QRIS untuk memperbesar.</p> : null}
                   {payment?.providerError || createdOrder?.paymentError ? (
-                    <div role="alert" className="mt-4 rounded-lg border border-amber-300/20 bg-amber-300/10 px-4 py-3 text-left text-sm text-amber-200">
+                    <div role="alert" className="mt-4 rounded-lg border border-[color-mix(in_srgb,var(--status-warning)_32%,transparent)] bg-[color-mix(in_srgb,var(--status-warning)_12%,transparent)] px-4 py-3 text-left text-sm text-[var(--status-warning)]">
                       Pembayaran belum dapat diperiksa. Coba lagi atau hubungi bantuan.
                     </div>
                   ) : null}
-                  {error ? <div role="alert" className="mt-4 rounded-lg border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-left text-sm text-rose-200">{error}</div> : null}
+                  {error ? <div role="alert" className="mt-4 rounded-lg border border-[color-mix(in_srgb,var(--status-danger)_32%,transparent)] bg-[color-mix(in_srgb,var(--status-danger)_12%,transparent)] px-4 py-3 text-left text-sm text-[var(--status-danger)]">{error}</div> : null}
                   <div className="mt-5 grid gap-3 sm:grid-cols-2">
                     <button
                       type="button"
                       onClick={() => refreshCurrentOrder({ manual: true })}
                       disabled={checkingPayment || paymentRefreshLockRef.current}
-                      className="inline-flex min-h-12 items-center justify-center rounded-lg bg-white px-4 text-sm font-semibold text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex min-h-12 items-center justify-center rounded-lg bg-[var(--text-primary)] px-4 text-sm font-semibold text-[var(--text-on-inverse)] transition-colors hover:bg-[color-mix(in_srgb,var(--text-primary)_58%,white)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {checkingPayment ? <span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-black/20 border-t-black" aria-hidden="true" /> : null}
+                      {checkingPayment ? <span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-[color-mix(in_srgb,var(--text-on-inverse)_22%,transparent)] border-t-[var(--text-on-inverse)]" aria-hidden="true" /> : null}
                       {checkingPayment ? "Sedang memeriksa..." : "Cek Status Pembayaran"}
                     </button>
                     {payment?.paymentUrl || createdOrder?.qrisUrl ? (
-                      <a href={payment?.paymentUrl || createdOrder?.qrisUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-12 items-center justify-center rounded-lg border border-white/10 px-4 text-sm font-semibold text-zinc-200 transition-colors hover:border-white/20 hover:bg-white/[0.04]">
+                      <a href={payment?.paymentUrl || createdOrder?.qrisUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-12 items-center justify-center rounded-lg border border-[var(--border)] px-4 text-sm font-semibold text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]">
                         Buka Halaman Pembayaran
                       </a>
                     ) : null}
                   </div>
-                  <div className="mt-5 border-t border-white/[0.08] pt-4 text-left text-sm text-zinc-500">
-                    Bermasalah saat membayar? <a href={ownerContactHref(ownerWhatsApp, createdOrder?.id || "")} target="_blank" rel="noreferrer" className="font-medium text-zinc-200 underline decoration-white/20 underline-offset-4 hover:text-white">Hubungi bantuan</a>
+                  <div className="mt-5 border-t border-[var(--border)] pt-4 text-left text-sm text-[var(--text-muted)]">
+                    Bermasalah saat membayar? <a href={ownerContactHref(ownerWhatsApp, createdOrder?.id || "")} target="_blank" rel="noreferrer" className="font-medium text-[var(--text-secondary)] underline decoration-[var(--border-strong)] underline-offset-4 hover:text-[var(--text-primary)]">Hubungi bantuan</a>
                   </div>
                 </div>
                 {qrExpanded && qrSrc ? (
-                  <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="QRIS diperbesar" onClick={() => setQrExpanded(false)}>
-                    <div className="w-full max-w-md rounded-xl border border-white/10 bg-[var(--surface)] p-4" onClick={(event) => event.stopPropagation()}>
+                  <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[color-mix(in_srgb,var(--bg-canvas)_76%,transparent)] p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="QRIS diperbesar" onClick={() => setQrExpanded(false)}>
+                    <div className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4" onClick={(event) => event.stopPropagation()}>
                       <div className="flex items-center justify-between gap-3">
-                        <div><p className="font-semibold text-white">QRIS Pembayaran</p><p className="mt-1 break-all font-mono text-xs text-zinc-500">{createdOrder?.id}</p></div>
-                        <button type="button" onClick={() => setQrExpanded(false)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/10 text-zinc-400 hover:text-white" aria-label="Tutup QRIS">
+                        <div><p className="font-semibold text-[var(--text-primary)]">QRIS Pembayaran</p><p className="mt-1 break-all font-mono text-xs text-[var(--text-muted)]">{createdOrder?.id}</p></div>
+                        <button type="button" onClick={() => setQrExpanded(false)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-primary)]" aria-label="Tutup QRIS">
                           <X size={20} aria-hidden="true" />
                         </button>
                       </div>
-                      <div className="mt-4 aspect-square overflow-hidden rounded-lg bg-white p-3">
+                      <div className="mt-4 aspect-square overflow-hidden rounded-lg bg-[var(--fx-scan-plate)] p-3">
                         <img src={qrSrc} alt="QRIS pembayaran Kavya diperbesar" className="h-full w-full object-contain" />
                       </div>
                     </div>
@@ -1340,11 +1341,11 @@ export default function ProductsPage() {
 
             {step === "process" || step === "done" ? (
               <div className="p-6 text-center sm:p-10">
-                <div className={`mx-auto flex h-14 w-14 items-center justify-center rounded-full border ${step === "done" ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-300" : "border-amber-300/20 bg-amber-300/10 text-amber-200"}`}>
+                <div className={`mx-auto flex h-14 w-14 items-center justify-center rounded-full border ${step === "done" ? "border-[color-mix(in_srgb,var(--status-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--status-success)_12%,transparent)] text-[var(--status-success)]" : "border-[color-mix(in_srgb,var(--status-warning)_32%,transparent)] bg-[color-mix(in_srgb,var(--status-warning)_12%,transparent)] text-[var(--status-warning)]"}`}>
                   {step === "done" ? <Check size={24} aria-hidden="true" /> : <Clock size={24} aria-hidden="true" />}
                 </div>
-                <h2 className="mt-5 text-2xl font-semibold text-white">{stockRaceDeposit ? "Stok habis, saldo bertambah" : step === "done" ? "Pesanan selesai" : "Pembayaran berhasil"}</h2>
-                <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-zinc-400">
+                <h2 className="mt-5 text-2xl font-semibold text-[var(--text-primary)]">{stockRaceDeposit ? "Stok habis, saldo bertambah" : step === "done" ? "Pesanan selesai" : "Pembayaran berhasil"}</h2>
+                <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-[var(--text-muted)]">
                   {stockRaceDeposit
                     ? "Pembayaran sudah diterima, tapi stok produk sudah habis. Nominal order otomatis masuk ke saldo reseller untuk order berikutnya."
                     : step === "done"
@@ -1352,64 +1353,64 @@ export default function ProductsPage() {
                       : "Pesananmu sudah diterima dan sedang diproses."}
                 </p>
                 {createdOrder ? (
-                  <dl className="mx-auto mt-6 grid max-w-3xl gap-px overflow-hidden rounded-lg border border-white/[0.08] bg-white/[0.08] text-left sm:grid-cols-2 lg:grid-cols-4">
-                    <div className="bg-[var(--bg-raised)] p-4"><dt className="text-xs uppercase tracking-wider text-zinc-600">Nomor pesanan</dt><dd className="mt-2 break-all font-mono text-xs text-zinc-300">{createdOrder.id}</dd></div>
-                    <div className="bg-[var(--bg-raised)] p-4"><dt className="text-xs uppercase tracking-wider text-zinc-600">Produk</dt><dd className="mt-2 text-sm font-medium text-zinc-200">{createdOrder.product}<span className="mt-1 block text-xs font-normal text-zinc-500">{createdOrder.variant}</span></dd></div>
-                    <div className="bg-[var(--bg-raised)] p-4"><dt className="text-xs uppercase tracking-wider text-zinc-600">Nominal</dt><dd className="mt-2 text-sm font-medium text-zinc-200">{formatRupiah(createdOrder.total || 0)}</dd></div>
-                    <div className="bg-[var(--bg-raised)] p-4"><dt className="text-xs uppercase tracking-wider text-zinc-600">Waktu pembayaran</dt><dd className="mt-2 text-sm text-zinc-300">{formatCheckoutDate(createdOrder.paidAt || "")}</dd></div>
+                  <dl className="mx-auto mt-6 grid max-w-3xl gap-px overflow-hidden rounded-lg border border-[var(--border)] bg-white/[0.08] text-left sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="bg-[var(--bg-raised)] p-4"><dt className="text-xs uppercase tracking-wider text-[var(--text-muted)]">Nomor pesanan</dt><dd className="mt-2 break-all font-mono text-xs text-[var(--text-secondary)]">{createdOrder.id}</dd></div>
+                    <div className="bg-[var(--bg-raised)] p-4"><dt className="text-xs uppercase tracking-wider text-[var(--text-muted)]">Produk</dt><dd className="mt-2 text-sm font-medium text-[var(--text-secondary)]">{createdOrder.product}<span className="mt-1 block text-xs font-normal text-[var(--text-muted)]">{createdOrder.variant}</span></dd></div>
+                    <div className="bg-[var(--bg-raised)] p-4"><dt className="text-xs uppercase tracking-wider text-[var(--text-muted)]">Nominal</dt><dd className="mt-2 text-sm font-medium text-[var(--text-secondary)]">{formatRupiah(createdOrder.total || 0)}</dd></div>
+                    <div className="bg-[var(--bg-raised)] p-4"><dt className="text-xs uppercase tracking-wider text-[var(--text-muted)]">Waktu pembayaran</dt><dd className="mt-2 text-sm text-[var(--text-secondary)]">{formatCheckoutDate(createdOrder.paidAt || "")}</dd></div>
                   </dl>
                 ) : null}
                 {step === "done" && canShowCredentials ? (
-                  <div className="mx-auto mt-5 max-w-4xl rounded-lg border border-emerald-400/20 bg-emerald-400/[0.05] px-4 py-3 text-left text-sm text-emerald-200">
+                  <div className="mx-auto mt-5 max-w-4xl rounded-lg border border-[color-mix(in_srgb,var(--status-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--status-success)_6%,transparent)] px-4 py-3 text-left text-sm text-[var(--status-success)]">
                     Akun baru berhasil ditambahkan ke Akun Saya.
                   </div>
                 ) : null}
                 {canShowCredentials ? (
                   <div className="mx-auto mt-5 grid max-w-4xl gap-4 text-left md:grid-cols-2">
-                    <div className="min-w-0 rounded-lg border border-emerald-400/15 bg-emerald-400/[0.04] p-4">
+                    <div className="min-w-0 rounded-lg border border-[color-mix(in_srgb,var(--status-success)_26%,transparent)] bg-[color-mix(in_srgb,var(--status-success)_5%,transparent)] p-4">
                       <div className="flex flex-wrap items-center justify-between gap-3">
-                        <p className="text-sm font-semibold text-zinc-100">Detail Akun</p>
+                        <p className="text-sm font-semibold text-[var(--text-primary)]">Detail Akun</p>
                         <div className="flex gap-2">
-                          <button type="button" onClick={() => setCredentialsVisible((visible) => !visible)} className="min-h-9 rounded-lg border border-white/10 px-3 text-xs font-semibold text-zinc-300 hover:border-white/20 hover:text-white">
+                          <button type="button" onClick={() => setCredentialsVisible((visible) => !visible)} className="min-h-9 rounded-lg border border-[var(--border)] px-3 text-xs font-semibold text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]">
                             {credentialsVisible ? "Sembunyikan" : "Tampilkan"}
                           </button>
-                          <button type="button" onClick={() => copyCheckoutValue("credential", credentialText)} disabled={!credentialsVisible} className="min-h-9 rounded-lg border border-white/10 px-3 text-xs font-semibold text-zinc-300 hover:border-white/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-40">
+                          <button type="button" onClick={() => copyCheckoutValue("credential", credentialText)} disabled={!credentialsVisible} className="min-h-9 rounded-lg border border-[var(--border)] px-3 text-xs font-semibold text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40">
                             {copiedValue === "credential" ? "Tersalin" : "Salin"}
                           </button>
                         </div>
                       </div>
-                      <div className="mt-3 min-h-36 rounded-md border border-white/[0.06] bg-black/20 p-4">
+                      <div className="mt-3 min-h-36 rounded-md border border-[var(--border)] bg-[var(--bg-canvas)] p-4">
                         {credentialsVisible ? (
                           <div className="space-y-2">
                             {deliveryCredentialFields.length ? deliveryCredentialFields.map((field) => (
-                              <div key={field.key} className="flex min-h-11 items-center justify-between gap-3 rounded-md border border-white/[0.06] px-3 py-2">
-                                <div className="min-w-0"><span className="block text-[11px] uppercase tracking-wide text-zinc-600">{field.label}</span><strong className="mt-0.5 block break-all font-mono text-xs font-medium text-zinc-300">{field.value}</strong></div>
-                                <button type="button" onClick={() => copyCheckoutValue(field.key, field.value)} className="shrink-0 rounded-md border border-white/10 px-2.5 py-2 text-[11px] font-semibold text-zinc-300 hover:text-white">{copiedValue === field.key ? "Tersalin" : "Salin"}</button>
+                              <div key={field.key} className="flex min-h-11 items-center justify-between gap-3 rounded-md border border-[var(--border)] px-3 py-2">
+                                <div className="min-w-0"><span className="block text-[11px] uppercase tracking-wide text-[var(--text-muted)]">{field.label}</span><strong className="mt-0.5 block break-all font-mono text-xs font-medium text-[var(--text-secondary)]">{field.value}</strong></div>
+                                <button type="button" onClick={() => copyCheckoutValue(field.key, field.value)} className="shrink-0 rounded-md border border-[var(--border)] px-2.5 py-2 text-[11px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]">{copiedValue === field.key ? "Tersalin" : "Salin"}</button>
                               </div>
-                            )) : <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-zinc-300">{credentialText}</pre>}
+                            )) : <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-[var(--text-secondary)]">{credentialText}</pre>}
                           </div>
                         ) : (
-                          <div className="flex min-h-28 items-center justify-center text-center text-sm leading-6 text-zinc-500">
+                          <div className="flex min-h-28 items-center justify-center text-center text-sm leading-6 text-[var(--text-muted)]">
                             Credential disembunyikan. Tekan Tampilkan untuk melihat selama 60 detik.
                           </div>
                         )}
                       </div>
                     </div>
-                    <div className="min-w-0 rounded-lg border border-violet-300/15 bg-violet-300/[0.04] p-4">
+                    <div className="min-w-0 rounded-lg border border-[color-mix(in_srgb,var(--accent-violet)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-violet)_7%,transparent)] p-4">
                       <div className="flex min-h-11 flex-wrap items-center justify-between gap-3">
-                        <div><p className="text-sm font-semibold text-zinc-100">Template Siap Kirim</p><p className="mt-1 text-xs text-zinc-500">{deliveryTemplateLabel}</p></div>
-                        {deliveryTemplateText ? <button type="button" onClick={() => copyCheckoutValue("template", deliveryTemplateText)} className="min-h-9 rounded-lg bg-white px-3 text-xs font-semibold text-black hover:bg-zinc-200">{copiedValue === "template" ? "Template berhasil disalin" : "Salin Semua"}</button> : null}
+                        <div><p className="text-sm font-semibold text-[var(--text-primary)]">Template Siap Kirim</p><p className="mt-1 text-xs text-[var(--text-muted)]">{deliveryTemplateLabel}</p></div>
+                        {deliveryTemplateText ? <button type="button" onClick={() => copyCheckoutValue("template", deliveryTemplateText)} className="min-h-9 rounded-lg bg-[var(--text-primary)] px-3 text-xs font-semibold text-[var(--text-on-inverse)] hover:bg-[color-mix(in_srgb,var(--text-primary)_58%,white)]">{copiedValue === "template" ? "Template berhasil disalin" : "Salin Semua"}</button> : null}
                       </div>
-                      {deliveryTemplateText ? <pre className="mt-3 max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-white/[0.06] bg-black/20 p-4 font-mono text-xs leading-5 text-zinc-300">{deliveryTemplateText}</pre> : <div className="mt-3 flex min-h-36 items-center justify-center rounded-md border border-white/[0.06] bg-black/20 p-4 text-center text-sm leading-6 text-zinc-500">{deliveryTemplateEmptyText}</div>}
+                      {deliveryTemplateText ? <pre className="mt-3 max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-[var(--border)] bg-[var(--bg-canvas)] p-4 font-mono text-xs leading-5 text-[var(--text-secondary)]">{deliveryTemplateText}</pre> : <div className="mt-3 flex min-h-36 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-canvas)] p-4 text-center text-sm leading-6 text-[var(--text-muted)]">{deliveryTemplateEmptyText}</div>}
                     </div>
                   </div>
                 ) : null}
                 <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row sm:flex-wrap">
-                  <Link to={isAuthenticatedResellerCheckout && deliveredAccountId ? `/reseller-v2/accounts?account=${encodeURIComponent(deliveredAccountId)}&tab=template` : isResellerCheckout ? "/reseller-v2/accounts" : trackingHref} className="inline-flex min-h-12 items-center justify-center rounded-lg bg-white px-5 text-sm font-semibold text-black transition-colors hover:bg-zinc-200">
+                  <Link to={isAuthenticatedResellerCheckout && deliveredAccountId ? `/reseller-v2/accounts?account=${encodeURIComponent(deliveredAccountId)}&tab=template` : isResellerCheckout ? "/reseller-v2/accounts" : trackingHref} className="inline-flex min-h-12 items-center justify-center rounded-lg bg-[var(--text-primary)] px-5 text-sm font-semibold text-[var(--text-on-inverse)] transition-colors hover:bg-[color-mix(in_srgb,var(--text-primary)_58%,white)]">
                     {isAuthenticatedResellerCheckout ? "Lihat Akun yang Dibeli" : "Lacak Pesanan"}
                   </Link>
-                  {isAuthenticatedResellerCheckout ? <Link to="/reseller-v2/orders" className="inline-flex min-h-12 items-center justify-center rounded-lg border border-white/10 px-5 text-sm font-semibold text-zinc-200 transition-colors hover:border-white/20 hover:bg-white/[0.04]">Lihat Pesanan</Link> : null}
-                  <Link to={isAuthenticatedResellerCheckout ? "/reseller-v2/ringkasan" : "/"} className="inline-flex min-h-12 items-center justify-center rounded-lg px-5 text-sm font-medium text-zinc-500 transition-colors hover:text-white">
+                  {isAuthenticatedResellerCheckout ? <Link to="/reseller-v2/orders" className="inline-flex min-h-12 items-center justify-center rounded-lg border border-[var(--border)] px-5 text-sm font-semibold text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]">Lihat Pesanan</Link> : null}
+                  <Link to={isAuthenticatedResellerCheckout ? "/reseller-v2/ringkasan" : "/"} className="inline-flex min-h-12 items-center justify-center rounded-lg px-5 text-sm font-medium text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]">
                     {isAuthenticatedResellerCheckout ? "Kembali ke Ringkasan" : "Kembali ke Beranda"}
                   </Link>
                 </div>
@@ -1417,77 +1418,78 @@ export default function ProductsPage() {
             ) : null}
           </section>
 
-          <p className="mt-10 text-center text-sm text-zinc-600">Pembayaran terhubung langsung dengan status pesanan Kavya.</p>
+          <p className="mt-10 text-center text-sm text-[var(--text-muted)]">Pembayaran terhubung langsung dengan status pesanan Kavya.</p>
         </main>
       
     );
   }
 
   return (
-    
-      <main className="min-h-screen bg-[#f4eee4] px-4 py-6 text-slate-950">
-        <section className="mx-auto min-h-[calc(100vh-48px)] max-w-6xl rounded-md border border-gray-200 bg-[#fbf6ef] px-5 py-5">
-          <header className="flex items-center justify-between">
-            <Link to="/" className="inline-flex items-center gap-2 text-sm font-semibold">
-              <span className="flex h-8 w-8 items-center justify-center rounded-md bg-[#2b2b2b] text-white">K</span>
-              Kavya
+      <main className="theme-dark min-h-screen bg-[var(--bg-canvas)] px-4 py-6 text-[var(--text-primary)] sm:px-6 sm:py-8">
+        <header className="mx-auto flex max-w-6xl items-center justify-between">
+          <Link to="/" className="inline-flex min-h-11 items-center gap-3 rounded-lg font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent-violet)]">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface-hover)] font-serif">K</span>
+            <span>Kavya</span>
+          </Link>
+          <nav className="flex items-center gap-2 sm:gap-3">
+            <Link to="/order-tracking" className="inline-flex min-h-11 items-center rounded-lg px-4 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]">
+              Lacak Pesanan
             </Link>
-            <nav className="flex items-center gap-5 text-xs font-medium">
-              <Link to="/" className="text-slate-600 hover:text-red-600">Beranda</Link>
-              <Link to="/products" className="text-slate-900">Produk</Link>
-              <Link to="/order-tracking" className="text-slate-600 hover:text-red-600">Lacak Pesanan</Link>
-              <Link to="/login" className="rounded-md bg-[#2b2b2b] px-4 py-2 text-white">Masuk</Link>
-            </nav>
-          </header>
+            <Link to="/login" className="inline-flex min-h-11 items-center rounded-lg border border-[var(--border)] px-4 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]">
+              Masuk
+            </Link>
+          </nav>
+        </header>
 
-          <div className="mx-auto mt-8 max-w-2xl text-center">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">Digital Account Catalog</p>
-            <h1 className="mt-3 font-serif text-4xl font-semibold leading-tight md:text-5xl">Pilih Paket Akun Digital</h1>
-            <p className="mx-auto mt-4 max-w-lg text-base leading-7 text-slate-500">
-              Semua akun premium dengan garansi penuh selama masa langganan. Harga terjangkau, proses cepat, aman terpercaya.
-            </p>
-          </div>
+        <div className="mx-auto mt-14 max-w-2xl text-center sm:mt-20">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[var(--text-muted)]">Digital Account Catalog</p>
+          <h1 className="mt-4 font-serif text-4xl font-semibold leading-tight md:text-5xl">Pilih Paket Akun Digital</h1>
+          <p className="mx-auto mt-5 max-w-lg text-base leading-7 text-[var(--text-secondary)]">
+            Semua akun premium dengan garansi penuh selama masa langganan. Harga terjangkau, proses cepat, aman terpercaya.
+          </p>
+        </div>
 
-          <div className="mx-auto mt-10 max-w-5xl rounded-md border border-gray-100 bg-white p-4">
-            <div className="grid gap-3 lg:grid-cols-[1fr_auto_auto] lg:items-center">
-              <label className="relative block">
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-                  <Search size={15} aria-hidden="true" />
-                </span>
-                <input value={query} onChange={(event) => setQuery(event.target.value)} className="h-10 w-full rounded-md border border-gray-100 bg-[#f7f1e8] pl-9 pr-3 text-sm outline-none focus:border-red-200" placeholder="Cari produk..." />
-              </label>
-              <div className="flex flex-wrap gap-2">
-                {categories.map((item) => (
-                  <button key={item} type="button" onClick={() => setCategory(item)} className={`h-9 rounded-md px-3 text-xs font-medium ${category === item ? "bg-[#2b2b2b] text-white" : "bg-[#f7f1e8] text-slate-700 hover:bg-red-50 hover:text-red-600"}`}>
-                    {item}
-                  </button>
-                ))}
-              </div>
-              <select value={sort} onChange={(event) => setSort(event.target.value)} className="h-9 rounded-md border border-gray-100 bg-[#f7f1e8] px-3 text-xs outline-none focus:border-red-200 focus:ring-2 focus:ring-red-200/40">
-                <option>Termurah</option>
-                <option>Termahal</option>
-                <option>Stok</option>
-              </select>
+        <div className="mx-auto mt-12 max-w-5xl rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-lift)] backdrop-blur-[var(--glass-blur)]">
+          <div className="grid gap-3 lg:grid-cols-[1fr_auto_auto] lg:items-center">
+            <label className="relative block">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]">
+                <Search size={15} aria-hidden="true" />
+              </span>
+              <input value={query} onChange={(event) => setQuery(event.target.value)} className="h-10 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-raised)] pl-9 pr-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--accent-violet)]" placeholder="Cari produk..." />
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {categories.map((item) => (
+                <button key={item} type="button" onClick={() => setCategory(item)} className={`catalog-filter px-4 ${category === item ? "is-selected" : ""}`}>
+                  {item}
+                </button>
+              ))}
             </div>
+            <select value={sort} onChange={(event) => setSort(event.target.value)} className="h-9 rounded-lg border border-[var(--border)] bg-[var(--bg-raised)] px-3 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent-violet)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--accent-violet)_18%,transparent)]">
+              <option>Termurah</option>
+              <option>Termahal</option>
+              <option>Stok</option>
+            </select>
           </div>
+        </div>
 
-          {error ? <div className="mx-auto mt-4 max-w-5xl rounded-md bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+        {error ? <div role="alert" className="mx-auto mt-4 max-w-5xl rounded-lg border border-[color-mix(in_srgb,var(--status-danger)_32%,transparent)] bg-[color-mix(in_srgb,var(--status-danger)_12%,transparent)] px-4 py-3 text-sm text-[var(--status-danger)]">{error}</div> : null}
 
-          <p className="mx-auto mt-6 max-w-5xl text-xs text-slate-400">Menampilkan {visibleProducts.length} produk</p>
+        <p className="mx-auto mt-6 max-w-5xl text-xs text-[var(--text-muted)]">Menampilkan {visibleProducts.length} produk</p>
 
-          <div className="mx-auto mt-4 grid max-w-5xl items-start gap-5 md:grid-cols-2 xl:grid-cols-3">
-            {productColumns.map((column, columnIndex) => (
-              <div key={columnIndex} className="grid gap-5">
-                {column.map((product) => {
+        <div className="mx-auto mt-4 grid max-w-5xl items-start gap-5 md:grid-cols-2 xl:grid-cols-3">
+          {productColumns.map((column, columnIndex) => (
+            <div key={columnIndex} className="grid gap-5">
+              {column.map((product) => {
               const expanded = openProductId === product.id;
               const selectedForProduct = catalogSelection?.product.id === product.id ? catalogSelection : null;
               const brand = productBrandAsset(product);
               const logoUrl = productLogoUrl(product);
               return (
-                <article key={product.id} className={`overflow-hidden rounded-md border bg-white shadow-sm transition-colors ${expanded ? "border-red-200" : "border-gray-100"}`}>
+                <article key={product.id} className={`catalog-card ${expanded ? "is-expanded" : ""}`}>
                   <div
                     role="button"
                     tabIndex={0}
+                    aria-expanded={expanded}
                     onClick={() => toggleProduct(product)}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
@@ -1495,18 +1497,18 @@ export default function ProductsPage() {
                         toggleProduct(product);
                       }
                     }}
-                    className="block w-full cursor-pointer text-left"
+                    className="catalog-trigger block w-full cursor-pointer text-left"
                   >
-                    <div className={`relative flex h-44 items-center justify-center bg-gradient-to-br ${productTone(product)}`}>
-                    <span className="absolute left-3 top-3 rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-700">{product.code}</span>
-                    <span className={`absolute right-3 top-3 rounded-full px-2 py-1 text-[10px] font-semibold ${product.stockCount > 0 ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                    <div className={`catalog-art bg-gradient-to-br ${productTone(product)}`}>
+                    <span className="absolute left-3 top-3 rounded-full bg-[var(--fx-art-plate)] px-2 py-1 text-[10px] font-semibold text-[var(--fx-art-plate-ink)]">{product.code}</span>
+                    <span className={`absolute right-3 top-3 rounded-full px-2 py-1 text-[10px] font-semibold ${product.stockCount > 0 ? "bg-[color-mix(in_srgb,var(--status-success)_18%,transparent)] text-[var(--status-success)]" : "bg-[var(--fx-art-scrim)] text-[var(--fx-art-scrim-ink)]"}`}>
                       {product.stockCount > 0 ? "Tersedia" : "Stok kosong"}
                     </span>
-                    <span className="absolute bottom-3 left-3 rounded-full bg-black/70 px-2 py-1 text-[10px] font-semibold text-white">{product.stockCount} stok</span>
-                    <span className="absolute bottom-3 right-3 rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-700">
+                    <span className="absolute bottom-3 left-3 rounded-full bg-[var(--fx-art-scrim)] px-2 py-1 text-[10px] font-semibold text-[var(--fx-art-scrim-ink)] backdrop-blur-md">{product.stockCount} stok</span>
+                    <span className="absolute bottom-3 right-3 rounded-full bg-[var(--fx-art-plate)] px-2 py-1 text-[10px] font-semibold text-[var(--fx-art-plate-ink)] backdrop-blur-md">
                       {expanded ? "Tutup varian" : "Lihat varian"}
                     </span>
-                    <div className="relative flex h-20 w-20 items-center justify-center rounded-2xl bg-white/90 text-slate-950 shadow-2xl backdrop-blur">
+                    <div className="catalog-logo-plate">
                       <span className="px-2 text-center text-xs font-black leading-tight tracking-wide">{product.code || brand.label}</span>
                       {logoUrl ? (
                         <img
@@ -1523,14 +1525,14 @@ export default function ProductsPage() {
                     </div>
                     </div>
 
-                    <div className="p-4 pb-3">
+                    <div className="p-5 pb-4">
                     <div className="flex items-center gap-2">
-                      <h2 className="text-base font-semibold">{product.name}</h2>
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">{productLabel(product)}</span>
-                      <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">Reseller</span>
+                      <h2 className="text-base font-semibold text-[var(--text-primary)]">{product.name}</h2>
+                      <span className="rounded-full bg-[var(--bg-raised)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]">{productLabel(product)}</span>
+                      <span className="rounded-full bg-[color-mix(in_srgb,var(--status-warning)_14%,transparent)] px-2 py-0.5 text-[10px] font-semibold text-[var(--status-warning)]">Reseller</span>
                     </div>
-                    <p className="mt-2 min-h-[44px] text-sm leading-5 text-slate-500">{product.description}</p>
-                    <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
+                    <p className="mt-2 min-h-[44px] text-sm leading-5 text-[var(--text-secondary)]">{product.description}</p>
+                    <div className="mt-3 flex items-center justify-between text-xs text-[var(--text-muted)]">
                       <span>{product.variants.length} varian</span>
                       <span>{durationCount(product)} pilihan durasi</span>
                     </div>
@@ -1538,45 +1540,45 @@ export default function ProductsPage() {
                   </div>
 
                   {expanded ? (
-                    <div className="border-t border-gray-100 px-4 pb-4 pt-3">
-                      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Pilih varian</p>
+                    <div className="border-t border-[var(--border)] px-5 pb-5 pt-4">
+                      <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Pilih varian</p>
                     <div className="mt-4 space-y-2">
                       {product.variants.slice(0, 4).map((variant) => {
                         const duration = firstDuration(variant);
                         const selectedVariant = selectedForProduct?.variant.id === variant.id;
                         return (
-                          <button key={variant.id} type="button" onClick={() => selectCatalogVariant(product, variant, duration.duration, duration.price)} className={`grid w-full grid-cols-[auto_1fr_auto] items-center gap-3 rounded-md border p-3 text-left transition-colors ${selectedVariant ? "border-red-200 bg-red-50" : "border-gray-100 hover:border-red-100 hover:bg-red-50/40"}`}>
-                            <span className={`flex h-7 w-7 items-center justify-center rounded-full ${selectedVariant ? "bg-red-500 text-white" : variant.stockCount > 0 ? "bg-red-50 text-red-500" : "bg-slate-50 text-slate-300"}`}>
+                          <button key={variant.id} type="button" onClick={() => selectCatalogVariant(product, variant, duration.duration, duration.price)} className={`catalog-variant ${selectedVariant ? "is-selected" : ""}`}>
+                            <span className={`flex h-7 w-7 items-center justify-center rounded-full ${selectedVariant ? "bg-[var(--accent-violet)] text-[var(--text-on-inverse)]" : variant.stockCount > 0 ? "bg-[color-mix(in_srgb,var(--accent-violet)_12%,transparent)] text-[var(--accent-violet)]" : "bg-[var(--bg-raised)] text-[var(--text-muted)]"}`}>
                               {selectedVariant ? <Check size={12} aria-hidden="true" /> : <Circle size={12} aria-hidden="true" />}
                             </span>
                             <span className="min-w-0">
-                              <span className="block text-sm font-semibold">{variant.name} <span className="text-[10px] font-medium text-slate-400">{variant.code}</span></span>
-                              <span className="block truncate text-xs text-slate-400">{variant.stockCount} akun tersedia</span>
+                              <span className="block text-sm font-semibold text-[var(--text-primary)]">{variant.name} <span className="text-[10px] font-medium text-[var(--text-muted)]">{variant.code}</span></span>
+                              <span className="block truncate text-xs text-[var(--text-muted)]">{variant.stockCount} akun tersedia</span>
                             </span>
-                            <span className="text-right text-sm font-bold">{formatRupiah(duration.price)}<span className="block text-[10px] font-medium text-slate-400">mulai</span></span>
+                            <span className="text-right text-sm font-bold text-[var(--text-primary)]">{formatRupiah(duration.price)}<span className="block text-[10px] font-medium text-[var(--text-muted)]">mulai</span></span>
                           </button>
                         );
                       })}
-                      {product.variants.length > 4 ? <p className="text-center text-xs text-slate-400">+ {product.variants.length - 4} varian lainnya</p> : null}
+                      {product.variants.length > 4 ? <p className="text-center text-xs text-[var(--text-muted)]">+ {product.variants.length - 4} varian lainnya</p> : null}
                     </div>
 
                       {selectedForProduct ? (
                         <>
                     <div className="mt-4 grid grid-cols-3 gap-2">
                       {sortedAllowedPriceEntries(selectedForProduct.variant.prices || {}, selectedForProduct.variant.durationModes).slice(0, 6).map(([duration, price]) => (
-                        <button key={duration} type="button" onClick={() => selectCatalogDuration(duration, Number(price))} className={`rounded-md border px-2 py-2 text-left text-[11px] transition-colors ${selectedForProduct.duration === duration ? "border-red-200 bg-red-50 text-red-700" : "border-gray-100 bg-[#fbf7f0] hover:border-red-100 hover:bg-red-50"}`}>
-                          <span className="block text-slate-500">{duration}</span>
+                        <button key={duration} type="button" onClick={() => selectCatalogDuration(duration, Number(price))} className={`catalog-duration px-2 py-2 text-[11px] ${selectedForProduct.duration === duration ? "is-selected" : ""}`}>
+                          <span className="block text-[var(--text-muted)]">{duration}</span>
                           <span className="font-semibold">{formatRupiah(Number(price))}</span>
                         </button>
                       ))}
                     </div>
 
-                    <button type="button" onClick={startCatalogOrder} disabled={prechecking} className="mt-4 h-10 w-full rounded-md bg-[#2b2b2b] text-sm font-semibold text-white hover:bg-red-600 disabled:cursor-wait disabled:bg-slate-300">
+                    <button type="button" onClick={startCatalogOrder} disabled={prechecking} className="catalog-primary mt-4 w-full disabled:cursor-wait disabled:bg-[var(--bg-raised)] disabled:text-[var(--text-muted)]">
                       Pesan Sekarang
                     </button>
                         </>
                       ) : (
-                        <button type="button" disabled className="mt-4 h-10 w-full cursor-not-allowed rounded-md bg-slate-200 text-sm font-semibold text-slate-500">
+                        <button type="button" disabled className="mt-4 h-10 w-full cursor-not-allowed rounded-[var(--radius-pill)] border border-[var(--border)] bg-[var(--surface)] text-sm font-semibold text-[var(--text-muted)]">
                           Pilih varian dulu
                         </button>
                       )}
@@ -1585,17 +1587,15 @@ export default function ProductsPage() {
                 </article>
               );
                 })}
-              </div>
-            ))}
-          </div>
-
-          {!visibleProducts.length ? (
-            <div className="mx-auto mt-8 max-w-5xl rounded-md border border-gray-100 bg-white p-8 text-center text-sm text-slate-500">
-              Belum ada produk dengan stok ready.
             </div>
-          ) : null}
-        </section>
+          ))}
+        </div>
+
+        {!visibleProducts.length ? (
+          <div className="mx-auto mt-8 max-w-5xl rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-8 text-center text-sm text-[var(--text-secondary)]">
+            Belum ada produk dengan stok ready.
+          </div>
+        ) : null}
       </main>
-    
   );
 }
