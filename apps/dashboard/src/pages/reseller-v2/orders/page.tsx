@@ -9,6 +9,8 @@ import {
   type ApiPayment,
 } from "../../../lib/api";
 import { formatDateTime, formatRupiah } from "../../../lib/format";
+import { useQrisQr } from "../../../lib/useQrisQr";
+import { qrisPayloadFrom } from "../../../lib/qrisQr";
 import {
   deliveryIsComplete,
   orderCanReopenQris,
@@ -40,21 +42,6 @@ const REVEAL_AFTER_MS = 60_000;
 /** How often an open payment is re-checked while it is still pending. */
 const PAYMENT_POLL_MS = 7_000;
 
-/**
- * The QR image, when the payment provider drew one for us.
- *
- * The old page had a fallback: it handed the raw QRIS payload to
- * `api.qrserver.com` to have an outsider draw the code. That is the payment
- * string for a live order leaving the site, and it happens in the public
- * checkout too, where the person paying is a customer who never logged in.
- *
- * This page does not do that. If the provider returned an image we show it; if
- * it did not, the direct payment link is the way through, and it is a better
- * one anyway -- it is the provider's own page rather than a picture of it.
- */
-function qrisImageSource(payment: ApiPayment | null) {
-  return payment?.qrImageUrl || "";
-}
 
 export default function ResellerV2OrdersPage() {
   const navigate = useNavigate();
@@ -271,7 +258,8 @@ export default function ResellerV2OrdersPage() {
     },
   ];
 
-  const qrisImage = qrisImageSource(qrisPayment);
+  // Always drawn here, from the provider's raw string. See lib/qrisQr.ts.
+  const qrisImage = useQrisQr(qrisPayloadFrom(qrisPayment));
   const qrisTotal = Number(
     qrisPayment?.totalPayment || qrisPayment?.amount || qrisOrder?.paymentDue || qrisOrder?.total || 0,
   );

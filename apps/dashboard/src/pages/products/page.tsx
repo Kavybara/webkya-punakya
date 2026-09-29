@@ -8,6 +8,8 @@ import { customerPaymentBreakdown } from "../../lib/payment";
 import { readSession, updateSession } from "../../lib/session";
 import type { CheckoutField } from "../../lib/types";
 import { formatRupiah } from "../../lib/format";
+import { useQrisQr } from "../../lib/useQrisQr";
+import { qrisPayloadFrom } from "../../lib/qrisQr";
 
 type CheckoutStep = "catalog" | "details" | "payment" | "process" | "done";
 
@@ -68,14 +70,6 @@ function productLabel(product: CatalogProduct) {
   if (text.includes("mobile")) return "Mobile";
   if (product.needsProfile) return "Premium";
   return "Streaming";
-}
-
-function qrImageSource(payment: ApiPayment | null) {
-  if (!payment) return "";
-  if (payment.qrImageUrl) return payment.qrImageUrl;
-  const qrData = payment.qrString || payment.qrisText || payment.paymentUrl || "";
-  if (!qrData) return "";
-  return `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=12&data=${encodeURIComponent(qrData)}`;
 }
 
 function normalizeWhatsapp(value: string) {
@@ -866,7 +860,9 @@ export default function ProductsPage() {
   }
 
   const activeStep = step === "details" ? 0 : step === "done" ? 2 : 1;
-  const qrSrc = qrImageSource(payment);
+  // Drawn here, from the provider's raw string -- never fetched as an image
+  // from the provider or from anyone else. See lib/qrisQr.ts.
+  const qrSrc = useQrisQr(qrisPayloadFrom(payment));
   const fulfillment = splitFulfillmentDisplayText(createdOrder?.fulfillmentText || "");
   const stockRaceDeposit = createdOrder?.deliveryStatus === "stock_unavailable_deposit";
   const depositUsed = Number(createdOrder?.depositUsed || payment?.depositUsed || 0);

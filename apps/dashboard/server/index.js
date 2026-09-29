@@ -5778,7 +5778,9 @@ function parsePakasirTransaction(payload = {}) {
     paymentMethod: String(transaction?.payment_method || payment?.payment_method || "qris").trim(),
     paymentNumber: String(transaction?.payment_number || payment?.payment_number || transaction?.qr_string || payment?.qr_string || "").trim(),
     qrString: String(transaction?.qr_string || payment?.qr_string || "").trim(),
-    qrImageUrl: String(transaction?.qr_image_url || payment?.qr_image_url || "").trim(),
+    // No image field, deliberately. The provider returns the raw QRIS string
+    // only, and the dashboard draws the code from it in the browser rather than
+    // loading a picture of a payment over the network. See apps/dashboard/src/lib/qrisQr.ts.
     expiredAt: transaction?.expired_at || payment?.expired_at || null,
     raw: transaction || payment || payload || {},
   };
@@ -5894,7 +5896,6 @@ async function createPakasirQris(db, order) {
       paymentMethod: transaction.paymentMethod,
       paymentNumber: transaction.paymentNumber,
       qrString: transaction.qrString,
-      qrImageUrl: transaction.qrImageUrl,
       fee,
       totalPayment,
       providerExpiresAt: transaction.expiredAt,
@@ -6121,7 +6122,6 @@ function safePublicPayment(payment = {}, order = null) {
     paymentUrl: payment.paymentUrl || order?.qrisUrl || "",
     qrisText: payment.qrisText || payment.qrString || payment.paymentNumber || payment.paymentUrl || `QRIS ${payment.ref} ${payment.amount}`,
     qrString: payment.qrString || "",
-    qrImageUrl: payment.qrImageUrl || "",
     paymentNumber: payment.paymentNumber || "",
     providerStatus: payment.providerStatus || "pending",
     providerError: payment.providerError || "",

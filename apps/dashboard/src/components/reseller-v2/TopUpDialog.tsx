@@ -6,6 +6,8 @@ import {
   type ResellerDepositInstructions,
 } from "../../lib/api";
 import { formatRupiah } from "../../lib/format";
+import { useQrisQr } from "../../lib/useQrisQr";
+import { qrisPayloadFrom } from "../../lib/qrisQr";
 
 const methodOrder = [
   "qris_auto",
@@ -31,16 +33,6 @@ function methodLabel(method = "") {
       } as Record<string, string>
     )[method] || method
   );
-}
-
-function qrSource(payment: ApiPayment | null) {
-  if (!payment) return "";
-  if (payment.qrImageUrl) return payment.qrImageUrl;
-  const value =
-    payment.qrString || payment.qrisText || payment.paymentUrl || "";
-  return value
-    ? `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=12&data=${encodeURIComponent(value)}`
-    : "";
 }
 
 function safeDepositError(error: unknown) {
@@ -140,7 +132,8 @@ export function TopUpDialog({
   );
   const selected = instructions?.methods?.[method] || null;
   const available = Boolean(selected?.available);
-  const qrImage = qrSource(payment);
+  // Always drawn here, from the provider's raw string. See lib/qrisQr.ts.
+  const qrImage = useQrisQr(qrisPayloadFrom(payment));
 
   async function submit() {
     const numericAmount = Number(amount || 0);

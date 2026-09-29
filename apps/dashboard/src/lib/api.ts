@@ -451,7 +451,11 @@ export type ApiPayment = {
   paymentUrl?: string;
   qrisText?: string;
   qrString?: string;
-  qrImageUrl?: string;
+  // No `qrImageUrl`: the provider returns the raw string only, and the code is
+  // drawn from it in the browser. See lib/qrisQr.ts. Leaving the field off the
+  // type is deliberate -- a payment image fetched over the network is a payment
+  // image we neither control nor vouch for, and this makes reaching for one a
+  // compile error rather than a code review question.
   paymentNumber?: string;
   providerStatus?: string;
   providerError?: string;

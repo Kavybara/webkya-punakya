@@ -41,6 +41,10 @@ function sourceText(dir) {
 
 const SOURCE = sourceText(path.resolve("src")).join("\n");
 
+function source(relativePath) {
+  return fs.readFileSync(path.resolve(relativePath), "utf8");
+}
+
 test("no icon font is loaded from a CDN, and none of their classes survive", () => {
   for (const { packageName, marker } of CDN_ICON_FONTS) {
     assert.doesNotMatch(
@@ -54,6 +58,63 @@ test("no icon font is loaded from a CDN, and none of their classes survive", () 
       `a ${packageName} class is back in src/; icons come from lucide-react, not a font CDN`,
     );
   }
+});
+
+test("a payment payload is never put in a URL to somebody else's server", () => {
+  // Three surfaces built the QRIS code by asking a free third-party image API
+  // to draw it:
+  //
+  //   https://api.qrserver.com/v1/create-qr-code/?...&data=${encodeURIComponent(payload)}
+  //
+  // `payload` is the live QRIS string -- the code a customer scans to hand over
+  // money. In a query string it is now in that company's access logs, in any
+  // cache between here and there, and in anything proxying the request. On the
+  // public checkout it was the payment string of someone who had never logged
+  // in.
+  //
+  // The code is drawn in the browser from `qrcode` instead, so nothing about a
+  // payment leaves the machine that is about to scan it. This assertion is
+  // deliberately absolute and covers comments too, so the pattern cannot come
+  // back as a "just for this one case" special case.
+  assert.doesNotMatch(
+    SOURCE,
+    /qrserver\.com/i,
+    "a QR image API must not be handed a payment payload -- use lib/qrisQr.ts",
+  );
+
+  // And the replacement has to actually exist, or the assertion above would
+  // pass on a page that simply stopped drawing a code.
+  assert.match(SOURCE, /from "qrcode"/, "the local QR encoder is the sanctioned path");
+});
+
+test("a payment code is drawn locally, from one shared definition, everywhere", async () => {
+  const [orders, checkout, topUp, encoder] = await Promise.all([
+    source("src/pages/reseller-v2/orders/page.tsx"),
+    source("src/pages/products/page.tsx"),
+    source("src/components/reseller-v2/TopUpDialog.tsx"),
+    source("src/lib/qrisQr.ts"),
+  ]);
+
+  // The provider returns the raw QRIS string and nothing to draw it with. Each
+  // of these three screens used to resolve "what does this payment encode" on
+  // its own, which is how three slightly different answers ended up on three
+  // screens. One definition, called from all three.
+  assert.match(encoder, /export function qrisPayloadFrom/, "one place decides what the code encodes");
+  for (const [name, page] of [["orders", orders], ["checkout", checkout], ["top-up", topUp]]) {
+    assert.match(page, /useQrisQr\(qrisPayloadFrom\(/, `${name} must draw from the shared payload`);
+  }
+
+  // A payment image fetched over the network is a payment image we neither
+  // control nor vouch for. Nothing may prefer one over the local render, and
+  // the field is off the type so reaching for one is a compile error.
+  for (const [name, page] of [["orders", orders], ["checkout", checkout], ["top-up", topUp]]) {
+    assert.doesNotMatch(page, /qrImageUrl/, `${name} must not prefer a remote payment image`);
+  }
+
+  // The fallback chain, in the one place it lives. `paymentUrl` is last on
+  // purpose: it is a scannable code, but it is the provider's payment page
+  // rather than the QRIS string proper.
+  assert.match(encoder, /\[payment\.qrString, payment\.qrisText, payment\.paymentUrl\]/);
 });
 
 test("vendored CDN assets carry an integrity attribute", () => {

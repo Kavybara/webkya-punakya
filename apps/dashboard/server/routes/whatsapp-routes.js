@@ -402,7 +402,6 @@ export function registerWhatsAppRoutes(app, deps) {
             paymentUrl: inboundResult.order.qrisUrl,
             qrisText: pakasir.qrisText || pakasir.qrString || pakasir.paymentNumber || pakasir.paymentUrl || inboundResult.order.qrisUrl,
             qrText: pakasir.qrisText || pakasir.qrString || pakasir.paymentNumber || pakasir.paymentUrl || inboundResult.order.qrisUrl,
-            qrImageUrl: pakasir.qrImageUrl || "",
             orderId: inboundResult.order.id,
             paymentRef: inboundResult.order.paymentRef,
             providerStatus: pakasir.providerStatus || "pending",

@@ -106,7 +106,6 @@ export function safeTrackingPayment(payment = {}, order = {}) {
     paymentUrl: payment.paymentUrl || order.qrisUrl || "",
     qrisText: payment.qrisText || payment.qrString || payment.paymentUrl || "",
     qrString: payment.qrString || "",
-    qrImageUrl: payment.qrImageUrl || "",
     totalPayment: Number(payment.totalPayment || payment.amount || order.paymentDue || 0),
     paymentMethod: payment.paymentMethod || order.paymentMethod || "QRIS",
   };
