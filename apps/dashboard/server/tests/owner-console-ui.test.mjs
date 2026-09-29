@@ -238,7 +238,7 @@ test("data tables only show row selection when a real bulk action exists", async
 test("shared data tables keep column context on narrow screens", async () => {
   const [table, styles] = await Promise.all([
     source("components/ui/DataTable.tsx"),
-    source("components/console/console.css"),
+    source("components/ui/ui.css"),
   ]);
   // Every body cell must carry its column header as data-label, and the
   // stylesheet must surface that attribute on narrow screens, so a table
