@@ -1,3 +1,5 @@
+import { joinPublicUrl } from "../lib/public-url.js";
+
 export function registerWarrantyRoutes(app, deps) {
   const {
     buildWarrantyOwnerNotification,
@@ -30,10 +32,6 @@ export function registerWarrantyRoutes(app, deps) {
     warrantyWhatsAppNumber,
   } = deps;
   const replacementFlights = new Map();
-
-  const publicDomain = (db = {}) => String(
-    db.settings?.publicDomain || process.env.PUBLIC_DOMAIN || "https://www.vya.baby",
-  ).replace(/\/$/, "");
 
   async function recordNotification(claimId, patch = {}) {
     if (!updateDb) return;
@@ -139,7 +137,7 @@ export function registerWarrantyRoutes(app, deps) {
     const delivery = await sendWhatsAppMessage(notificationDb, {
       to: result.ownerNumber,
       text: buildWarrantyOwnerNotification(notificationDb, finalClaim, {
-        ownerUrl: `${publicDomain(notificationDb)}/owner-v2/warranty`,
+        ownerUrl: joinPublicUrl(notificationDb, "/owner-v2/warranty"),
       }),
     });
     await recordNotification(finalClaim.id, {
@@ -279,7 +277,7 @@ export function registerWarrantyRoutes(app, deps) {
     const reseller = (db.resellers || []).find((item) => item.id === claim.resellerId) || null;
     const replacement = { claim, oldAccount, newAccount, order };
     const messages = buildWarrantyReplacementNotifications(db, replacement, {
-      accountUrl: `${publicDomain(db)}/reseller-v2/accounts`,
+      accountUrl: joinPublicUrl(db, "/reseller-v2/accounts"),
     });
     const recipientNumber = oldAccount?.whatsapp
       || order?.whatsapp

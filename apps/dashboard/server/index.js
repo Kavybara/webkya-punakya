@@ -44,6 +44,7 @@ import { registerWarrantyRoutes } from "./routes/warranty-routes.js";
 import { mergeGoogleSheetsSettings } from "./settings-merge.js";
 import { clientKey, resolveTrustProxy } from "./lib/client-ip.js";
 import { createLoginAttemptLimiter } from "./lib/login-attempt-limiter.js";
+import { joinPublicUrl, publicWebsiteUrl } from "./lib/public-url.js";
 import { stockBlockedByAccountCondition } from "./google-sheets/account-condition.js";
 import { createOrderStockService } from "./services/order-stock-service.js";
 import { createFulfillmentNotificationService } from "./services/fulfillment-notification-service.js";
@@ -181,6 +182,9 @@ const configuredPort = process.env.DASHBOARD_API_PORT || process.env.API_PORT ||
 const configuredHost = process.env.DASHBOARD_API_HOST || process.env.API_HOST;
 const port = Number(configuredPort || 4174);
 const host = configuredHost || "127.0.0.1";
+// Where this instance says it lives when nobody has told it. Better a link
+// that plainly fails than one that quietly points at production.
+const localOrigin = `http://${host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host}:${port}`;
 const paymentTtlMinutes = Math.max(1, Math.floor(Number(process.env.PAYMENT_TTL_MINUTES || 15) || 15));
 const resellerRequiredMessage = "Nomor WhatsApp ini belum terdaftar sebagai reseller Kavya. Pembelian hanya untuk reseller aktif. Hubungi owner untuk daftar atau aktivasi reseller.";
 const allowedBrowserOrigins = configuredOrigins(
@@ -667,7 +671,7 @@ function warrantyWhatsAppNumber(db = {}) {
 
 function ownerIntegrationSettings(db) {
   const settings = db.settings || {};
-  const publicDomain = firstConfigured(settings.publicDomain, process.env.PUBLIC_DOMAIN, settings.botPublicUrl, "http://127.0.0.1:4174").replace(/\/$/, "");
+  const publicDomain = publicWebsiteUrl(db, { fallback: localOrigin });
   const pakasir = {
     apiKey: firstUsableSecret(settings.pakasirApiKey, process.env.PAKASIR_API_KEY),
     merchantId: firstConfigured(settings.pakasirMerchantId, settings.pakasirProject, process.env.PAKASIR_PROJECT),
@@ -1755,11 +1759,6 @@ function passwordResetDeliveryError(reason = "") {
   if (code === "whatsapp_bot_timeout") return "Bot WhatsApp tidak merespons saat mengirim OTP.";
   if (/not_connected|closed|socket|EPIPE|timed?_?out/i.test(code)) return "Bot WhatsApp belum stabil/terhubung. Coba lagi setelah status bot terhubung.";
   return code ? `OTP belum terkirim: ${code}` : "OTP belum terkirim.";
-}
-
-function dashboardWebsiteUrl(db) {
-  const integrations = ownerIntegrationSettings(db);
-  return firstConfigured(integrations.cloudflare.publicDomain, db.settings?.publicDomain, process.env.PUBLIC_DOMAIN, "https://vya.baby").replace(/\/$/, "");
 }
 
 function resellerWelcomeMessage(db, reseller) {
@@ -6294,7 +6293,7 @@ async function readTunnelInfo(db) {
   return {
     configured,
     running: /cloudflared/i.test(raw),
-    publicDomain: firstConfigured(db.settings?.publicDomain, process.env.PUBLIC_DOMAIN, "https://vya.baby"),
+    publicDomain: publicWebsiteUrl(db, { fallback: localOrigin }),
   };
 }
 
@@ -9361,7 +9360,7 @@ async function runWarrantyOverdueAlertJob() {
   try {
     const db = await readDbSnapshot();
     const nowMs = Date.now();
-    const ownerUrl = `${String(db.settings?.publicDomain || process.env.PUBLIC_DOMAIN || "https://www.vya.baby").replace(/\/$/, "")}/owner-v2/warranty`;
+    const ownerUrl = joinPublicUrl(db, "/owner-v2/warranty", { fallback: localOrigin });
     const candidates = (db.warrantyClaims || [])
       .filter((claim) => ["submitted", "reviewing", "waiting_evidence"].includes(String(claim.status || "").toLowerCase()))
       .filter((claim) => !claim.overdueOwnerNotificationAt)
