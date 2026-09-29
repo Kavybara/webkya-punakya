@@ -20,6 +20,14 @@ const SUMMARY_PATH = "/reseller-v2/ringkasan";
 type ResellerShellActions = { openTopUp: () => void };
 
 /**
+ * The one item that carries a count, and only while the count is not zero --
+ * a badge reading "0" is noise on a nav rail that is scanned, not read.
+ */
+function withBadge(item: ResellerNavigationItem, count: number) {
+  return item.path === ACCOUNTS_PATH && count > 0 ? { ...item, badge: count } : item;
+}
+
+/**
  * The reseller's half of the shared frame.
  *
  * The frame is the shell's; what is left here is the balance and the top-up,
@@ -80,17 +88,19 @@ export function ResellerShell({
   // The unread count rides on the navigation itself rather than being painted
   // into this file's markup, so the badge and the item it belongs to cannot
   // drift apart.
-  const badge = (item: ResellerNavigationItem) =>
-    item.path === ACCOUNTS_PATH && unreadDeliveryCount > 0
-      ? { ...item, badge: unreadDeliveryCount }
-      : item;
-
   const navigation = useMemo(
-    () => resellerNavigation.map((group) => ({ ...group, items: group.items.map(badge) })),
+    () =>
+      resellerNavigation.map((group) => ({
+        ...group,
+        items: group.items.map((item) => withBadge(item, unreadDeliveryCount)),
+      })),
     [unreadDeliveryCount],
   );
 
-  const bottomNavigation = useMemo(() => resellerBottomNavigation.map(badge), [unreadDeliveryCount]);
+  const bottomNavigation = useMemo(
+    () => resellerBottomNavigation.map((item) => withBadge(item, unreadDeliveryCount)),
+    [unreadDeliveryCount],
+  );
 
   return (
     <AppShell

@@ -1,48 +1,139 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Grid2X2, LoaderCircle, PackageCheck, ReceiptText, Search, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Grid2X2, PackageCheck, ReceiptText } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api, type ApiAccount, type ApiOrder, type CatalogProduct } from "../../lib/api";
-import { maskIdentity } from "../../components/ui";
+import { CommandPalette, maskIdentity, type CommandGroup } from "../ui";
 
 type SearchData = { products: CatalogProduct[]; orders: ApiOrder[]; accounts: ApiAccount[] };
-type SearchHit = { id: string; label: string; detail: string; group: "Produk" | "Pesanan" | "Akun"; href: string };
 
+const EMPTY: SearchData = { products: [], orders: [], accounts: [] };
+
+/** How many hits one group may contribute, so a broad term cannot bury the rest. */
+const PER_GROUP = 4;
+
+const DESTINATIONS = [
+  { href: "/reseller-v2/catalog", label: "Buka katalog", Icon: Grid2X2 },
+  { href: "/reseller-v2/orders", label: "Lihat pesanan", Icon: ReceiptText },
+  { href: "/reseller-v2/accounts", label: "Buka akun saya", Icon: PackageCheck },
+];
+
+/** Whether a haystack mentions the needle, without a regular expression the reader's text has to survive. */
+function mentions(needle: string, ...parts: Array<string | undefined | null>) {
+  return parts.some((part) => part?.toLowerCase().includes(needle));
+}
+
+/**
+ * Reseller search is the other half: the data is the reseller's own catalogue,
+ * their own orders and their own accounts, all of which the console has
+ * already loaded and none of which is allowed to reach another reseller. So
+ * there is nothing to ask the server -- `search` below is a plain filter over
+ * what is already in memory, and the palette runs it on every keystroke.
+ *
+ * The load still happens on open rather than on page load, because the three
+ * requests are not free and a reader who never searches should not pay for it.
+ */
 export function ResellerSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
   const navigate = useNavigate();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [query, setQuery] = useState("");
-  const [data, setData] = useState<SearchData>({ products: [], orders: [], accounts: [] });
+  const [data, setData] = useState<SearchData>(EMPTY);
   const [loading, setLoading] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!open) return;
-    inputRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose, open]);
-
-  useEffect(() => {
-    if (!open || loaded || loading) return;
+    if (!open || ready || loading) return undefined;
+    let active = true;
     setLoading(true);
     setError("");
     Promise.all([api.catalog(), api.orders(), api.accounts({ view: "overview" })])
-      .then(([products, orders, accounts]) => { setData({ products, orders, accounts }); setLoaded(true); })
-      .catch(() => setError("Pencarian belum dapat dimuat. Coba lagi beberapa saat."))
-      .finally(() => setLoading(false));
-  }, [loaded, loading, open]);
+      .then(([products, orders, accounts]) => {
+        if (!active) return;
+        setData({ products, orders, accounts });
+        setReady(true);
+      })
+      .catch(() => {
+        if (active) setError("Pencarian belum dapat dimuat. Coba lagi beberapa saat.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [loading, open, ready]);
 
-  const hits = useMemo<SearchHit[]>(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return [];
-    const productHits = data.products.filter((item) => `${item.name} ${item.code} ${item.category}`.toLowerCase().includes(needle)).slice(0, 4).map((item) => ({ id: item.id, label: item.name, detail: item.category || "Produk digital", group: "Produk" as const, href: "/reseller-v2/catalog" }));
-    const orderHits = data.orders.filter((item) => `${item.id} ${item.product} ${item.variant}`.toLowerCase().includes(needle)).slice(0, 4).map((item) => ({ id: item.id, label: item.id, detail: `${item.product} / ${item.variant}`, group: "Pesanan" as const, href: "/reseller-v2/orders" }));
-    const accountHits = data.accounts.filter((item) => `${item.product} ${item.variant} ${item.email} ${item.loginPhone} ${item.profile}`.toLowerCase().includes(needle)).slice(0, 4).map((item) => ({ id: item.id, label: item.product, detail: `${maskIdentity(item.loginPhone || item.email)} / ${item.profile || "Tanpa profil"}`, group: "Akun" as const, href: "/reseller-v2/accounts" }));
-    return [...productHits, ...orderHits, ...accountHits].slice(0, 10);
-  }, [data, query]);
-
-  if (!open) return null;
-  return <div className="reseller-v2-search-overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="reseller-v2-search" role="dialog" aria-modal="true" aria-labelledby="reseller-search-title"><header><Search size={18} /><input ref={inputRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cari produk, pesanan, atau akun..." aria-label="Pencarian reseller" /><kbd>Esc</kbd><button type="button" onClick={onClose} aria-label="Tutup pencarian"><X size={18} /></button></header><div className="reseller-v2-search-body"><h2 id="reseller-search-title">Pencarian reseller</h2>{loading ? <div className="reseller-v2-search-message"><LoaderCircle className="ui-spin" size={17} /> Memuat data milik Anda...</div> : error ? <div className="reseller-v2-search-message is-error">{error}</div> : !query.trim() ? <div className="reseller-v2-search-shortcuts"><button type="button" onClick={() => navigate("/reseller-v2/catalog")}><Grid2X2 size={17} /> Buka katalog</button><button type="button" onClick={() => navigate("/reseller-v2/orders")}><ReceiptText size={17} /> Lihat pesanan</button><button type="button" onClick={() => navigate("/reseller-v2/accounts")}><PackageCheck size={17} /> Buka akun saya</button></div> : hits.length ? <div className="reseller-v2-search-results">{hits.map((hit) => <button key={`${hit.group}-${hit.id}`} type="button" onClick={() => { onClose(); navigate(hit.href); }}><span>{hit.group === "Produk" ? <Grid2X2 size={16} /> : hit.group === "Pesanan" ? <ReceiptText size={16} /> : <PackageCheck size={16} />}</span><div><strong>{hit.label}</strong><small>{hit.detail}</small></div><em>{hit.group}</em></button>)}</div> : <div className="reseller-v2-search-message">Tidak ada hasil pada data Anda.</div>}</div></section></div>;
+  return (
+    <CommandPalette
+      open={open}
+      onClose={onClose}
+      onSelect={(hit) => navigate(hit.href)}
+      title="Pencarian reseller"
+      label="Pencarian reseller"
+      placeholder="Cari produk, pesanan, atau akun..."
+      // The three requests are still in the air. Saying "no matches" now would
+      // be a lie the reader cannot check.
+      busy={loading || !ready}
+      empty="Tidak ada hasil pada data Anda."
+      idle={
+        error ? (
+          <p className="ui-command-alert" role="alert">
+            {error}
+          </p>
+        ) : (
+          <div className="ui-command-shortcuts">
+            {DESTINATIONS.map(({ href, label, Icon }) => (
+              <button key={href} type="button" onClick={() => navigate(href)}>
+                <Icon size={16} aria-hidden="true" />
+                {label}
+              </button>
+            ))}
+          </div>
+        )
+      }
+      search={(query): CommandGroup[] => {
+        const needle = query.trim().toLowerCase();
+        if (!needle) return [];
+        return [
+          {
+            label: "Produk",
+            hits: data.products
+              .filter((item) => mentions(needle, item.name, item.code, item.category))
+              .slice(0, PER_GROUP)
+              .map((item) => ({
+                id: item.id,
+                label: item.name,
+                detail: item.category || "Produk digital",
+                href: "/reseller-v2/catalog",
+                icon: Grid2X2,
+              })),
+          },
+          {
+            label: "Pesanan",
+            hits: data.orders
+              .filter((item) => mentions(needle, item.id, item.product, item.variant))
+              .slice(0, PER_GROUP)
+              .map((item) => ({
+                id: item.id,
+                label: item.id,
+                detail: `${item.product} / ${item.variant}`,
+                href: "/reseller-v2/orders",
+                icon: ReceiptText,
+              })),
+          },
+          {
+            label: "Akun",
+            hits: data.accounts
+              .filter((item) => mentions(needle, item.product, item.variant, item.email, item.loginPhone, item.profile))
+              .slice(0, PER_GROUP)
+              .map((item) => ({
+                id: item.id,
+                label: item.product,
+                detail: `${maskIdentity(item.loginPhone || item.email)} / ${item.profile || "Tanpa profil"}`,
+                href: "/reseller-v2/accounts",
+                icon: PackageCheck,
+              })),
+          },
+        ];
+      }}
+    />
+  );
 }

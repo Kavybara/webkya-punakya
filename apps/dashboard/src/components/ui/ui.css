@@ -160,6 +160,142 @@
 }
 
 @keyframes ui-overlay-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* The command palette: a dialog whose chrome is a field. It sits high on the
+   screen rather than centred -- a search box in the middle of a phone covers
+   the page being searched and puts its own results below the fold. */
+.ui-overlay.has-command {
+  align-items: start;
+  justify-items: center;
+  padding: max(24px, 8svh) 24px 24px;
+}
+.ui-command {
+  display: flex;
+  width: min(680px, 100%);
+  max-height: min(680px, calc(100svh - 96px));
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 24px 64px -12px color-mix(in srgb, #000 62%, transparent);
+}
+.ui-command-field {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px 0 18px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.ui-command-field input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+.ui-command-field input::placeholder { color: var(--text-muted); }
+.ui-command-hint { flex: none; }
+.ui-command-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.ui-command-body { flex: 1; min-height: 0; overflow-y: auto; padding: 10px; }
+.ui-command-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 8px 9px;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.ui-command-state {
+  display: grid;
+  min-height: 150px;
+  place-items: center;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+.ui-command-state.is-error { color: var(--status-danger); }
+/* A failure inside a caller-supplied idle slot. The palette already centred
+   whatever it was given, so this is a note rather than a second state block. */
+.ui-command-alert { max-width: 34ch; margin: 0; color: var(--status-danger); font-size: 12px; line-height: 1.6; }
+.ui-command-shortcuts { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.ui-command-shortcuts button {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 15px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.ui-command-shortcuts button:hover { border-color: var(--border-strong); background: var(--surface-hover); color: var(--text-primary); }
+.ui-command-skeleton { display: grid; gap: 7px; }
+.ui-command-skeleton span {
+  height: 54px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--surface-hover) 40%, transparent), var(--surface-hover), color-mix(in srgb, var(--surface-hover) 40%, transparent));
+  background-size: 200% 100%;
+  animation: ui-shimmer 1.2s linear infinite;
+}
+@keyframes ui-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.ui-command-group + .ui-command-group { margin-top: 13px; }
+.ui-command-group > p {
+  margin: 0 8px 6px;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.ui-command-group > button {
+  display: flex;
+  width: 100%;
+  min-height: 56px;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+.ui-command-group > button:hover { background: var(--surface-hover); color: var(--text-primary); }
+.ui-command-group > button > span:not(.ui-command-hit-icon) { min-width: 0; flex: 1; }
+.ui-command-group strong, .ui-command-group small { display: block; }
+.ui-command-group strong { overflow: hidden; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.ui-command-group small {
+  overflow: hidden;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-command-hit-icon { flex: none; color: var(--text-muted); }
+.ui-command-group > button:hover .ui-command-hit-icon { color: var(--text-secondary); }
 @keyframes ui-drawer-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
 
 .ui-card {
@@ -499,6 +635,7 @@
  * ------------------------------------------------------------------ */
 
 .ui-panel :focus-visible,
+.ui-command :focus-visible,
 .ui-badge:focus-visible,
 .ui-metric.is-interactive:focus-visible,
 .ui-action-card:focus-visible,
@@ -519,13 +656,15 @@
  * ------------------------------------------------------------------ */
 
 @media (prefers-reduced-motion: reduce) {
-  .ui-panel, .ui-panel *, .ui-toast, .ui-metric, .ui-action-card, .ui-button, .ui-icon-button { animation: none !important; transition: none !important; }
-  .ui-skeleton > span { animation: none; background: var(--bg-raised); }
+  .ui-panel, .ui-panel *, .ui-command, .ui-command *, .ui-toast, .ui-metric, .ui-action-card, .ui-button, .ui-icon-button { animation: none !important; transition: none !important; }
+  .ui-skeleton > span, .ui-command-skeleton span { animation: none; background: var(--bg-raised); }
   .ui-metric.is-interactive:hover, .ui-action-card:hover { transform: none; }
 }
 
 @media (max-width: 640px) {
   .ui-overlay { padding: 0; }
+  .ui-overlay.has-command { padding: 0; }
+  .ui-command { width: 100%; max-height: 100svh; border-radius: 0; }
   .ui-panel.is-dialog { width: 100%; max-height: 100svh; border-radius: 0; }
   .ui-panel.is-drawer { width: 100%; }
   .ui-toast { right: 12px; left: 12px; bottom: 12px; max-width: none; }

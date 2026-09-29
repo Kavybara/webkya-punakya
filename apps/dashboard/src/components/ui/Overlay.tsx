@@ -20,7 +20,17 @@ import { LoaderCircle, X } from "lucide-react";
 
 const FOCUSABLE = 'button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])';
 
-function useDismissable(open: boolean, onClose: () => void) {
+/**
+ * The focus half of an overlay, for anything that is a dialog without being
+ * one of the two shapes below.
+ *
+ * The command palette is that case: it is a dialog, it is modal, and it owes
+ * the keyboard reader exactly what the others do -- focus goes in, Tab stays
+ * in, Escape dismisses, focus comes back on the way out -- but its chrome is a
+ * search field rather than a title and a close button. Exported so that it can
+ * reuse this instead of growing a second, slightly different keyboard story.
+ */
+export function useOverlayFocus(open: boolean, onClose: () => void) {
   const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
@@ -86,7 +96,7 @@ function OverlayFrame({
   closeLabel: string;
 }) {
   const titleId = useId();
-  const { panelRef, closeRef } = useDismissable(open, onClose);
+  const { panelRef, closeRef } = useOverlayFocus(open, onClose);
   if (!open) return null;
 
   return (

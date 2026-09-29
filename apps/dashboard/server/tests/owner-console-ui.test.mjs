@@ -19,8 +19,16 @@ test("Owner Console is lazy-loaded on a separate rollback-safe route", async () 
 
 test("Owner Console keeps search on the owner-only search API", async () => {
   const search = await source("components/console/ConsoleSearch.tsx");
-  assert.match(search, /api\.ownerSearch\(query\.trim\(\)\)/);
+  const palette = await source("components/ui/CommandPalette.tsx");
+  // The console no longer trims the query itself -- the palette hands it an
+  // already-trimmed one. What still has to be true is that the only data
+  // source this search may reach is the owner-scoped search endpoint, and
+  // that it is not asked on every single keystroke.
+  assert.match(search, /api\.ownerSearch\(query\)/);
   assert.doesNotMatch(search, /api\.(accounts|stock|orders|resellers)\(/);
+  assert.match(search, /minChars=\{2\}/);
+  assert.match(search, /debounceMs=\{250\}/);
+  assert.match(palette, /const trimmed = query\.trim\(\)/);
 });
 
 test("Owner Console Overview excludes credential-bearing account APIs and fields", async () => {

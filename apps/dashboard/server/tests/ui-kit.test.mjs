@@ -169,6 +169,47 @@ test("both consoles render the one shell", async () => {
   }
 });
 
+test("both consoles search through one palette", async () => {
+  // The two palettes were the same dialog twice. The owner one asked the
+  // server; the reseller one filtered data it already had. Both then
+  // re-implemented the field, the three waiting states, the grouped results
+  // and the dismissal -- and neither of them moved focus into the panel, so a
+  // keyboard reader was typing into a dialog that had not opened.
+  const [consoleSearch, resellerSearch, palette] = await Promise.all(
+    [
+      "src/components/console/ConsoleSearch.tsx",
+      "src/components/reseller-v2/ResellerSearch.tsx",
+      "src/components/ui/CommandPalette.tsx",
+    ].map((path) => readFile(new URL(`../../${path}`, import.meta.url), "utf8")),
+  );
+
+  for (const [name, source] of [["ConsoleSearch", consoleSearch], ["ResellerSearch", resellerSearch]]) {
+    assert.match(source, /<CommandPalette\b/, `${name} must render the shared palette`);
+    assert.match(source, /from "\.\.\/ui"/, `${name} must import the kit by its barrel`);
+    // A palette built by hand is the thing being replaced. None of these class
+    // names may come back.
+    const strays = ["console-command", "console-search-", "reseller-v2-search"]
+      .filter((className) => source.includes(className));
+    assert.deepEqual(strays, [], `${name} hand-rolls palette markup: ${strays.join(", ")}`);
+  }
+
+  // The palette reuses the overlay's focus handling rather than growing a
+  // third account of it.
+  assert.match(palette, /useOverlayFocus\(open, onClose\)/, "the palette must trap and restore focus");
+  assert.match(palette, /role="dialog"/);
+  assert.match(palette, /aria-modal="true"/);
+  assert.match(palette, /inputRef\.current\?\.focus\(\)/, "the palette must open to be typed into");
+  // The search function is read through a ref, or a caller that builds it
+  // inline would re-run the effect on every render and never settle.
+  assert.match(palette, /searchRef\.current = search/);
+
+  // And the stylesheet the two stylesheets gave up is now the kit's.
+  const { css } = await kit();
+  for (const name of ["ui-command", "ui-command-field", "ui-command-group", "ui-command-skeleton"]) {
+    assert.match(css, new RegExp(`\\.${name}\\b`), `the kit must style .${name}`);
+  }
+});
+
 test("the shared shell keeps the access rule and the sign-out honest", async () => {
   const source = await readFile(new URL("../../src/components/ui/AppShell.tsx", import.meta.url), "utf8");
 
