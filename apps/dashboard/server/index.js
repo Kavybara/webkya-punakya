@@ -22,6 +22,9 @@ import {
   syncDataResellersToGoogleSheets,
   syncAccountCredentialsToGoogleSheets,
   syncGoogleSheetsStock,
+  syncGoogleSheetsProductStock,
+  syncAccountReplacementToGoogleSheets,
+  syncWarrantyStockReviewToGoogleSheets,
 } from "./google-sheets.js";
 import { applyWaPriceSync, findWaPriceSource, previewWaPriceSync } from "./price-sync.js";
 import { registerAuthRoutes } from "./routes/auth-routes.js";
@@ -37,16 +40,67 @@ import { registerSheetsRoutes } from "./routes/sheets-routes.js";
 import { registerStockRoutes } from "./routes/stock-routes.js";
 import { registerSystemRoutes } from "./routes/system-routes.js";
 import { registerWhatsAppRoutes } from "./routes/whatsapp-routes.js";
+import { registerWarrantyRoutes } from "./routes/warranty-routes.js";
 import { mergeGoogleSheetsSettings } from "./settings-merge.js";
 import { stockBlockedByAccountCondition } from "./google-sheets/account-condition.js";
 import { createOrderStockService } from "./services/order-stock-service.js";
 import { createFulfillmentNotificationService } from "./services/fulfillment-notification-service.js";
+import { extractNetflixVerificationCode } from "./services/account-access-code-service.js";
+import {
+  accountAccessGmailQueries,
+  accountAccessMailboxPaths,
+} from "./services/account-access-search-service.js";
+import { classifyGmailConnectionError, createGmailHealthService } from "./services/gmail-health-service.js";
 import { createPaymentReconciliationService } from "./services/payment-reconciliation-service.js";
 import { createOperationsRepairService } from "./services/operations-repair-service.js";
 import { createReadMaintenanceService } from "./services/read-maintenance-service.js";
 import { snapshotVersion } from "./services/read-snapshot-service.js";
 import { createSettingsMigrationService } from "./services/settings-migration-service.js";
 import { createSettingsStartupMigrationService } from "./services/settings-startup-migration-service.js";
+import { securityHeaders } from "./services/security-headers-service.js";
+import { requestPakasirJsonWithRetry, shouldEnablePakasirMaintenance } from "./services/pakasir-client-service.js";
+import { createDeliveryTemplateSnapshot } from "./services/delivery-template-service.js";
+import { recordOperationalCheck } from "./services/operational-alert-service.js";
+import {
+  rentalChangedNotificationText,
+  rentalDisplayName,
+  rentalExpiredNotificationText,
+  rentalExpiringNotificationText,
+  rentalJoinedNotificationText,
+  rentalOwnerContactNumber,
+} from "./services/whatsapp-rental-notification-service.js";
+import {
+  buildWarrantyOwnerNotification,
+  buildWarrantyOverdueNotification,
+  buildWarrantyReplacementNotifications,
+  buildWarrantyStatusNotification,
+  createWarrantyClaim,
+  markWarrantyReplacementSync,
+  replacementCandidatesForClaim,
+  replaceWarrantyAccount,
+  replaceWarrantyAccountManually,
+  updateWarrantyClaim,
+  validateWarrantyReplacementState,
+  warrantyClaimsForAuth,
+  warrantyManualClaimOptions,
+} from "./services/warranty-service.js";
+import {
+  decodeWarrantyEvidence,
+  readWarrantyEvidence,
+  removeWarrantyEvidence,
+  saveWarrantyEvidence,
+} from "./services/warranty-evidence-service.js";
+import {
+  friendlyGoogleSheetsError,
+  GOOGLE_SHEETS_CATALOG_PRECHECK_COOLDOWN_MS,
+  googleSheetsProductSyncScope,
+  googleSheetsRequiredSectionsError,
+  recentGoogleSheetsProductSync,
+  recentGoogleSheetsResellerLookup,
+  recordGoogleSheetsProductSync,
+  googleSheetsSectionError,
+  googleSheetsSyncHealth,
+} from "./services/google-sheets-sync-policy-service.js";
 import {
   createPublicTrackingLimiter,
   ensureOrderTrackingToken,
@@ -60,7 +114,14 @@ import {
   checkoutFieldsForVariant as structuredCheckoutFieldsForVariant,
   normalizeCheckoutField,
 } from "./services/checkout-fields-service.js";
-import { isDeliverableManagedAccount } from "./services/sheet-sync-status-service.js";
+import {
+  classifyDeliveryAuditAccounts,
+  deliveryAuditCoverage,
+  hasHistoricalDeliveryEvidence,
+  hasOnlyHistoricalManagedAssignment,
+  isCreditedStockUnavailableOrder,
+  isDeliverableManagedAccount,
+} from "./services/sheet-sync-status-service.js";
 import { databasePath, ensureDb, getDbVersion, makeId, nowText, onDbChange, readDb, readDbSnapshot, todayText, updateDb, writeDb } from "./store.js";
 import {
   SESSION_COOKIE_NAME,
@@ -102,7 +163,13 @@ const __dirname = path.dirname(__filename);
 const distDir = path.join(__dirname, "..", "dist");
 const legacyRootDir = path.resolve(__dirname, "..", "..");
 
-dotenv.config({ path: path.join(legacyRootDir, ".env") });
+for (const envPath of [
+  path.join(process.cwd(), ".env"),
+  path.join(legacyRootDir, ".env"),
+  path.resolve(__dirname, "..", "..", "..", ".env"),
+]) {
+  dotenv.config({ path: envPath });
+}
 
 const whatsappDatabaseDir = path.resolve(
   process.env.WHATSAPP_DATABASE_DIR || path.join(legacyRootDir, "apps", "bot", "database"),
@@ -120,6 +187,7 @@ const allowedBrowserOrigins = configuredOrigins(
 );
 
 app.set("trust proxy", 1);
+app.use(securityHeaders({ isSecureRequest: requestUsesHttps }));
 app.use(cors(corsOptions(allowedBrowserOrigins)));
 app.use(express.json({ limit: "1mb" }));
 app.use("/api", (req, res, next) => {
@@ -288,27 +356,11 @@ function sheetSyncKeyForProduct(product = {}) {
   if (isViuProduct(product)) return "viu";
   if (isVidioProduct(product)) return "vidio";
   if (isNetflixOrderProduct(product)) return "netflix";
-  return "";
+  return "dynamic";
 }
 
 function isGoogleSheetsBackedStock(stock = {}) {
   return String(stock?.sheetSource || "").toLowerCase() === "google_sheets";
-}
-
-function isGoogleSheetsQuotaError(error) {
-  const message = String(error?.message || error || "").toLowerCase();
-  return message.includes("quota exceeded") || message.includes("read requests") || message.includes("rate limit") || message.includes("429");
-}
-
-function friendlyGoogleSheetsError(error) {
-  if (isGoogleSheetsQuotaError(error)) {
-    const friendly = new Error("Stok sedang disinkronkan dengan Google Sheets. Coba lagi dalam 1 menit.");
-    friendly.status = 429;
-    friendly.code = "google_sheets_rate_limited";
-    friendly.cause = error;
-    return friendly;
-  }
-  return error;
 }
 
 async function syncGoogleSheetsStockSafely(db, options = {}) {
@@ -326,31 +378,59 @@ async function syncGoogleSheetsStockSafely(db, options = {}) {
 
 async function syncSheetsForProductOrThrow(db, product, reason = "stock_precheck", options = {}) {
   if (!googleSheetsConfigured(db)) return null;
+  db.settings = db.settings || {};
+  const syncKey = sheetSyncKeyForProduct(product);
+  const syncScope = googleSheetsProductSyncScope(product, syncKey);
+  const allowRecent = reason === "catalog_precheck" && options.reuseRecent !== false;
+  const recent = allowRecent
+    ? recentGoogleSheetsProductSync(
+        db.settings,
+        syncScope,
+        Date.now(),
+        Number(options.cooldownMs || GOOGLE_SHEETS_CATALOG_PRECHECK_COOLDOWN_MS),
+      )
+    : null;
+  if (recent) {
+    return {
+      ok: true,
+      reused: true,
+      [syncKey]: recent,
+      resellers: recentGoogleSheetsResellerLookup(db.settings) || {
+        ok: true,
+        skipped: true,
+        reused: true,
+        reason: "product_sync_already_refreshed",
+      },
+    };
+  }
   let result;
   try {
-    result = await syncGoogleSheetsStockSafely(db, { silent: true, reason, force: options.force === true });
+    result = await syncGoogleSheetsProductStock(db, product, {
+      silent: true,
+      reason,
+      force: options.force === true,
+      syncKey,
+      reuseRecentResellerLookup: reason === "catalog_precheck",
+    });
   } catch (error) {
     const friendly = friendlyGoogleSheetsError(error);
-    if (friendly.code !== "google_sheets_rate_limited") {
-      enableMaintenanceMode(db, `Google Sheets gagal sync: ${friendly.message || "unknown_error"}`, "google_sheets");
-      friendly.maintenance = { reason: `Google Sheets gagal sync: ${friendly.message || "unknown_error"}`, source: "google_sheets" };
+    if (friendly.code === "google_sheets_rate_limited") {
       throw friendly;
     }
-    return null;
+    enableMaintenanceMode(db, `Google Sheets gagal sync: ${friendly.message || "unknown_error"}`, "google_sheets");
+    friendly.maintenance = { reason: `Google Sheets gagal sync: ${friendly.message || "unknown_error"}`, source: "google_sheets" };
+    throw friendly;
   }
-  const syncKey = sheetSyncKeyForProduct(product);
-  const section = syncKey ? result?.[syncKey] : null;
-  if (section && section.ok === false) {
-    const sectionMessage = section.error || section.reason || "unknown_error";
-    if (isGoogleSheetsQuotaError(sectionMessage)) {
-      return result;
+  const sectionError = googleSheetsSectionError(result, syncKey);
+  if (sectionError) {
+    if (sectionError.code === "google_sheets_rate_limited") {
+      throw sectionError;
     }
-    const error = new Error(`Sync Google Sheets ${syncKey} gagal: ${sectionMessage}`);
-    error.status = 503;
-    enableMaintenanceMode(db, error.message, "google_sheets");
-    error.maintenance = { reason: error.message, source: "google_sheets" };
-    throw error;
+    enableMaintenanceMode(db, sectionError.message, "google_sheets");
+    sectionError.maintenance = { reason: sectionError.message, source: "google_sheets" };
+    throw sectionError;
   }
+  recordGoogleSheetsProductSync(db.settings, syncScope, result);
   return result;
 }
 
@@ -457,6 +537,14 @@ function firstConfigured(...values) {
   return values.map((value) => String(value || "").trim()).find(Boolean) || "";
 }
 
+function normalizeConfiguredUrl(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const markdownLink = raw.match(/^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/i);
+  const candidate = markdownLink ? markdownLink[2] : raw.replace(/\\([:/])/g, "$1");
+  return candidate.replace(/\/$/, "");
+}
+
 function configuredTokens(...values) {
   return Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean)));
 }
@@ -530,9 +618,10 @@ function ownerCredentials(db = {}) {
   const storedPassword = firstUsableSecret(db.settings?.ownerPassword);
   const envPassword = firstUsableSecret(process.env.OWNER_PASSWORD, process.env.OWNER_LOGIN_PASSWORD);
   return {
-    email: firstConfigured(db.settings?.ownerEmail, process.env.OWNER_EMAIL, process.env.OWNER_LOGIN_EMAIL),
+    email: firstConfigured(process.env.OWNER_EMAIL, process.env.OWNER_LOGIN_EMAIL, db.settings?.ownerEmail),
     passwordHash,
     legacyPassword: storedPassword && storedPassword !== "admin12345" ? storedPassword : envPassword,
+    envPassword,
   };
 }
 
@@ -541,13 +630,18 @@ function ownerPasswordConfigured(credentials = {}) {
 }
 
 function verifyOwnerPassword(credentials = {}, password = "") {
-  return verifyPassword(password, credentials.passwordHash || credentials.legacyPassword || "");
+  return (
+    verifyPassword(password, credentials.envPassword || "") ||
+    verifyPassword(password, credentials.passwordHash || credentials.legacyPassword || "")
+  );
 }
 
 function ownerProfile(db) {
   const name = String(db.settings?.ownerName || "Admin Owner").trim() || "Admin Owner";
-  const username = String(db.settings?.ownerUsername || "owner").trim() || "owner";
-  const email = String(db.settings?.ownerEmail || "owner@kavya.id").trim() || "owner@kavya.id";
+  const username = String(
+    firstConfigured(process.env.OWNER_USERNAME, process.env.OWNER_LOGIN_USERNAME, db.settings?.ownerUsername, "owner"),
+  ).trim() || "owner";
+  const email = String(firstConfigured(process.env.OWNER_EMAIL, process.env.OWNER_LOGIN_EMAIL, db.settings?.ownerEmail, "owner@kavya.id")).trim() || "owner@kavya.id";
   const whatsapp = String(db.settings?.ownerWhatsAppNumber || process.env.OWNER_WHATSAPP_NUMBER || "").replace(/[^\d]/g, "");
   const initial = String(db.settings?.ownerInitial || name.slice(0, 1) || "A").trim().slice(0, 2).toUpperCase();
   return { name, username, email, whatsapp, initial: initial || "O" };
@@ -558,7 +652,10 @@ function warrantyWhatsAppNumber(db = {}) {
     db.settings?.warrantyWhatsAppNumber ||
       process.env.WARRANTY_WHATSAPP_NUMBER ||
       process.env.GARANSI_WHATSAPP_NUMBER ||
-      "6285194629029",
+      db.settings?.ownerWhatsAppNumber ||
+      process.env.OWNER_WHATSAPP_NUMBER ||
+      ownerProfile(db).whatsapp ||
+      "",
   );
 }
 
@@ -618,6 +715,7 @@ function ownerIntegrationSettings(db) {
   const gmailStatus = gmail.mode === "imap"
     ? gmailHasImap ? "connected" : "disconnected"
     : gmailHasConfig && gmailHasToken && !gmailTokenInvalid ? "connected" : gmailHasConfig ? "needs_oauth" : "disconnected";
+  const sheetsHealth = googleSheetsSyncHealth(settings);
   return {
     profile: ownerProfile(db),
     pakasir,
@@ -630,7 +728,9 @@ function ownerIntegrationSettings(db) {
       pakasir: pakasir.merchantId && pakasir.apiKey ? "connected" : "disconnected",
       bailey: bailey.sessionId && bailey.botNumber && bailey.botToken && bailey.inboundToken ? "connected" : "disconnected",
       gmail: gmailStatus,
-      googleSheets: googleSheetsConfigured(db) ? "connected" : "disconnected",
+      googleSheets: !googleSheetsConfigured(db)
+        ? "disconnected"
+        : sheetsHealth.healthy ? "connected" : "degraded",
     },
   };
 }
@@ -1473,6 +1573,67 @@ async function sendWhatsAppMessage(db, { to, text, imageUrl = "", mediaPath = ""
   }
 }
 
+async function reportOperationalHealth({ key, label, ok, detail = "" }) {
+  try {
+    const event = await updateDb((db) => {
+      db.settings = db.settings || {};
+      const transition = recordOperationalCheck(db.settings, {
+        key,
+        label,
+        ok,
+        detail,
+        failureThreshold: Number(process.env.OPERATIONAL_ALERT_FAILURE_THRESHOLD || 3),
+        cooldownMs: Number(process.env.OPERATIONAL_ALERT_COOLDOWN_MS || 12 * 60 * 60 * 1000),
+      });
+      if (transition.event !== "none") {
+        db.activities = db.activities || [];
+        db.activities.unshift({
+          id: makeId("act"),
+          type: "system",
+          title: transition.title,
+          description: transition.event === "recovery"
+            ? `${label} kembali normal setelah gangguan.`
+            : `${label} gagal ${transition.state.consecutiveFailures} kali berturut-turut.`,
+          createdAt: nowText(),
+          source: "operational_alert",
+          alertKey: key,
+          alertEvent: transition.event,
+        });
+      }
+      return {
+        transition,
+        to: normalizeWhatsappNumber(
+          db.settings.ownerWhatsAppNumber
+            || process.env.OWNER_WHATSAPP_NUMBER
+            || ownerProfile(db).whatsapp,
+        ),
+      };
+    });
+
+    const { transition, to } = event;
+    const canSend = key !== "whatsapp" || ok === true;
+    if (!transition.shouldNotify || !to || !canSend) return transition;
+
+    const delivery = await sendWhatsAppMessage(await readDb(), {
+      to,
+      text: transition.message,
+    }).catch((error) => ({ sent: false, reason: error.message || "send_failed" }));
+
+    await updateDb((db) => {
+      const state = db.settings?.operationalAlertState?.[key];
+      if (!state) return null;
+      state.lastDeliveryAt = nowText();
+      state.lastDeliveryStatus = delivery.sent ? "sent" : "failed";
+      state.lastDeliveryReason = delivery.sent ? "" : String(delivery.reason || "send_failed").slice(0, 120);
+      return null;
+    });
+    return transition;
+  } catch (error) {
+    console.warn(`[OperationalAlert] ${key} report skipped: ${error.message || error}`);
+    return null;
+  }
+}
+
 function depositRequestMethodLabel(value = "") {
   const method = String(value || "").trim().toLowerCase();
   if (method === "qris_auto" || method === "qris") return "Deposit otomatis QRIS";
@@ -1513,50 +1674,8 @@ function normalizeWhatsAppTarget(value = "") {
   return normalizeWhatsappNumber(target);
 }
 
-function formatRentalDays(value) {
-  const days = Number(value || 0);
-  return `${Number.isFinite(days) ? Math.max(0, days) : 0} hari`;
-}
-
-function rentalDayChangeLines({ addedDays, previousDays, totalDays } = {}) {
-  let delta = Number(addedDays || 0);
-  if (!Number.isFinite(delta) || delta === 0) {
-    const before = Number(previousDays || 0);
-    const after = Number(totalDays || 0);
-    if (Number.isFinite(before) && Number.isFinite(after) && before !== after) {
-      delta = after - before;
-    }
-  }
-  if (!Number.isFinite(delta) || delta === 0) return [];
-  const label = delta > 0 ? "Penambahan Hari" : "Pengurangan Hari";
-  return [`${label} : *${Math.abs(delta)} hari*`];
-}
-
-function rentalOwnerContactNumber(db, rental = {}) {
-  return normalizeWhatsappNumber(
-    rental.contact ||
-      rental.ownerNumber ||
-      rental.ownerWhatsapp ||
-      rental.ownerWhatsAppNumber ||
-      rental.owner ||
-      process.env.OWNER_WHATSAPP_NUMBER ||
-      db.settings?.ownerWhatsAppNumber ||
-      process.env.BACKUP_OWNER_NUMBER ||
-      ownerProfile(db).whatsapp ||
-      "",
-  );
-}
-
 function rentalStoreOwnerNotificationTarget(db, rental = {}) {
   return rentalOwnerContactNumber(db, rental);
-}
-
-function rentalDisplayName(rental = {}) {
-  return String(rental.name || rental.groupName || rental.groupJid || rental.id || "Grup WhatsApp").trim();
-}
-
-function rentalOwnerNumber(db, rental = {}) {
-  return rentalOwnerContactNumber(db, rental) || "-";
 }
 
 function joinBotMessageLines(lines = []) {
@@ -1567,33 +1686,12 @@ function joinBotMessageLines(lines = []) {
     .trim();
 }
 
-function rentalNotificationText({ title, db, rental, totalDays, addedDays, previousDays }) {
-  return joinBotMessageLines([
-    `_*${title}*_`,
-    "",
-    `Name Grub : *${rentalDisplayName(rental)}*`,
-    `Nomor Owner : *${rentalOwnerNumber(db, rental)}*`,
-    ...rentalDayChangeLines({ addedDays, previousDays, totalDays }),
-    `Expired : *${formatRentalDays(totalDays || rental.daysLeft || 0)}*`,
-    "",
-    "_Untuk Mengecek status sewa ketik .ceksewa pada grub tersebut_",
-  ]);
-}
-
-function rentalOwnerNotificationText(payload) {
-  return rentalNotificationText({ ...payload, title: "Bot Sewa Bertambah" });
-}
-
-function rentalJoinedNotificationText(payload) {
-  return rentalNotificationText({ ...payload, title: "Bot Sudah Bergabung" });
-}
-
 async function notifyOwnerRentalChanged(db, payload) {
   const target = rentalStoreOwnerNotificationTarget(db, payload.rental);
   if (!target) return { sent: false, reason: "store_owner_whatsapp_missing" };
   return sendWhatsAppMessage(db, {
     to: target,
-    text: rentalOwnerNotificationText({ db, ...payload }),
+    text: rentalChangedNotificationText({ db, ...payload }),
   });
 }
 
@@ -1604,31 +1702,6 @@ async function notifyOwnerRentalJoined(db, payload) {
     to: target,
     text: rentalJoinedNotificationText({ db, ...payload }),
   });
-}
-
-function rentalExpiringNotificationText(db, rental, daysLeft) {
-  return joinBotMessageLines([
-    "_*Notifikasi Bot Owner Grup*_",
-    "",
-    `Name Grub : *${rentalDisplayName(rental)}*`,
-    `Nomor Owner : *${rentalOwnerNumber(db, rental)}*`,
-    `Expired : *${formatRentalDays(daysLeft)}*`,
-    "",
-    "_Untuk Mengecek status sewa ketik .ceksewa pada grub tersebut_",
-  ]);
-}
-
-function rentalExpiredNotificationText(db, rental) {
-  return joinBotMessageLines([
-    "_*Notifikasi Sewa Bot Expired*_",
-    "",
-    `Name Grub : *${rentalDisplayName(rental)}*`,
-    `Nomor Owner : *${rentalOwnerNumber(db, rental)}*`,
-    "Expired : *0 hari*",
-    "",
-    "Bot tidak akan merespons command di grup sampai sewa diperpanjang.",
-    "_List grup tetap disimpan sementara dan baru dibersihkan otomatis setelah 30 hari expired._",
-  ]);
 }
 
 async function deleteWhatsAppMessage(db, { to, messageKey }) {
@@ -1915,13 +1988,21 @@ function whatsappDatabasePath(fileName) {
   return path.join(whatsappDatabaseDir, fileName);
 }
 
+function hasLegacyDashboardListShape(groupData = {}) {
+  if (!groupData || typeof groupData !== "object" || Array.isArray(groupData) || !groupData.list || typeof groupData.list !== "object") {
+    return false;
+  }
+  const listValue = groupData.list;
+  return !("text" in listValue || "content" in listValue || "media" in listValue || "media_path" in listValue || "updated_at" in listValue);
+}
+
 function normalizeDashboardListGroup(groupData = {}) {
   const now = new Date().toISOString();
   if (!groupData || typeof groupData !== "object" || Array.isArray(groupData)) {
     return { createdAt: now, updatedAt: now, list: {} };
   }
 
-  if (groupData.list && typeof groupData.list === "object") {
+  if (hasLegacyDashboardListShape(groupData)) {
     const list = {};
     for (const [keyword, item] of Object.entries(groupData.list || {})) {
       list[keyword] = {
@@ -1939,7 +2020,7 @@ function normalizeDashboardListGroup(groupData = {}) {
     };
   }
 
-  const metadataKeys = new Set(["createdAt", "updatedAt", "addedAt", "list", "template", "templatelist", "setlist"]);
+  const metadataKeys = new Set(["createdAt", "updatedAt", "addedAt", "template", "templatelist", "setlist"]);
   const list = {};
   for (const [keyword, item] of Object.entries(groupData)) {
     if (metadataKeys.has(keyword) || !item || typeof item !== "object") continue;
@@ -2199,11 +2280,13 @@ async function upsertLegacyRental(groupJid, patch) {
   if (!String(groupJid || "").endsWith("@g.us")) return null;
   const rentals = await readLegacyRentals();
   const current = rentals[groupJid] || {};
+  const status = String(patch.status ?? current.status ?? "").trim().toLowerCase();
   const next = {
     ...current,
     ...(patch.linkGrub ? { linkGrub: patch.linkGrub } : {}),
     start: patch.start || current.start || legacyTodayText(),
     expired: Number(patch.expired ?? current.expired ?? expirationFromDays(patch.daysLeft || 0)),
+    ...(status ? { status } : {}),
   };
   rentals[groupJid] = next;
   await writeLegacyRentals(rentals);
@@ -2255,6 +2338,12 @@ async function joinGroupThroughBot(inviteLink) {
 function buildRentalBase(groupJid, rental, listCount) {
   const daysLeft = legacyDaysLeft(rental?.expired);
   const hasRental = Boolean(rental);
+  const legacyStatus = String(rental?.status || "").trim().toLowerCase();
+  const status = ["active", "paused", "expired"].includes(legacyStatus)
+    ? legacyStatus
+    : hasRental
+      ? (daysLeft > 0 ? "active" : "expired")
+      : "paused";
   return {
     id: groupJid,
     groupJid,
@@ -2271,7 +2360,7 @@ function buildRentalBase(groupJid, rental, listCount) {
     daysLeft,
     sent: 0,
     replies: 0,
-    status: hasRental ? (daysLeft > 0 ? "active" : "expired") : "paused",
+    status,
     linkGrub: rental?.linkGrub || "",
     listCount,
   };
@@ -3861,7 +3950,20 @@ function repairCompletedOrderSheetAssignment(db, orderId = "") {
       return String(account.orderId || account.sourceOrderId || "").trim() !== String(order.id || "").trim();
     });
     const conflictingOrderId = String(stock.sheetOrderId || "").trim();
-    if (conflictingAccount || (conflictingOrderId && conflictingOrderId !== order.id && String(stock.status || "").toLowerCase() === "sold")) {
+    const staleHistoricalOrderLink = (
+      conflictingOrderId
+      && conflictingOrderId !== order.id
+      && hasOnlyHistoricalManagedAssignment(db.managedAccounts, stockId, conflictingOrderId)
+    );
+    if (
+      conflictingAccount
+      || (
+        conflictingOrderId
+        && conflictingOrderId !== order.id
+        && String(stock.status || "").toLowerCase() === "sold"
+        && !staleHistoricalOrderLink
+      )
+    ) {
       return {
         ok: false,
         status: 409,
@@ -4825,6 +4927,18 @@ function decodeMimeWord(value = "") {
   });
 }
 
+async function readListUpdateAudit() {
+  const candidates = [
+    whatsappDatabasePath("list-updates.json"),
+    path.join(legacyRootDir, "apps", "bot", "database", "list-updates.json"),
+  ];
+  for (const filePath of candidates) {
+    const rows = await readJsonIfExists(filePath, []);
+    if (Array.isArray(rows) && rows.length) return rows;
+  }
+  return [];
+}
+
 function parseRawEmailHeaders(raw = "") {
   const headerText = String(raw || "").split(/\r?\n\r?\n/)[0] || "";
   const unfolded = headerText.replace(/\r?\n[ \t]+/g, " ");
@@ -5075,38 +5189,6 @@ function extractNetflixSigninCode(text = "") {
   return extractNearbyCode(source, hints, 4);
 }
 
-function extractNetflixVerificationCode(text = "") {
-  const source = String(text || "");
-  const acceptedLengths = expectedCodeLengths(6);
-  const headlinePattern = /(?:verifikasi\s+dengan\s+kode\s+ini|verify\s+with\s+this\s+code)/gi;
-  const headlineMatches = Array.from(source.matchAll(headlinePattern));
-  for (let index = headlineMatches.length - 1; index >= 0; index -= 1) {
-    const match = headlineMatches[index];
-    const afterTitle = source.slice((match.index || 0) + match[0].length, (match.index || 0) + match[0].length + 260);
-    const lines = afterTitle
-      .split(/\r?\n/)
-      .map((line) => normalizeAccessCode(line))
-      .filter(Boolean);
-    const directLine = lines.find((line) => isLikelyAccessCode(line, acceptedLengths));
-    if (directLine) return directLine;
-    const directCode = findDigitAccessCodesInText(afterTitle, acceptedLengths)
-      .find((code) => isLikelyAccessCode(code, acceptedLengths));
-    if (directCode) return directCode;
-  }
-  const patterns = [
-    /(?:verifikasi\s+dengan\s+kode\s+ini|verify\s+with\s+this\s+code)[^\d]{0,220}?((?:\d[\s-]*){6})/i,
-    /(?:kode\s+verifikasi|verification\s+code|kode\s+keamanan|security\s+code)[^\d]{0,180}?((?:\d[\s-]*){6})/i,
-    /((?:\d[\s-]*){6})[\s\S]{0,260}?(?:kode\s+ini\s+akan\s+(?:kedaluwarsa|kadaluarsa|berakhir)|you(?:'|\u2019)?ll\s+have\s+15\s+minutes|kode\s+verifikasi|verification\s+code|kedaluwarsa|kadaluarsa|expires?|valid)/i,
-  ];
-  for (const pattern of patterns) {
-    const match = source.match(pattern);
-    const code = normalizeAccessCode(match?.[1] || "");
-    if (isLikelyAccessCode(code, acceptedLengths)) return code;
-  }
-  const hints = ["verifikasi dengan kode ini", "verify with this code", "kode ini akan kedaluwarsa", "kode verifikasi. kedaluwarsa", "verification code. expires", "kode verifikasi", "verification code", "kode keamanan", "security code"];
-  return extractNearbyCode(source, hints, 6);
-}
-
 function stripAccessUrlTail(value = "") {
   let output = String(value || "")
     .replace(/&amp;/gi, "&")
@@ -5238,63 +5320,6 @@ function pickResetPasswordLink(html = "", combined = "") {
   return strongestAccessUrl(otherLinks, isNetflixResetPasswordUrl);
 }
 
-function extractNetflixPageHouseholdCode(body = "") {
-  const text = htmlToText(body);
-  const compact = [text, String(body || "").replace(/<[^>]+>/g, " ")].join("\n");
-  const patterns = [
-    /(?:gunakan|masukkan|enter|use)\s+(?:kode|code)[\s\S]{0,220}?((?:\d[\s-]*){4})/i,
-    /((?:\d[\s-]*){4})[\s\S]{0,80}(?:kode\s+ini\s+akan|this\s+code\s+(?:will\s+)?(?:expire|expires)|kedaluwarsa|expires?\s+in\s+15)/i,
-    /(?:temporary\s+access\s+code|kode\s+akses\s+sementara)[\s\S]{0,260}?((?:\d[\s-]*){4})/i,
-  ];
-  const acceptedLengths = expectedCodeLengths(4);
-  for (const pattern of patterns) {
-    const match = compact.match(pattern);
-    const code = normalizeAccessCode(match?.[1] || "");
-    if (isLikelyAccessCode(code, acceptedLengths)) return code;
-  }
-  return "";
-}
-
-async function fetchNetflixHouseholdCode(url = "") {
-  const link = String(url || "").trim();
-  if (!/^https?:\/\/(?:www\.)?netflix\.com\//i.test(link)) return "";
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 9000);
-  try {
-    const response = await fetch(link, {
-      redirect: "follow",
-      signal: controller.signal,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
-      },
-    });
-    const body = await response.text().catch(() => "");
-    return extractNetflixPageHouseholdCode(body);
-  } catch {
-    return "";
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function extractExplicitHouseholdEmailCode(text = "") {
-  const acceptedLengths = expectedCodeLengths(4);
-  const source = normalizeAccessText(text);
-  const patterns = [
-    /(?:kode|code)\s*(?:akses|access)?\s*[:\-]\s*((?:\d[\s-]*){4})/i,
-    /(?:kode\s+ini|this\s+code\s+is)\s*[:\-]?\s*((?:\d[\s-]*){4})/i,
-  ];
-  for (const pattern of patterns) {
-    const match = source.match(pattern);
-    const code = normalizeAccessCode(match?.[1] || "");
-    if (isLikelyAccessCode(code, acceptedLengths)) return code;
-  }
-  return "";
-}
-
 function extractFirstAccessCode(text = "", expectedLength) {
   const source = normalizeAccessText(text);
   const acceptedLengths = expectedCodeLengths(expectedLength);
@@ -5327,6 +5352,14 @@ const ACCOUNT_ACCESS_MAX_AGE_MS = 15 * 60 * 1000;
 const ACCOUNT_ACCESS_LINK_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const ACCOUNT_ACCESS_CLOCK_SKEW_MS = 2 * 60 * 1000;
 const accountAccessLookupInflight = new Map();
+const gmailHealthService = createGmailHealthService({
+  createClient: (config) => new ImapFlow({
+    ...config,
+    logger: false,
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+  }),
+});
 
 function accountAccessMaxAgeMs(type = "") {
   return ["reset", "household"].includes(String(type || "").toLowerCase())
@@ -5338,16 +5371,6 @@ function accountAccessCandidateWindowMs(type = "") {
   return ["reset", "household"].includes(String(type || "").toLowerCase())
     ? ACCOUNT_ACCESS_LINK_MAX_AGE_MS
     : 20 * 60 * 1000;
-}
-
-function accountAccessLabelNames(type = "") {
-  const key = String(type || "").toLowerCase();
-  if (key === "signin") return ["NF_SIGNIN"];
-  if (key === "verification") return ["NF_VERIF"];
-  if (key === "reset") return ["NF_RESET"];
-  if (key === "household") return ["NF_HOUSE"];
-  if (key === "disney_otp") return ["DISNEY_CODE"];
-  return [];
 }
 
 function accountAccessTargetAddress(account = {}, type = "") {
@@ -5435,17 +5458,7 @@ async function extractAccessValue(type, message, account = {}) {
       ["household", "updatehousehold", "verify", "travel", "temporary", "simplesetup", "getcode"],
       true,
     );
-    if (preferred) {
-      const codeFromNetflix = await fetchNetflixHouseholdCode(preferred);
-      if (codeFromNetflix) {
-        return { kind: "code", value: codeFromNetflix, label: "Kode akses household", score: 95, resolvedFrom: "netflix_link" };
-      }
-      return { kind: "link", value: preferred, label: "Link household", score: 40 };
-    }
-    const explicitCode =
-      extractExplicitHouseholdEmailCode(normalizedCombined || combined) ||
-      extractFirstAccessCode(normalizedVisible || normalizedCombined || combined, 4);
-    return explicitCode ? { kind: "code", value: explicitCode, label: "Kode akses household", score: 50 } : null;
+    return preferred ? { kind: "link", value: preferred, label: "Link household", score: 80 } : null;
   }
   if (type === "verification") {
     const source = normalizedAll || normalizedVisible || normalizedCombined;
@@ -5499,10 +5512,10 @@ async function lookupGmailAccessValueFresh(db, account, type) {
   }
 
   const email = accountAccessTargetAddress(account, type);
-  const labelQueries = accountAccessLabelNames(type).map((label) => `label:${label} to:${email} newer_than:2d`);
-  if (!labelQueries.length) return { source: "gmail", reason: "label_not_configured", value: "" };
+  const accessQueries = accountAccessGmailQueries(type, email);
+  if (!accessQueries.length) return { source: "gmail", reason: "label_not_configured", value: "" };
   const messageMap = new Map();
-  for (const query of labelQueries) {
+  for (const query of accessQueries) {
     const listUrl = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
     listUrl.searchParams.set("q", query);
     listUrl.searchParams.set("maxResults", "50");
@@ -5579,7 +5592,8 @@ async function lookupImapAccessValue(db, account, type) {
 
   try {
     await client.connect();
-    const mailboxes = accountAccessLabelNames(type);
+    const availableMailboxes = await client.list().catch(() => []);
+    const mailboxes = accountAccessMailboxPaths(type, availableMailboxes);
     const hydratedMessages = [];
     const nowMs = Date.now();
     const mailboxErrors = [];
@@ -5659,7 +5673,8 @@ async function lookupAccountAccessValue(db, account, type) {
   try {
     gmailResult = await lookupGmailAccessValue(db, account, type);
   } catch (error) {
-    gmailResult = { source: "gmail", reason: "gmail_error", error: error.message || "Gmail lookup gagal", value: "" };
+    const classified = classifyGmailConnectionError(error);
+    gmailResult = { source: "gmail", reason: "gmail_error", error: classified.message, value: "" };
     if (error?.oauthInvalid || isGmailOAuthInvalidError(error)) {
       db.settings = db.settings || {};
       db.settings.gmailOAuthStatus = "invalid";
@@ -5681,7 +5696,7 @@ const accessLookupLabels = {
   signin: "Sign-in code",
   verification: "Verification code",
   reset: "Reset password link",
-  household: "Household code/link",
+  household: "Link household",
   disney_otp: "Disney OTP code",
 };
 
@@ -5698,8 +5713,9 @@ function accessLookupSourceLabel(source = "") {
 
 function appendAccessLookupActivity(db, auth, { account = null, email = "", type = "", result = {}, status = "" } = {}) {
   if (!db || !auth) return;
+  const ownerLookup = auth.role === "owner";
   const reseller = authReseller(db, auth);
-  const resellerName = reseller?.name || reseller?.username || account?.reseller || account?.buyer || "Reseller";
+  const resellerName = ownerLookup ? "Owner" : reseller?.name || reseller?.username || account?.reseller || account?.buyer || "Reseller";
   const resellerWhatsapp = normalizeWhatsappNumber(account?.whatsapp || reseller?.whatsapp || "");
   const label = accessLookupLabel(type);
   const valueFound = Boolean(String(result?.value || "").trim());
@@ -5719,10 +5735,10 @@ function appendAccessLookupActivity(db, auth, { account = null, email = "", type
       ? `${resellerName} mengambil ${label} untuk ${targetEmail || "-"}${productLabel ? ` (${productLabel})` : ""} dari ${source}.`
       : `${resellerName} mencoba ${label} untuk ${targetEmail || "-"}${productLabel ? ` (${productLabel})` : ""}, tetapi belum tersedia (${normalizedStatus}).`,
     createdAt: nowText(),
-    resellerId: reseller?.id || account?.resellerId || auth.sub || "",
+    resellerId: ownerLookup ? "" : reseller?.id || account?.resellerId || auth.sub || "",
     whatsapp: resellerWhatsapp,
     actorName: resellerName,
-    actorRole: auth.role || "reseller",
+    actorRole: ownerLookup ? "owner" : auth.role || "reseller",
     actorWhatsapp: resellerWhatsapp,
     accountId: account?.id || "",
     accountEmail: targetEmail,
@@ -5796,14 +5812,10 @@ async function fetchPakasirTransactionDetail(db, order = {}, payment = {}) {
   url.searchParams.set("order_id", orderId);
   url.searchParams.set("api_key", credentials.apiKey);
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), Number(process.env.PAKASIR_TIMEOUT_MS || 8000));
   try {
-    const response = await fetch(url, {
+    const { response, payload } = await requestPakasirJsonWithRetry(url, {
       headers: { Accept: "application/json" },
-      signal: controller.signal,
     });
-    const payload = await response.json().catch(() => ({}));
     const transaction = parsePakasirTransaction(payload);
     const raw = transaction.raw || payload?.transaction || payload?.payment || payload?.data || payload || {};
     const status = String(raw.status || raw.payment_status || payload?.status || "").trim().toLowerCase();
@@ -5827,10 +5839,8 @@ async function fetchPakasirTransactionDetail(db, order = {}, payment = {}) {
   } catch (error) {
     return {
       ok: false,
-      error: error.name === "AbortError" ? "Pakasir detail timeout." : error.message || "Pakasir detail gagal.",
+      error: error.message?.includes("timeout") ? "Pakasir detail timeout." : error.message || "Pakasir detail gagal.",
     };
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -5856,10 +5866,8 @@ async function createPakasirQris(db, order) {
     };
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), Number(process.env.PAKASIR_TIMEOUT_MS || 8000));
   try {
-    const response = await fetch("https://app.pakasir.com/api/transactioncreate/qris", {
+    const { response, payload } = await requestPakasirJsonWithRetry("https://app.pakasir.com/api/transactioncreate/qris", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -5868,9 +5876,7 @@ async function createPakasirQris(db, order) {
         amount,
         api_key: credentials.apiKey,
       }),
-      signal: controller.signal,
     });
-    const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       throw new Error(payload?.error || `Pakasir QRIS gagal dibuat (${response.status})`);
     }
@@ -5908,15 +5914,13 @@ async function createPakasirQris(db, order) {
     return {
       ...fallback,
       providerStatus: "error",
-      providerError: error.name === "AbortError" ? "Pakasir timeout." : error.message || "Pakasir tidak tersedia.",
+      providerError: error.message?.includes("timeout") ? "Pakasir timeout." : error.message || "Pakasir tidak tersedia.",
     };
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
-function shouldRefreshGoogleSheetsForResellerView(db, auth) {
-  if (auth?.role !== "reseller") return false;
+function shouldRefreshGoogleSheetsForResellerView(db, auth, options = {}) {
+  if (auth?.role !== "reseller" && !(auth?.role === "owner" && options.allowOwner === true)) return false;
   if (!googleSheetsConfigured(db)) return false;
   const maxAgeMs = Math.max(60_000, Number(process.env.RESELLER_VIEW_SHEETS_MAX_AGE_MS || 60_000));
   const lastSyncAt = toDateTime(db.settings?.googleSheetsLastSyncAt || "");
@@ -5926,12 +5930,32 @@ function shouldRefreshGoogleSheetsForResellerView(db, auth) {
 
 async function refreshResellerViewFromGoogleSheets(db, auth, reason = "reseller_view_refresh", options = {}) {
   const bypassStaleWindow = options.forceRecent === true;
-  if (!bypassStaleWindow && !shouldRefreshGoogleSheetsForResellerView(db, auth)) return false;
+  const assertRequiredSections = (result) => {
+    const requiredError = googleSheetsRequiredSectionsError(result || {}, options.requiredSections || []);
+    if (requiredError) throw requiredError;
+    if (options.requireAll === true && result?.ok === false) {
+      const error = new Error(`Sync Google Sheets tidak lengkap: ${(result.failedSections || []).join(", ") || "unknown"}`);
+      error.status = 503;
+      error.code = "google_sheets_sync_failed";
+      throw error;
+    }
+  };
+  if (!bypassStaleWindow && !shouldRefreshGoogleSheetsForResellerView(db, auth, options)) {
+    try {
+      assertRequiredSections(db.settings?.googleSheetsLastSyncSummary || {});
+    } catch (error) {
+      if (options.throwOnFailure === true) throw error;
+      return false;
+    }
+    return false;
+  }
   try {
-    await syncGoogleSheetsStockSafely(db, { silent: true, reason });
+    const result = await syncGoogleSheetsStockSafely(db, { silent: true, reason });
+    assertRequiredSections(result);
     return true;
   } catch (error) {
     const friendly = friendlyGoogleSheetsError(error);
+    if (options.throwOnFailure === true) throw friendly;
     if (friendly.code !== "google_sheets_rate_limited") {
       console.warn(`[ResellerView] Google Sheets refresh skipped: ${friendly.message || friendly}`);
     }
@@ -6172,7 +6196,10 @@ async function getWhatsAppBotStatus(db) {
           connected: Boolean(body.connected),
           state: body.state || (body.connected ? "open" : "disconnected"),
           qrAvailable: Boolean(body.qr_available || body.qrAvailable),
+          pairingAvailable: Boolean(body.pairing_available || body.pairingAvailable || body.pairing_code || body.pairingCode),
+          pairingCode: String(body.pairing_code || body.pairingCode || ""),
           publicQrUrl: body.public_qr_url || body.publicQrUrl || "",
+          lastError: String(body.last_error || body.lastError || ""),
         };
       }
       lastError = new Error(body.error || `whatsapp_bot_http_${response.status}`);
@@ -6182,6 +6209,7 @@ async function getWhatsAppBotStatus(db) {
     return {
       ...base,
       error: error.name === "AbortError" ? "whatsapp_bot_timeout" : error.message || "whatsapp_bot_unavailable",
+      lastError: error.name === "AbortError" ? "whatsapp_bot_timeout" : error.message || "whatsapp_bot_unavailable",
     };
   } finally {
     clearTimeout(timeout);
@@ -6357,25 +6385,29 @@ async function readBackupInfo() {
   return directorySummary(process.env.RUNTIME_BACKUP_DIR || process.env.BACKUP_DIR || fallbackDir);
 }
 
-function readIntegrationInfo(db, whatsapp, tunnel) {
+function readIntegrationInfo(db, whatsapp, tunnel, gmailRuntimeHealth = null) {
   const pakasir = getPakasirCredentials(db);
   const gmailInfo = gmailConnectionInfo(db);
   const whatsappInboundConfigured = Boolean(firstUsableSecret(db.settings?.whatsappInboundToken, process.env.WHATSAPP_INBOUND_TOKEN));
   const ownerWhatsAppNumber = normalizeWhatsappNumber(db.settings?.ownerWhatsAppNumber || process.env.OWNER_WHATSAPP_NUMBER || "");
+  const sheetsHealth = googleSheetsSyncHealth(db.settings || {});
   return {
     pakasir: {
       configured: pakasir.configured,
       merchantId: pakasir.project || "",
     },
     gmail: {
-      connected: gmailInfo.connected,
+      connected: gmailRuntimeHealth?.checked ? Boolean(gmailRuntimeHealth.connected) : gmailInfo.connected,
       needsOAuth: gmailInfo.needsOAuth,
-      error: gmailInfo.error,
+      error: gmailRuntimeHealth?.checked ? gmailRuntimeHealth.error || "" : gmailInfo.error,
       inboxEmail: firstConfigured(db.settings?.gmailInboxEmail, process.env.GMAIL_INBOX_EMAIL),
     },
     googleSheets: {
       configured: googleSheetsConfigured(db),
       lastSyncAt: db.settings?.googleSheetsLastSyncAt || "",
+      lastSyncAttemptAt: sheetsHealth.lastAttemptAt,
+      healthy: sheetsHealth.healthy,
+      failedSections: sheetsHealth.failedSections,
       lastSyncSummary: db.settings?.googleSheetsLastSyncSummary || null,
     },
     whatsapp: {
@@ -6395,7 +6427,16 @@ function readIntegrationInfo(db, whatsapp, tunnel) {
 async function buildSystemStatus(db) {
   const totalMemory = os.totalmem();
   const freeMemory = os.freemem();
-  const [disk, swap, pm2, whatsapp, tunnel, database, backup] = await Promise.all([
+  const gmailSettings = ownerIntegrationSettings(db).gmail;
+  const gmailRuntimePromise = gmailImapConfigured(db)
+    ? gmailHealthService.check({
+        host: gmailSettings.imapHost,
+        port: gmailSettings.imapPort,
+        secure: gmailSettings.imapSecure,
+        auth: { user: gmailSettings.imapUser, pass: gmailSettings.imapPassword },
+      })
+    : Promise.resolve(null);
+  const [disk, swap, pm2, whatsapp, tunnel, database, backup, gmailRuntimeHealth] = await Promise.all([
     readDiskInfo(),
     readSwapInfo(),
     readPm2Info(),
@@ -6403,6 +6444,7 @@ async function buildSystemStatus(db) {
     readTunnelInfo(db),
     readDatabaseInfo(),
     readBackupInfo(),
+    gmailRuntimePromise,
   ]);
   const memory = {
     total: totalMemory,
@@ -6433,7 +6475,7 @@ async function buildSystemStatus(db) {
       error: whatsapp.error || whatsapp.last_error || "",
     },
     tunnel,
-    integrations: readIntegrationInfo(db, whatsapp, tunnel),
+    integrations: readIntegrationInfo(db, whatsapp, tunnel, gmailRuntimeHealth),
     database,
     backup,
     warnings: [],
@@ -7060,7 +7102,11 @@ function buildReconcileReport(db) {
     if (order.type === "deposit_topup" || order.orderType === "deposit_topup") continue;
     if (createdAtMs(order.createdAt || "") < Date.now() - 60 * 86400000) continue;
     const linkedAccounts = deliveredAccountsForOrder(db, order, { includeHidden: true });
-    if ((order.deliveryStatus === "sent" || order.orderStatus === "completed") && !linkedAccounts.length) {
+    const coverage = deliveryAuditCoverage(order, linkedAccounts, db.activities || []);
+    if (
+      (order.deliveryStatus === "sent" || order.orderStatus === "completed")
+      && coverage.missingHistoricalCount > 0
+    ) {
       issues.push({
         id: `order-missing-account-${order.id}`,
         severity: "high",
@@ -7127,7 +7173,13 @@ function buildSheetsRowAudit(db) {
   for (const stock of rows) {
     const sold = String(stock.status || "").toLowerCase() === "sold";
     const condition = String(stock.accountCondition || "NORMAL").trim().toUpperCase();
-    const linked = accounts.filter((account) => String(account.stockId || "").trim() === String(stock.id || "").trim() && !account.hidden && !account.returnedToStockAt);
+    const linked = accounts.filter((account) => (
+      String(account.stockId || "").trim() === String(stock.id || "").trim()
+      && isDeliverableManagedAccount({
+        ...account,
+        status: account.status || accountStatusFromDate(account.expiresAt, account.durationDays),
+      })
+    ));
     const sellerInput = String(stock.sheetSellerInput || "").trim();
     const resolvedSeller = sellerInput ? resellerBySellerText(db, sellerInput) : null;
 
@@ -7173,6 +7225,7 @@ function buildSheetsRowAudit(db) {
   const paidNotDelivered = orders.filter((order) => (
     String(order.qrisStatus || "").toLowerCase() === "paid"
     && String(order.deliveryStatus || "").toLowerCase() !== "sent"
+    && !isCreditedStockUnavailableOrder(order)
     && !["deposit_topup"].includes(String(order.orderType || order.type || "").toLowerCase())
   )).length;
   const sorted = issues.sort(compareQueueItems);
@@ -7206,16 +7259,14 @@ function buildDeliveryAuditQueue(db) {
     const delivery = String(order.deliveryStatus || "").toLowerCase();
     const status = String(order.orderStatus || "").toLowerCase();
     const qty = Math.max(1, Number(order.qty || 1));
-    const linkedAccounts = deliveredAccountsForOrder(db, order, { includeHidden: true })
-      .filter((account) => !account.returnedToStockAt && !account.hidden);
-    const uniqueLinkedAccounts = [...new Map(linkedAccounts.map((account) => {
-      const stockId = String(account.stockId || "").trim();
-      const sheetSlot = account.sheetName && account.sheetRow ? `${account.sheetName}:${account.sheetRow}` : "";
-      const identitySlot = `${account.email || account.loginPhone || account.id || ""}:${account.profile || ""}`.toLowerCase();
-      return [stockId || sheetSlot || identitySlot || String(account.id || ""), account];
-    })).values()];
+    const linkedAccounts = deliveredAccountsForOrder(db, order, { includeHidden: true });
+    const {
+      historical: uniqueLinkedAccounts,
+      active: activeLinkedAccounts,
+    } = classifyDeliveryAuditAccounts(linkedAccounts);
+    const historicalDeliveryVerified = hasHistoricalDeliveryEvidence(db.activities || [], order);
     const removedConflictStocks = Array.isArray(order.historyConflictRemovedStockIds) ? order.historyConflictRemovedStockIds.filter(Boolean) : [];
-    const missingSheetAccounts = uniqueLinkedAccounts.filter((account) => (
+    const missingSheetAccounts = activeLinkedAccounts.filter((account) => (
       String(account.sheetSource || "").toLowerCase() === "google_sheets"
       && (!account.sheetName || !account.sheetRow)
     ));
@@ -7233,7 +7284,7 @@ function buildDeliveryAuditQueue(db) {
       });
     }
 
-    if ((delivery === "sent" || status === "completed") && uniqueLinkedAccounts.length === 0) {
+    if ((delivery === "sent" || status === "completed") && uniqueLinkedAccounts.length === 0 && !historicalDeliveryVerified) {
       issues.push({
         id: `delivery-order-missing-${order.id}`,
         severity: "high",
@@ -7247,7 +7298,7 @@ function buildDeliveryAuditQueue(db) {
       continue;
     }
 
-    if ((delivery === "sent" || status === "completed") && uniqueLinkedAccounts.length < qty) {
+    if ((delivery === "sent" || status === "completed") && uniqueLinkedAccounts.length < qty && !historicalDeliveryVerified) {
       issues.push({
         id: `delivery-order-under-${order.id}`,
         severity: "high",
@@ -7260,13 +7311,13 @@ function buildDeliveryAuditQueue(db) {
       });
     }
 
-    if (uniqueLinkedAccounts.length > qty) {
+    if (activeLinkedAccounts.length > qty) {
       issues.push({
         id: `delivery-order-over-${order.id}`,
         severity: "high",
         kind: "delivery",
         title: "Jumlah akun tertaut melebihi qty order",
-        detail: `${order.id} qty ${qty}, tapi ada ${uniqueLinkedAccounts.length} akun unik tertaut. Ini sinyal double drop yang perlu diperiksa.`,
+        detail: `${order.id} qty ${qty}, tapi ada ${activeLinkedAccounts.length} akun aktif unik tertaut. Ini sinyal double drop yang perlu diperiksa.`,
         createdAt: order.fulfillmentSentAt || order.paidAt || order.createdAt || "",
         orderId: order.id,
         href: operationLink({ orderId: order.id }),
@@ -7589,6 +7640,22 @@ function buildWalletLedger(db) {
     });
   }
 
+  for (const claim of db.warrantyClaims || []) {
+    if (!["failed", "pending"].includes(String(claim.replacementSyncStatus || "").toLowerCase())) continue;
+    items.push({
+      id: `manual-warranty-sync-${claim.id}`,
+      severity: claim.replacementSyncStatus === "failed" ? "high" : "medium",
+      kind: "warranty_sync",
+      title: `Sinkronisasi penggantian garansi ${claim.id} ${claim.replacementSyncStatus === "failed" ? "gagal" : "belum selesai"}`,
+      detail: "Penggantian sudah dikunci di database. Buka Warranty Center dan coba sinkronisasi ulang tanpa memilih stok lain.",
+      createdAt: claim.replacementSyncFailedAt || claim.replacementSyncStartedAt || claim.updatedAt || claim.createdAt || "",
+      orderId: claim.orderId || "",
+      accountId: claim.replacement?.newAccountId || claim.accountId || "",
+      stockId: claim.replacement?.newStockId || "",
+      href: "/owner-v2/warranty",
+    });
+  }
+
   const resellerSummaries = Array.from(summaryByReseller.values())
     .sort((left, right) => Number(right.currentBalance || 0) - Number(left.currentBalance || 0));
   const allEntries = [...entries].sort(compareQueueItems);
@@ -7695,29 +7762,28 @@ function buildResellerHealthQueue(db) {
     if (orderMoment && orderMoment < Date.now() - 90 * 86400000) continue;
     const delivery = String(order.deliveryStatus || "").toLowerCase();
     const status = String(order.orderStatus || "").toLowerCase();
-    const linkedAccounts = deliveredAccountsForOrder(db, order, { includeHidden: true })
-      .filter((account) => !account.returnedToStockAt && !isTerminalManagedAccountStatus(account.status || accountStatusFromDate(account.expiresAt, account.durationDays)));
-    const qty = Math.max(1, Number(order.qty || 1));
-    if ((delivery === "sent" || status === "completed") && linkedAccounts.length < qty) {
+    const linkedAccounts = deliveredAccountsForOrder(db, order, { includeHidden: true });
+    const coverage = deliveryAuditCoverage(order, linkedAccounts, db.activities || []);
+    if ((delivery === "sent" || status === "completed") && coverage.missingHistoricalCount > 0) {
       issues.push({
         id: `reseller-order-missing-accounts-${order.id}`,
         severity: "high",
         kind: "reseller",
         title: "Order reseller selesai tapi Manage Account belum lengkap",
-        detail: `${order.id} butuh ${qty} akun, tapi yang tertaut baru ${linkedAccounts.length}. Ini yang bikin panel reseller terasa kosong atau tidak sinkron.`,
+        detail: `${order.id} butuh ${coverage.qty} akun, tapi jejak delivery valid baru ${coverage.historicalCount}. Ini yang bikin panel reseller terasa kosong atau tidak sinkron.`,
         createdAt: order.fulfillmentSentAt || order.paidAt || order.createdAt || "",
         orderId: order.id,
         href: operationLink({ orderId: order.id }),
         resellerId: order.resellerId || "",
       });
     }
-    if (linkedAccounts.length > qty) {
+    if (coverage.activeCount > coverage.qty) {
       issues.push({
         id: `reseller-order-duplicate-${order.id}`,
         severity: "high",
         kind: "reseller",
         title: "Order reseller terindikasi double drop",
-        detail: `${order.id} qty ${qty}, tapi ada ${linkedAccounts.length} akun aktif tertaut. Perlu cek sebelum reseller lihat data ganda.`,
+        detail: `${order.id} qty ${coverage.qty}, tapi ada ${coverage.activeCount} akun aktif tertaut. Perlu cek sebelum reseller lihat data ganda.`,
         createdAt: order.fulfillmentSentAt || order.paidAt || order.createdAt || "",
         orderId: order.id,
         href: operationLink({ orderId: order.id }),
@@ -7909,13 +7975,13 @@ function buildManualQueue(db, reconcile, expiry, wallet, whatsappHealth, reselle
         href: operationLink({ orderId: order.id }),
       });
     }
-    if (order.deliveryStatus === "stock_unavailable_deposit") {
+    if (order.deliveryStatus === "stock_unavailable_deposit" && !isCreditedStockUnavailableOrder(order)) {
       items.push({
         id: `manual-order-stockrace-${order.id}`,
-        severity: "medium",
+        severity: "high",
         kind: "order",
-        title: `Dana order ${order.id} jadi saldo`,
-        detail: "Pastikan reseller tahu order gagal fulfill dan dana sudah dipindah ke saldo.",
+        title: `Kredit saldo order ${order.id} belum terverifikasi`,
+        detail: "Order ditandai stok habis, tetapi marker kredit saldo belum lengkap. Periksa ledger sebelum tindakan apa pun.",
         createdAt: order.stockRaceDepositCreditedAt || order.createdAt || "",
         orderId: order.id,
         href: operationLink({ orderId: order.id }),
@@ -7934,6 +8000,24 @@ function buildManualQueue(db, reconcile, expiry, wallet, whatsappHealth, reselle
       createdAt: request.createdAt || "",
       requestId: request.id,
       href: operationLink({ requestId: request.id }),
+    });
+  }
+
+  for (const claim of db.warrantyClaims || []) {
+    if (!claim.stockReviewTriggered) continue;
+    const syncStatus = String(claim.stockReviewSyncStatus || "").toLowerCase();
+    if (!["pending", "failed"].includes(syncStatus)) continue;
+    items.push({
+      id: `manual-warranty-review-${claim.id}`,
+      severity: syncStatus === "failed" ? "high" : "medium",
+      kind: "warranty_stock_review",
+      title: `Stok ${syncStatus === "failed" ? "gagal ditandai" : "menunggu tanda"} DIPERIKSA`,
+      detail: `${Number(claim.stockReviewProfileCount || 0)} profil pada akun login yang sama memiliki klaim. Stok tetap dikunci lokal sampai sinkronisasi Sheets selesai.`,
+      createdAt: claim.stockReviewSyncUpdatedAt || claim.updatedAt || claim.createdAt || "",
+      orderId: claim.orderId || "",
+      accountId: claim.accountId || "",
+      stockId: claim.stockId || "",
+      href: "/owner-v2/warranty",
     });
   }
 
@@ -8072,13 +8156,17 @@ async function ensureRuntimeSettings() {
     settings[key] = normalized;
     changed = true;
   };
+  const setIfConfigured = (key, value) => {
+    const normalized = normalizeConfiguredUrl(value);
+    if (!normalized || settings[key] === normalized) return;
+    settings[key] = normalized;
+    changed = true;
+  };
 
-  const defaultPublicDomain = firstConfigured(
-    settings.publicDomain,
-    process.env.PUBLIC_DOMAIN,
-    settings.botPublicUrl,
-    `http://${host}:${port}`,
-  ).replace(/\/$/, "");
+  const envPublicDomain = normalizeConfiguredUrl(process.env.PUBLIC_DOMAIN);
+  const defaultPublicDomain = normalizeConfiguredUrl(
+    firstConfigured(envPublicDomain, settings.publicDomain, settings.botPublicUrl, `http://${host}:${port}`),
+  );
   const envCloudflaredToken = firstUsableSecret(process.env.CLOUDFLARED_TOKEN);
 
   if (envCloudflaredToken) {
@@ -8091,11 +8179,25 @@ async function ensureRuntimeSettings() {
     changed = true;
   }
 
-  setDefault("publicDomain", defaultPublicDomain);
-  setDefault("botPublicUrl", defaultPublicDomain);
+  setIfConfigured("publicDomain", envPublicDomain || defaultPublicDomain);
+  setIfConfigured("botPublicUrl", normalizeConfiguredUrl(process.env.BOT_PUBLIC_URL) || defaultPublicDomain);
+  const envOwnerUsername = firstConfigured(process.env.OWNER_USERNAME, process.env.OWNER_LOGIN_USERNAME);
+  if (envOwnerUsername && settings.ownerUsername !== envOwnerUsername) {
+    settings.ownerUsername = envOwnerUsername;
+    changed = true;
+  }
+  const envOwnerEmail = firstConfigured(process.env.OWNER_EMAIL, process.env.OWNER_LOGIN_EMAIL);
+  if (envOwnerEmail && settings.ownerEmail !== envOwnerEmail) {
+    settings.ownerEmail = envOwnerEmail;
+    changed = true;
+  }
   const envOwnerPassword = firstUsableSecret(process.env.OWNER_PASSWORD, process.env.OWNER_LOGIN_PASSWORD);
   const storedOwnerPassword = firstUsableSecret(settings.ownerPassword);
-  if (!settings.ownerPasswordHash && storedOwnerPassword && storedOwnerPassword !== "admin12345") {
+  if (envOwnerPassword && !verifyPassword(envOwnerPassword, settings.ownerPasswordHash || "")) {
+    settings.ownerPasswordHash = hashPassword(envOwnerPassword);
+    delete settings.ownerPassword;
+    changed = true;
+  } else if (!settings.ownerPasswordHash && storedOwnerPassword && storedOwnerPassword !== "admin12345") {
     settings.ownerPasswordHash = hashPassword(storedOwnerPassword);
     delete settings.ownerPassword;
     changed = true;
@@ -8119,10 +8221,10 @@ async function ensureRuntimeSettings() {
   }
   setDefault("baileySessionId", process.env.WHATSAPP_BAILEY_SESSION_ID || "kavya-main");
   setDefault("baileyBotNumber", process.env.WHATSAPP_BOT_NUMBER || settings.ownerWhatsAppNumber || process.env.OWNER_WHATSAPP_NUMBER || "");
-  setDefault("whatsappBotPublicUrl", process.env.WHATSAPP_BOT_PUBLIC_URL || `${defaultPublicDomain}/whatsapp-bot`);
-  setDefault("baileyWebhookUrl", process.env.WHATSAPP_INBOUND_WEBHOOK_URL || `${defaultPublicDomain}/api/whatsapp/inbound`);
-  setDefault("baileyQrisGenerateUrl", `${defaultPublicDomain}/api/orders`);
-  setDefault("gmailRedirectUri", process.env.GMAIL_REDIRECT_URI || `${defaultPublicDomain}/api/gmail/oauth/callback`);
+  setIfConfigured("whatsappBotPublicUrl", process.env.WHATSAPP_BOT_PUBLIC_URL || `${defaultPublicDomain}/whatsapp-bot`);
+  setIfConfigured("baileyWebhookUrl", process.env.WHATSAPP_INBOUND_WEBHOOK_URL || `${defaultPublicDomain}/api/whatsapp/inbound`);
+  setIfConfigured("baileyQrisGenerateUrl", `${defaultPublicDomain}/api/orders`);
+  setIfConfigured("gmailRedirectUri", process.env.GMAIL_REDIRECT_URI || `${defaultPublicDomain}/api/gmail/oauth/callback`);
   setDefault("whatsappBotToken", firstUsableSecret(process.env.WHATSAPP_BOT_TOKEN) || randomSecret("wabot"));
   setDefault("whatsappInboundToken", firstUsableSecret(process.env.WHATSAPP_INBOUND_TOKEN) || randomSecret("wain"));
   setDefault("pakasirApiKey", firstUsableSecret(process.env.PAKASIR_API_KEY));
@@ -8228,12 +8330,15 @@ registerSystemRoutes(app, {
   getDbVersion,
   getPakasirCredentials,
   googleSheetsConfigured,
+  googleSheetsSyncHealth,
   maintenanceMode,
   makeId,
   mergedWhatsappRentals,
   nowText,
   onDbChange,
   readActiveLegacyGroupLists,
+  readLegacyGroupLists,
+  readListUpdateAudit,
   readDb,
   readDbSnapshot,
   requireAuth,
@@ -8578,6 +8683,8 @@ registerSheetsRoutes(app, {
   friendlyGoogleSheetsError,
   googleSheetsConfigured,
   googleSheetsPublicSettings,
+  googleSheetsRequiredSectionsError,
+  googleSheetsSyncHealth,
   previewAccountSheetMapping,
   readDb,
   requireAuth,
@@ -8735,6 +8842,7 @@ registerOrderRoutes(app, {
   resellerRequiredMessage,
   serializeOrderForApi,
   safeTrackingOrder,
+  shouldEnablePakasirMaintenance,
   splitCustomerEmails,
   splitDeviceNames,
   updateDb,
@@ -8760,6 +8868,7 @@ registerResellerRoutes(app, {
   notifyResellerProfileChanged,
   nowText,
   ownerIntegrationSettings,
+  shouldEnablePakasirMaintenance,
   ownerProfile,
   ownerWhatsappTarget,
   publicUser,
@@ -8817,12 +8926,14 @@ registerAccountRoutes(app, {
   buildManagedAccountInput,
   canonicalResellerDisplayName,
   clearAccountsInGoogleSheets,
+  createDeliveryTemplateSnapshot,
   findAccountForLookup,
   findDisneyAccountForLookup,
   gmailConnectionInfo,
   historicalAccountForLookup,
   historicalDisneyAccountForLookup,
   inactiveLookupResult,
+  isDisneyManagedAccount,
   isGmailOAuthInvalidError,
   isNetflixManagedAccount,
   isTerminalManagedAccountStatus,
@@ -8851,6 +8962,37 @@ registerAccountRoutes(app, {
   syncSoldStockMetadata,
   updateDb,
   visibleManagedAccountsForAuth,
+});
+
+registerWarrantyRoutes(app, {
+  buildWarrantyOwnerNotification,
+  buildWarrantyReplacementNotifications,
+  buildWarrantyStatusNotification,
+  createWarrantyClaim,
+  decodeWarrantyEvidence,
+  makeId,
+  markWarrantyReplacementSync,
+  nowText,
+  primaryResellerWhatsapp,
+  readWarrantyEvidence,
+  readDbSnapshot,
+  removeWarrantyEvidence,
+  refreshOrderDeliveryTemplateSnapshot,
+  replacementCandidatesForClaim,
+  replaceWarrantyAccount,
+  replaceWarrantyAccountManually,
+  requireAuth,
+  saveWarrantyEvidence,
+  sendWhatsAppMessage,
+  syncAccountReplacementToGoogleSheets,
+  syncWarrantyStockReviewToGoogleSheets,
+  syncSheetsForProductOrThrow,
+  updateDb,
+  updateWarrantyClaim,
+  validateWarrantyReplacementState,
+  warrantyClaimsForAuth,
+  warrantyManualClaimOptions,
+  warrantyWhatsAppNumber,
 });
 
 function archiveOldActivities(db, keepDays = 5) {
@@ -8932,10 +9074,13 @@ registerWhatsAppRoutes(app, {
   notifyOwnerRentalChanged,
   notifyOwnerRentalJoined,
   nowText,
+  shouldEnablePakasirMaintenance,
   paymentTtlMinutes,
   previewWaPriceSync,
   pushFulfilledOrderToGoogleSheets,
   readActiveLegacyGroupLists,
+  readLegacyGroupLists,
+  readListUpdateAudit,
   readDb,
   readLegacyRentals,
   requireAuth,
@@ -9005,12 +9150,26 @@ async function runGoogleSheetsStockSyncJob() {
   if (googleSheetsStockSyncRunning) return;
   googleSheetsStockSyncRunning = true;
   try {
-    await updateDb(async (db) => {
+    const result = await updateDb(async (db) => {
       if (!googleSheetsConfigured(db)) return { skipped: true };
       return syncGoogleSheetsStockSafely(db, { silent: true, reason: "scheduled_sync" });
     });
+    if (!result?.skipped) {
+      await reportOperationalHealth({
+        key: "google_sheets",
+        label: "Google Sheets",
+        ok: result?.ok !== false,
+        detail: (result?.failedSections || []).join(", ") || "sinkronisasi tidak lengkap",
+      });
+    }
   } catch (error) {
     console.warn(`[GoogleSheets] sync skipped: ${error.message || error}`);
+    await reportOperationalHealth({
+      key: "google_sheets",
+      label: "Google Sheets",
+      ok: false,
+      detail: error.message || "scheduled sync failed",
+    });
   } finally {
     googleSheetsStockSyncRunning = false;
   }
@@ -9066,8 +9225,19 @@ async function runPakasirPaymentSyncJob() {
       }
       return { checked: refs.length };
     });
+    await reportOperationalHealth({
+      key: "pakasir_sync",
+      label: "Pemeriksaan pembayaran",
+      ok: true,
+    });
   } catch (error) {
     console.warn(`[Pakasir] payment sync skipped: ${error.message || error}`);
+    await reportOperationalHealth({
+      key: "pakasir_sync",
+      label: "Pemeriksaan pembayaran",
+      ok: false,
+      detail: error.message || "payment sync failed",
+    });
   } finally {
     pakasirPaymentSyncRunning = false;
   }
@@ -9136,8 +9306,19 @@ async function runFulfillmentRepairJob() {
       }
       return { checked: candidates.length };
     });
+    await reportOperationalHealth({
+      key: "fulfillment_repair",
+      label: "Pemulihan fulfillment",
+      ok: true,
+    });
   } catch (error) {
     console.warn(`[Fulfillment] repair skipped: ${error.message || error}`);
+    await reportOperationalHealth({
+      key: "fulfillment_repair",
+      label: "Pemulihan fulfillment",
+      ok: false,
+      detail: error.message || "fulfillment repair failed",
+    });
   } finally {
     fulfillmentRepairRunning = false;
   }
@@ -9145,3 +9326,85 @@ async function runFulfillmentRepairJob() {
 
 setTimeout(runFulfillmentRepairJob, 20_000);
 setInterval(runFulfillmentRepairJob, 45_000);
+
+let warrantyOverdueAlertRunning = false;
+
+async function runWarrantyOverdueAlertJob() {
+  if (warrantyOverdueAlertRunning) return;
+  warrantyOverdueAlertRunning = true;
+  try {
+    const db = await readDbSnapshot();
+    const nowMs = Date.now();
+    const ownerUrl = `${String(db.settings?.publicDomain || process.env.PUBLIC_DOMAIN || "https://www.vya.baby").replace(/\/$/, "")}/owner-v2/warranty`;
+    const candidates = (db.warrantyClaims || [])
+      .filter((claim) => ["submitted", "reviewing", "waiting_evidence"].includes(String(claim.status || "").toLowerCase()))
+      .filter((claim) => !claim.overdueOwnerNotificationAt)
+      .map((claim) => {
+        const dueMs = Number(toDateTime(claim.reviewDueAt || "")?.getTime() || 0);
+        const startedMs = Number(toDateTime(claim.holdStartedAt || claim.createdAt || "")?.getTime() || 0);
+        return { claim, dueMs, startedMs };
+      })
+      .filter((item) => item.dueMs > 0 && item.dueMs <= nowMs)
+      .sort((left, right) => left.dueMs - right.dueMs)
+      .slice(0, 5);
+
+    for (const item of candidates) {
+      const elapsedMinutes = item.startedMs > 0 ? Math.max(0, Math.ceil((nowMs - item.startedMs) / 60000)) : 0;
+      const claimForMessage = {
+        ...item.claim,
+        reviewElapsedMinutes: elapsedMinutes || item.claim.reviewElapsedMinutes || 0,
+        reviewOverdue: true,
+      };
+      const delivery = await sendWhatsAppMessage(db, {
+        to: warrantyWhatsAppNumber(db),
+        text: buildWarrantyOverdueNotification(db, claimForMessage, { ownerUrl }),
+      });
+      await updateDb((currentDb) => {
+        const current = (currentDb.warrantyClaims || []).find((claim) => claim.id === item.claim.id);
+        if (!current) return null;
+        current.reviewOverdue = true;
+        current.reviewElapsedMinutes = claimForMessage.reviewElapsedMinutes;
+        current.overdueOwnerNotificationAt = delivery.sent ? nowText() : "";
+        current.overdueOwnerNotificationStatus = delivery.sent ? "sent" : "failed";
+        current.overdueOwnerNotificationError = delivery.sent ? "" : String(delivery.reason || "whatsapp_delivery_failed").slice(0, 160);
+        current.updatedAt = nowText();
+        return current;
+      });
+    }
+  } catch (error) {
+    console.warn(`[Warranty] overdue alert skipped: ${error.message || error}`);
+  } finally {
+    warrantyOverdueAlertRunning = false;
+  }
+}
+
+setTimeout(runWarrantyOverdueAlertJob, 90_000);
+setInterval(runWarrantyOverdueAlertJob, 15 * 60 * 1000);
+
+let whatsappHealthAlertRunning = false;
+
+async function runWhatsAppHealthAlertJob() {
+  if (whatsappHealthAlertRunning) return;
+  whatsappHealthAlertRunning = true;
+  try {
+    const status = await getWhatsAppBotStatus(await readDb());
+    await reportOperationalHealth({
+      key: "whatsapp",
+      label: "WhatsApp Bot",
+      ok: status.connected === true && status.state === "open",
+      detail: status.error || status.state || "disconnected",
+    });
+  } catch (error) {
+    await reportOperationalHealth({
+      key: "whatsapp",
+      label: "WhatsApp Bot",
+      ok: false,
+      detail: error.message || "health check failed",
+    });
+  } finally {
+    whatsappHealthAlertRunning = false;
+  }
+}
+
+setTimeout(runWhatsAppHealthAlertJob, 45_000);
+setInterval(runWhatsAppHealthAlertJob, 2 * 60 * 1000);

@@ -112,6 +112,7 @@ test("catalog and fulfillment stock selection exclude blocked conditions defensi
       { id: "normal", productId: product.id, variantId: variant.id, status: "available", accountCondition: "NORMAL" },
       { id: "problem", productId: product.id, variantId: variant.id, status: "available", accountCondition: "BERMASALAH" },
       { id: "unknown", productId: product.id, variantId: variant.id, status: "available", accountConditionKnown: false },
+      { id: "pending-review-sync", productId: product.id, variantId: variant.id, status: "available", accountCondition: "NORMAL", warrantyReviewBlocked: true },
     ],
   };
 

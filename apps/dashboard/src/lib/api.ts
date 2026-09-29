@@ -99,6 +99,118 @@ export type PublicTrackingOrder = {
 };
 export type ApiReseller = Reseller;
 export type ApiAccount = ManagedAccount;
+export type WarrantyClaimStatus = "submitted" | "reviewing" | "waiting_evidence" | "replaced" | "resolved" | "rejected";
+export type WarrantyClaim = {
+  id: string;
+  resellerId: string;
+  resellerName?: string;
+  accountId: string;
+  orderId: string;
+  stockId: string;
+  productId: string;
+  variantId: string;
+  product: string;
+  variant: string;
+  accountIdentity: string;
+  profile?: string;
+  issue: string;
+  status: WarrantyClaimStatus;
+  createdAt: string;
+  updatedAt: string;
+  ownerNote?: string;
+  submissionSource?: "reseller_dashboard" | "owner_manual_whatsapp" | string;
+  createdByRole?: "owner" | "reseller" | string;
+  createdBy?: string;
+  ownerNotificationStatus?: "pending" | "sent" | "failed" | string;
+  replacementNotificationStatus?: "pending" | "sent" | "failed" | string;
+  replacementNotificationError?: string;
+  ownerReplacementNotificationStatus?: "pending" | "sent" | "failed" | string;
+  ownerReplacementNotificationError?: string;
+  statusNotificationStatus?: "pending" | "sent" | "failed" | string;
+  statusNotificationError?: string;
+  replacementSyncStatus?: "pending" | "failed" | "synced" | string;
+  replacementSyncError?: string;
+  stockReviewTriggered?: boolean;
+  stockReviewProfileCount?: number;
+  stockReviewProfiles?: string[];
+  stockReviewStockIds?: string[];
+  stockReviewSyncStatus?: "pending" | "failed" | "synced" | "not_required" | string;
+  stockReviewSyncError?: string;
+  stockReviewSyncUpdatedAt?: string;
+  warrantyDays?: number;
+  warrantyStartedAt?: string;
+  warrantyEndsAt?: string;
+  holdStartedAt?: string;
+  holdEndedAt?: string;
+  holdAppliedMinutes?: number;
+  reviewElapsedMinutes?: number;
+  reviewDueAt?: string;
+  reviewOverdue?: boolean;
+  evidence?: Array<{
+    id: string;
+    mimeType: string;
+    originalName: string;
+    size: number;
+    createdAt: string;
+  }>;
+  replacement?: {
+    id: string;
+    oldAccountId: string;
+    oldStockId: string;
+    newAccountId: string;
+    newStockId: string;
+    createdAt: string;
+    originalExpiresAt?: string;
+    adjustedExpiresAt?: string;
+    holdAppliedMinutes?: number;
+    manualByOrder?: boolean;
+  };
+};
+export type WarrantyManualReplacementPayload = {
+  reason?: string;
+  account: {
+    email?: string;
+    login?: string;
+    username?: string;
+    loginPhone?: string;
+    password: string;
+    profile?: string;
+    pin?: string;
+    expiresAt?: string;
+    otpEmail?: string;
+    canvaLink?: string;
+    signInCode?: string;
+    verificationCode?: string;
+    resetLink?: string;
+    householdLink?: string;
+  };
+};
+export type WarrantyManualClaimOption = {
+  accountId: string;
+  orderId: string;
+  resellerId: string;
+  resellerName: string;
+  product: string;
+  variant: string;
+  accountIdentity: string;
+  profile: string;
+  status: string;
+  warrantyDays: number;
+  warrantyEndsAt: string;
+  remainingDays: number;
+};
+export type WarrantyReplacementCandidate = {
+  id: string;
+  productId: string;
+  variantId: string;
+  stockPoolKey: string;
+  sheetPool: string;
+  sheetName: string;
+  sheetRow: number;
+  identity: string;
+  profile: string;
+  status: string;
+};
 export type ApiActivity = Omit<Activity, "type"> & { type: Activity["type"] | "security" };
 export type AccountAccessLookupType = "signin" | "verification" | "reset" | "household" | "disney_otp";
 export type ApiDepositRequest = {
@@ -317,6 +429,7 @@ export type AccountAccessLookupResult = {
     error?: string;
   };
 };
+export type OwnerAccountAccessAccount = AccountAccessLookupResult["account"];
 
 export type CatalogVariant = ProductVariant & {
   stockCount: number;
@@ -359,7 +472,7 @@ export type OwnerProfile = {
   initial: string;
 };
 
-type IntegrationStatus = "connected" | "needs_oauth" | "disconnected";
+type IntegrationStatus = "connected" | "degraded" | "needs_oauth" | "disconnected";
 
 export type OwnerPaymentSettings = {
   ownerQrisImageUrl: string;
@@ -444,6 +557,9 @@ export type GoogleSheetsStatus = {
   configured: boolean;
   settings: OwnerSettings["googleSheets"];
   lastSyncAt?: string;
+  lastSyncAttemptAt?: string;
+  healthy?: boolean;
+  failedSections?: string[];
   lastSyncSummary?: Record<string, unknown> | null;
 };
 
@@ -494,11 +610,38 @@ export type WhatsappRental = {
   replies: number;
 };
 
+export type WhatsappListHistory = {
+  group: {
+    id?: string;
+    groupJid?: string;
+    name?: string;
+    owner?: string;
+    contact?: string;
+  } | null;
+  total: number;
+  items: Array<{
+    id: string;
+    source: "audit" | "snapshot";
+    action: string;
+    groupJid: string;
+    groupName: string;
+    keyword: string;
+    sender: string;
+    senderName: string;
+    textPreview: string;
+    media: string;
+    updatedAt: string;
+  }>;
+};
+
 export type WhatsappStatus = {
   connected: boolean;
   state?: string;
   error?: string;
+  lastError?: string;
   qrAvailable?: boolean;
+  pairingAvailable?: boolean;
+  pairingCode?: string;
   publicQrUrl?: string;
   publicUrl?: string;
   botUrl?: string;
@@ -551,6 +694,9 @@ export type HealthResult = {
   pakasirConfigured?: boolean;
   googleSheetsConfigured?: boolean;
   googleSheetsLastSyncAt?: string;
+  googleSheetsLastSyncAttemptAt?: string;
+  googleSheetsHealthy?: boolean;
+  googleSheetsFailedSections?: string[];
   maintenance?: MaintenanceState;
 };
 
@@ -625,6 +771,9 @@ export type SystemStatus = {
     googleSheets: {
       configured: boolean;
       lastSyncAt: string;
+      lastSyncAttemptAt?: string;
+      healthy?: boolean;
+      failedSections?: string[];
       lastSyncSummary: unknown;
     };
     whatsapp: {
@@ -900,7 +1049,7 @@ export const api = {
   deliveryTemplate(productId: string, variantId: string) {
     return request<DeliveryTemplateConfig>(`/products/${encodeURIComponent(productId)}/variants/${encodeURIComponent(variantId)}/delivery-template`);
   },
-  previewDeliveryTemplate(productId: string, variantId: string, payload: { source: string; requiredFields: Array<string | string[]> }) {
+  previewDeliveryTemplate(productId: string, variantId: string, payload: { source: string; requiredFields: Array<string | string[]>; duration?: string; durationDays?: number }) {
     return request<DeliveryTemplatePreview>(`/products/${encodeURIComponent(productId)}/variants/${encodeURIComponent(variantId)}/delivery-template/preview`, { method: "POST", body: payload });
   },
   saveDeliveryTemplate(productId: string, variantId: string, payload: { source: string; requiredFields: Array<string | string[]> }) {
@@ -1041,6 +1190,55 @@ export const api = {
     const view = options?.view && options.view !== "full" ? `?view=${encodeURIComponent(options.view)}` : "";
     return request<ApiAccount[]>(`/accounts${view}`);
   },
+  warrantyClaims() {
+    return request<WarrantyClaim[]>("/warranty-claims");
+  },
+  warrantyManualClaimOptions() {
+    return request<WarrantyManualClaimOption[]>("/warranty-claims/manual-options");
+  },
+  createWarrantyClaim(payload: {
+    accountId: string;
+    issue: string;
+    evidence?: { name: string; mimeType: string; dataUrl: string };
+  }) {
+    return request<WarrantyClaim>("/warranty-claims", { method: "POST", body: payload });
+  },
+  updateWarrantyClaim(id: string, payload: { status?: WarrantyClaimStatus; ownerNote?: string }) {
+    return request<WarrantyClaim>(`/warranty-claims/${encodeURIComponent(id)}`, { method: "PATCH", body: payload });
+  },
+  retryWarrantyStockReviewSync(id: string) {
+    return request<WarrantyClaim>(`/warranty-claims/${encodeURIComponent(id)}/retry-stock-review-sync`, { method: "POST" });
+  },
+  warrantyReplacementCandidates(id: string) {
+    return request<WarrantyReplacementCandidate[]>(`/warranty-claims/${encodeURIComponent(id)}/replacement-candidates`);
+  },
+  replaceWarrantyAccount(id: string, payload: { stockId: string; reason?: string }) {
+    return request<{
+      ok: boolean;
+      idempotent: boolean;
+      claim: WarrantyClaim;
+      notifications: { recipient: { status: "sent" | "failed"; reason: string }; owner: { status: "sent" | "failed"; reason: string } };
+      account: { id: string; stockId: string; orderId: string; product: string; variant: string; expiresAt: string; status: string };
+    }>(`/warranty-claims/${encodeURIComponent(id)}/replace`, { method: "POST", body: payload });
+  },
+  replaceWarrantyAccountManual(id: string, payload: WarrantyManualReplacementPayload) {
+    return request<{
+      ok: boolean;
+      idempotent: boolean;
+      claim: WarrantyClaim;
+      notifications: { recipient: { status: "sent" | "failed"; reason: string }; owner: { status: "sent" | "failed"; reason: string } };
+      account: { id: string; stockId: string; orderId: string; product: string; variant: string; expiresAt: string; status: string };
+    }>(`/warranty-claims/${encodeURIComponent(id)}/replace-manual`, { method: "POST", body: payload });
+  },
+  retryWarrantyNotification(id: string) {
+    return request<{
+      claim: WarrantyClaim;
+      notifications: { recipient: { status: "sent" | "failed"; reason: string }; owner: { status: "sent" | "failed"; reason: string } };
+    }>(`/warranty-claims/${encodeURIComponent(id)}/retry-notification`, { method: "POST" });
+  },
+  warrantyEvidenceUrl(claimId: string, evidenceId: string) {
+    return apiUrl(`/warranty-claims/${encodeURIComponent(claimId)}/evidence/${encodeURIComponent(evidenceId)}`);
+  },
   unreadDeliveryCount() {
     return request<{ count: number }>("/accounts/unread-delivery-count");
   },
@@ -1058,6 +1256,12 @@ export const api = {
   },
   lookupAccountAccess(payload: { email?: string; target?: string; type: AccountAccessLookupType; silent?: boolean }) {
     return request<AccountAccessLookupResult>("/account-access/lookup", { method: "POST", body: payload });
+  },
+  ownerAccountAccessAccounts(provider: "netflix" | "disney") {
+    return request<OwnerAccountAccessAccount[]>(`/owner/account-access/accounts?provider=${encodeURIComponent(provider)}`);
+  },
+  ownerAccountAccessLookup(payload: { email?: string; target?: string; type: AccountAccessLookupType }) {
+    return request<AccountAccessLookupResult>("/owner/account-access/lookup", { method: "POST", body: payload });
   },
   updateAccount(id: string, payload: Partial<ApiAccount>) {
     return request<ApiAccount>(`/accounts/${encodeURIComponent(id)}`, { method: "PUT", body: payload as Record<string, unknown> });
@@ -1132,6 +1336,9 @@ export const api = {
   whatsappGroupLists() {
     return request<Array<Record<string, unknown>>>("/whatsapp/group-lists");
   },
+  whatsappListHistory(id: string) {
+    return request<WhatsappListHistory>(`/whatsapp/rentals/${encodeURIComponent(id)}/list-history`);
+  },
   syncWhatsappGroups(payload: Record<string, unknown>) {
     return request<{ success: boolean; result?: unknown }>("/whatsapp/groups/sync", { method: "POST", body: payload });
   },
@@ -1155,7 +1362,12 @@ export const api = {
   updateWhatsappRental(id: string, payload: Partial<WhatsappRental>) {
     return request<WhatsappRental>(`/whatsapp/rentals/${encodeURIComponent(id)}`, { method: "PUT", body: payload as Record<string, unknown> });
   },
-  adjustWhatsappRental(id: string, days: number) {
-    return request<WhatsappRental>(`/whatsapp/rentals/${encodeURIComponent(id)}/adjust`, { method: "POST", body: { days } });
+  adjustWhatsappRental(id: string, payload: number | { direction: "add" | "subtract"; unit: "month" | "day"; amount: number }) {
+    const body = typeof payload === "number" ? { days: payload } : {
+      adjustmentDirection: payload.direction,
+      adjustmentUnit: payload.unit,
+      adjustmentAmount: payload.amount,
+    };
+    return request<WhatsappRental>(`/whatsapp/rentals/${encodeURIComponent(id)}/adjust`, { method: "POST", body });
   },
 };

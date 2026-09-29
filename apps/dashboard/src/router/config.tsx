@@ -21,11 +21,17 @@ const OwnerConsoleStockPage = lazy(
 const OwnerConsoleAccountsPage = lazy(
   () => import("../pages/owner-v2/accounts/page"),
 );
+const OwnerConsoleAccountAccessPage = lazy(
+  () => import("../pages/owner-v2/account-access/page"),
+);
 const OwnerConsoleResellersPage = lazy(
   () => import("../pages/owner-v2/resellers/page"),
 );
-const OwnerConsoleOperationsPage = lazy(
-  () => import("../pages/owner-v2/operations/page"),
+const OwnerConsoleWarrantyPage = lazy(
+  () => import("../pages/owner-v2/warranty/page"),
+);
+const OwnerConsoleHealthPage = lazy(
+  () => import("../pages/owner-v2/health/page"),
 );
 const OwnerConsoleWhatsappPage = lazy(
   () => import("../pages/owner-v2/whatsapp/page"),
@@ -59,6 +65,9 @@ const ResellerV2OverviewPage = lazy(() => import("../pages/reseller-v2/page"));
 const ResellerV2AccountsPage = lazy(
   () => import("../pages/reseller-v2/accounts/page"),
 );
+const ResellerV2GuidesPage = lazy(
+  () => import("../pages/reseller-v2/guides/page"),
+);
 const NotFound = lazy(() => import("../pages/NotFound"));
 
 function page(Component: ComponentType) {
@@ -91,6 +100,7 @@ export const routes: RouteObject[] = [
   { path: "/daftar", element: <Navigate to="/register" replace /> },
   { path: "/masuk", element: <Navigate to="/login" replace /> },
   { path: "/forgot-password", element: page(ForgotPasswordPage) },
+  { path: "/store", element: <Navigate to="/#produk" replace /> },
   { path: "/products", element: <ResellerCatalogGate /> },
   { path: "/katalog", element: <ResellerCatalogGate /> },
   { path: "/order", element: <ResellerCatalogGate /> },
@@ -102,8 +112,11 @@ export const routes: RouteObject[] = [
   { path: "/owner-v2/products", element: page(OwnerConsoleProductsPage) },
   { path: "/owner-v2/stock", element: page(OwnerConsoleStockPage) },
   { path: "/owner-v2/accounts", element: page(OwnerConsoleAccountsPage) },
+  { path: "/owner-v2/account-access", element: page(OwnerConsoleAccountAccessPage) },
+  { path: "/owner-v2/warranty", element: page(OwnerConsoleWarrantyPage) },
   { path: "/owner-v2/resellers", element: page(OwnerConsoleResellersPage) },
-  { path: "/owner-v2/operations", element: page(OwnerConsoleOperationsPage) },
+  { path: "/owner-v2/health", element: page(OwnerConsoleHealthPage) },
+  { path: "/owner-v2/operations", element: <Navigate to="/owner-v2/health" replace /> },
   { path: "/owner-v2/whatsapp", element: page(OwnerConsoleWhatsappPage) },
   { path: "/owner-v2/activities", element: page(OwnerConsoleActivitiesPage) },
   {
@@ -134,7 +147,7 @@ export const routes: RouteObject[] = [
   },
   {
     path: "/dashboard/operations",
-    element: <Navigate to="/owner-v2/operations" replace />,
+    element: <Navigate to="/owner-v2/health" replace />,
   },
   {
     path: "/dashboard/resellers",
@@ -210,6 +223,7 @@ export const routes: RouteObject[] = [
   { path: "/reseller-v2/orders", element: page(ResellerHistoryPage) },
   { path: "/reseller-v2/accounts", element: page(ResellerV2AccountsPage) },
   { path: "/reseller-v2/access", element: page(ResellerAccountsPage) },
+  { path: "/reseller-v2/guides", element: page(ResellerV2GuidesPage) },
   { path: "/reseller-v2/warranty", element: page(ResellerWarrantyPage) },
   { path: "/reseller-v2/settings", element: page(ResellerSettings) },
   { path: "*", element: page(NotFound) },

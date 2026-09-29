@@ -111,6 +111,10 @@ try {
   process.env.DATABASE_PATH = databasePath;
   process.env.AUTH_SECRET = "kavya-regression-test-auth-secret-32-characters";
   process.env.PORT = String(port);
+  process.env.DASHBOARD_API_PORT = String(port);
+  process.env.OWNER_USERNAME = "owner-check";
+  process.env.OWNER_EMAIL = "owner-check@kavya.local";
+  process.env.OWNER_PASSWORD = "owner-check-password";
   process.env.PUBLIC_APP_URL = `http://127.0.0.1:${port}`;
   process.env.APP_PUBLIC_URL = `http://127.0.0.1:${port}`;
   process.env.WHATSAPP_BOT_URL = "";

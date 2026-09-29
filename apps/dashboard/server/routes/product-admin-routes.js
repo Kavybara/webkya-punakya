@@ -153,12 +153,16 @@ export function registerProductAdminRoutes(app, deps) {
         : Array.isArray(variant.requiredDeliveryFields)
           ? variant.requiredDeliveryFields
           : [];
+      const previewDuration = String(req.body?.duration || "1 Bulan");
+      const previewAmount = Math.max(1, Number(previewDuration.match(/\d+/)?.[0] || 1));
+      const previewDurationDays = Math.max(0, Number(req.body?.durationDays || (/hari/i.test(previewDuration) ? previewAmount : previewAmount * 30)));
       const order = {
         id: "ORD-PREVIEW",
         product: product.name,
         variant: variant.name,
         variantCode: variant.sku || variant.code || "",
-        duration: "1 Bulan",
+        duration: previewDuration,
+        durationDays: previewDurationDays,
         customer: "Customer Preview",
         email: "customer@kavya.test",
         whatsapp: "628123456789",

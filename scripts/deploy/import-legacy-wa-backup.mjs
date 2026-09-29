@@ -52,6 +52,146 @@ async function writeJson(filePath, value) {
   await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
+async function mergeJsonObjectFile(filePath, imported = {}) {
+  const existing = await readJsonIfExists(filePath, {});
+  const merged = { ...(imported || {}) };
+  for (const [groupJid, groupData] of Object.entries(existing || {})) {
+    if (!groupData || typeof groupData !== "object" || Array.isArray(groupData)) continue;
+    const importedGroup = merged[groupJid];
+    if (importedGroup && typeof importedGroup === "object" && !Array.isArray(importedGroup)) {
+      merged[groupJid] = { ...importedGroup, ...groupData };
+    } else {
+      merged[groupJid] = groupData;
+    }
+  }
+  await writeJson(filePath, merged);
+}
+
+function hasLegacyListShape(group = {}) {
+  if (!group || typeof group !== "object" || Array.isArray(group) || !group.list || typeof group.list !== "object") {
+    return false;
+  }
+  const listValue = group.list;
+  return !("text" in listValue || "content" in listValue || "media" in listValue || "media_path" in listValue || "updated_at" in listValue);
+}
+
+function listEntryTimestamp(entry = {}) {
+  const raw = entry.updatedAt || entry.updated_at || entry.addedAt || entry.added_at || "";
+  const timestamp = Date.parse(raw);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function normalizeListFileEntries(group = {}) {
+  const entries = {};
+  if (!group || typeof group !== "object" || Array.isArray(group)) return entries;
+  if (hasLegacyListShape(group)) {
+    for (const [keyword, entry] of Object.entries(group.list || {})) {
+      const normalizedKeyword = String(keyword || "").trim().toLowerCase();
+      if (!normalizedKeyword) continue;
+      entries[normalizedKeyword] = {
+        text: String(entry?.content?.text || entry?.text || "").trim(),
+        media: String(entry?.content?.media || entry?.media || "").trim(),
+        media_path: String(entry?.media_path || entry?.mediaPath || "").trim(),
+        updated_at: entry?.updatedAt || entry?.updated_at || entry?.addedAt || entry?.added_at || group.updatedAt || group.createdAt || new Date().toISOString(),
+      };
+    }
+    return entries;
+  }
+
+  const metadataKeys = new Set(["createdAt", "updatedAt", "addedAt", "template", "templatelist", "setlist"]);
+  for (const [keyword, entry] of Object.entries(group)) {
+    if (metadataKeys.has(keyword) || !entry || typeof entry !== "object") continue;
+    const normalizedKeyword = String(keyword || "").trim().toLowerCase();
+    if (!normalizedKeyword) continue;
+    entries[normalizedKeyword] = {
+      text: String(entry?.text || entry?.content?.text || "").trim(),
+      media: String(entry?.media || entry?.content?.media || "").trim(),
+      media_path: String(entry?.media_path || entry?.mediaPath || "").trim(),
+      updated_at: entry?.updated_at || entry?.updatedAt || entry?.addedAt || entry?.added_at || group.updatedAt || group.createdAt || new Date().toISOString(),
+    };
+  }
+  return entries;
+}
+
+function mergeListFileGroup(importedGroup = {}, existingGroup = {}) {
+  const importedEntries = normalizeListFileEntries(importedGroup);
+  const existingEntries = normalizeListFileEntries(existingGroup);
+  const mergedEntries = { ...importedEntries };
+  for (const [keyword, entry] of Object.entries(existingEntries)) {
+    const importedEntry = mergedEntries[keyword];
+    if (!importedEntry || listEntryTimestamp(entry) >= listEntryTimestamp(importedEntry)) {
+      mergedEntries[keyword] = entry;
+    }
+  }
+  return {
+    createdAt: existingGroup?.createdAt || importedGroup?.createdAt || new Date().toISOString(),
+    updatedAt: existingGroup?.updatedAt || importedGroup?.updatedAt || new Date().toISOString(),
+    entries: mergedEntries,
+  };
+}
+
+async function mergeListJsonFile(filePath, imported = {}, shape = "runtime") {
+  const existing = await readJsonIfExists(filePath, {});
+  const groupJids = new Set([...Object.keys(imported || {}), ...Object.keys(existing || {})]);
+  const merged = {};
+  for (const groupJid of groupJids) {
+    const group = mergeListFileGroup(imported?.[groupJid] || {}, existing?.[groupJid] || {});
+    if (shape === "legacy") {
+      merged[groupJid] = {
+        createdAt: group.createdAt,
+        updatedAt: group.updatedAt,
+        list: Object.fromEntries(Object.entries(group.entries).map(([keyword, entry]) => [keyword, {
+          content: {
+            text: entry.text || "",
+            media: entry.media || "",
+          },
+          updatedAt: entry.updated_at || group.updatedAt,
+        }])),
+      };
+    } else {
+      merged[groupJid] = group.entries;
+    }
+  }
+  await writeJson(filePath, merged);
+}
+
+function rentalGroupKey(rental = {}, fallback = "") {
+  return String(rental?.groupJid || rental?.id || fallback || "").trim();
+}
+
+function activeLegacyRentalFromRuntime(rental = {}) {
+  const daysLeft = Number(rental?.daysLeft || 0);
+  const status = String(rental?.status || "").toLowerCase();
+  const expired = Number(rental?.expired || 0) || (daysLeft > 0 ? Date.now() + daysLeft * 86400000 : 0);
+  return {
+    linkGrub: String(rental?.linkGrub || "").trim(),
+    start: String(rental?.start || rental?.startedAt || "").trim(),
+    expired,
+    createdAt: rental?.createdAt || new Date().toISOString(),
+    updatedAt: rental?.updatedAt || new Date().toISOString(),
+    ...(daysLeft ? { daysLeft } : {}),
+    ...(status ? { status } : {}),
+  };
+}
+
+async function mergeRentalJsonFile(filePath, imported = {}, shape = "runtime") {
+  const existing = await readJsonIfExists(filePath, {});
+  const merged = { ...(imported || {}) };
+
+  for (const [fallbackKey, rental] of Object.entries(existing || {})) {
+    if (!rental || typeof rental !== "object" || Array.isArray(rental)) continue;
+    const key = rentalGroupKey(rental, fallbackKey);
+    if (!key) continue;
+    if (shape === "legacy") {
+      merged[key] = activeLegacyRentalFromRuntime(rental);
+    } else {
+      merged[key] = { ...(merged[key] || {}), ...rental };
+    }
+  }
+
+  await writeJson(filePath, merged);
+}
+
 async function fileHash(filePath) {
   try {
     const buffer = await fs.readFile(filePath);
@@ -81,6 +221,12 @@ function daysLeftFromExpired(value) {
   const timestamp = Number(value || 0);
   if (!timestamp) return 0;
   return Math.ceil((timestamp - Date.now()) / 86400000);
+}
+
+function normalizeRentalStatus(value = "", daysLeft = 0) {
+  const status = String(value || "").trim().toLowerCase();
+  if (["active", "paused", "expired"].includes(status)) return status;
+  return daysLeft > 0 ? "active" : "expired";
 }
 
 function normalizeLegacyLists(legacyLists) {
@@ -136,8 +282,9 @@ function normalizeLegacyRentals(legacyRentals) {
   for (const [groupJid, rental] of Object.entries(legacyRentals || {})) {
     const normalizedGroupJid = normalizeGroupJid(groupJid);
     if (!normalizedGroupJid) continue;
-    const daysLeft = daysLeftFromExpired(rental?.expired);
-    if (daysLeft <= 0) continue;
+    const daysLeft = Number.isFinite(Number(rental?.daysLeft)) ? Number(rental?.daysLeft) : daysLeftFromExpired(rental?.expired);
+    const status = normalizeRentalStatus(rental?.status, daysLeft);
+    if (status === "expired" || daysLeft <= 0) continue;
 
     const normalized = {
       linkGrub: String(rental?.linkGrub || "").trim(),
@@ -145,12 +292,14 @@ function normalizeLegacyRentals(legacyRentals) {
       expired: Number(rental?.expired || 0),
       createdAt: rental?.createdAt || new Date().toISOString(),
       updatedAt: rental?.updatedAt || new Date().toISOString(),
+      daysLeft,
+      status,
     };
     activeRentals[normalizedGroupJid] = normalized;
     runtimeRentals[normalizedGroupJid] = {
       ...normalized,
       daysLeft,
-      status: "active",
+      status,
     };
     dashboardRentals.push({
       id: normalizedGroupJid,
@@ -168,7 +317,7 @@ function normalizeLegacyRentals(legacyRentals) {
       daysLeft,
       sent: 0,
       replies: 0,
-      status: "active",
+      status,
       linkGrub: normalized.linkGrub,
       joinStatus: "legacy-import",
     });
@@ -204,14 +353,68 @@ async function mergeDashboardRentals(importedRentals) {
   if (!db || typeof db !== "object") return { skipped: true, reason: "dashboard_db_missing" };
 
   db.whatsappRentals = Array.isArray(db.whatsappRentals) ? db.whatsappRentals : [];
-  const byId = new Map(db.whatsappRentals.map((rental) => [rental.id, rental]));
+  const byId = new Map();
+  for (const rental of db.whatsappRentals) {
+    const key = rentalGroupKey(rental);
+    if (key) byId.set(key, rental);
+  }
   for (const rental of importedRentals) {
-    const existing = byId.get(rental.id);
-    byId.set(rental.id, existing ? { ...rental, ...existing, daysLeft: rental.daysLeft, status: rental.status, linkGrub: rental.linkGrub } : rental);
+    const key = rentalGroupKey(rental);
+    if (!key || byId.has(key)) continue;
+    byId.set(key, rental);
   }
   db.whatsappRentals = Array.from(byId.values());
   await writeJson(dashboardDbPath, db);
   return { merged: importedRentals.length };
+}
+
+function dashboardEntriesFromLegacyGroup(group = {}) {
+  return Object.entries(group.list || {}).map(([keyword, item]) => ({
+    keyword,
+    text: String(item?.content?.text || "").trim(),
+    media: String(item?.content?.media || "").trim(),
+    updatedAt: item?.updatedAt || item?.addedAt || group.updatedAt || group.createdAt || new Date().toISOString(),
+  }));
+}
+
+async function mergeDashboardGroupLists(importedLists) {
+  const db = await readJsonIfExists(dashboardDbPath, null);
+  if (!db || typeof db !== "object") return { skipped: true, reason: "dashboard_db_missing" };
+
+  db.whatsappGroupLists = Array.isArray(db.whatsappGroupLists) ? db.whatsappGroupLists : [];
+  const byGroupJid = new Map(db.whatsappGroupLists.map((row) => [row.groupJid, row]));
+  for (const [groupJid, importedGroup] of Object.entries(importedLists || {})) {
+    const existing = byGroupJid.get(groupJid);
+    const importedEntries = dashboardEntriesFromLegacyGroup(importedGroup);
+    if (!existing) {
+      byGroupJid.set(groupJid, {
+        groupJid,
+        total: importedEntries.length,
+        updatedAt: importedGroup.updatedAt || new Date().toISOString(),
+        template: "",
+        entries: importedEntries,
+      });
+      continue;
+    }
+    const byKeyword = new Map(importedEntries.map((entry) => [String(entry.keyword || "").trim().toLowerCase(), entry]));
+    for (const entry of existing.entries || []) {
+      const keyword = String(entry.keyword || "").trim().toLowerCase();
+      if (!keyword) continue;
+      const importedEntry = byKeyword.get(keyword);
+      if (!importedEntry || listEntryTimestamp(entry) >= listEntryTimestamp(importedEntry)) {
+        byKeyword.set(keyword, entry);
+      }
+    }
+    byGroupJid.set(groupJid, {
+      ...existing,
+      entries: [...byKeyword.values()],
+      total: byKeyword.size,
+      updatedAt: existing.updatedAt || importedGroup.updatedAt || new Date().toISOString(),
+    });
+  }
+  db.whatsappGroupLists = Array.from(byGroupJid.values());
+  await writeJson(dashboardDbPath, db);
+  return { merged: Object.keys(importedLists || {}).length };
 }
 
 async function main() {
@@ -258,8 +461,21 @@ async function main() {
       ...listCounts,
     },
   };
+  const hasLegacyInput =
+    Object.values(files).some(Boolean) &&
+    (Object.keys(runtimeLists).length || Object.keys(runtimeRentals).length || Object.keys(runtimeGroups).length);
 
   if (dryRun) {
+    console.log(JSON.stringify(manifest, null, 2));
+    return;
+  }
+
+  if (!hasLegacyInput) {
+    manifest.skipped = true;
+    manifest.skip_reason = "legacy_source_empty";
+    await fs.mkdir(importStateDir, { recursive: true });
+    await writeJson(manifestPath, manifest);
+    await writeJson(markerPath, manifest);
     console.log(JSON.stringify(manifest, null, 2));
     return;
   }
@@ -274,15 +490,16 @@ async function main() {
   }
 
   await Promise.all([
-    writeJson(path.join(whatsappRuntimeDbDir, "lists.json"), runtimeLists),
-    writeJson(path.join(whatsappRuntimeDbDir, "rentals.json"), runtimeRentals),
+    mergeListJsonFile(path.join(whatsappRuntimeDbDir, "lists.json"), runtimeLists, "runtime"),
+    mergeRentalJsonFile(path.join(whatsappRuntimeDbDir, "rentals.json"), runtimeRentals, "runtime"),
     writeJson(path.join(whatsappRuntimeDbDir, "groups.json"), runtimeGroups),
-    writeJson(path.join(whatsappSourceDbDir, "lists.json"), dashboardLists),
-    writeJson(path.join(whatsappSourceDbDir, "rentals.json"), activeRentals),
+    mergeListJsonFile(path.join(whatsappSourceDbDir, "lists.json"), dashboardLists, "legacy"),
+    mergeRentalJsonFile(path.join(whatsappSourceDbDir, "rentals.json"), activeRentals, "legacy"),
     writeJson(path.join(whatsappSourceDbDir, "groups.json"), runtimeGroups),
   ]);
 
   manifest.dashboard = await mergeDashboardRentals(dashboardRentals);
+  manifest.dashboard_lists = await mergeDashboardGroupLists(dashboardLists);
   await fs.mkdir(importStateDir, { recursive: true });
   await writeJson(manifestPath, manifest);
   await writeJson(markerPath, manifest);

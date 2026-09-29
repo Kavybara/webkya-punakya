@@ -10,6 +10,7 @@
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.23",
     "dotenv": "^16.6.1",
+    "kavya-platform": "file:../..",
     "pino": "^9.6.0",
     "qrcode": "^1.5.4"
   },

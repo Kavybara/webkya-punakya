@@ -1,13 +1,15 @@
 import type { LucideIcon } from "lucide-react";
 import {
-  Activity,
   Boxes,
   CircleGauge,
+  HeartPulse,
   Layers3,
   MessageCircle,
+  KeyRound,
   PackageCheck,
   PlugZap,
   ReceiptText,
+  ShieldCheck,
   Users,
 } from "lucide-react";
 
@@ -42,13 +44,15 @@ export const consoleNavigation: ConsoleNavigationGroup[] = [
     label: "Pelanggan",
     items: [
       { label: "Manajemen Akun", path: "/owner-v2/accounts", icon: PackageCheck },
+      { label: "Akses & Kode", path: "/owner-v2/account-access", icon: KeyRound },
+      { label: "Garansi", path: "/owner-v2/warranty", icon: ShieldCheck },
       { label: "Reseller", path: "/owner-v2/resellers", icon: Users },
     ],
   },
   {
     label: "Operasional",
     items: [
-      { label: "Operations Center", path: "/owner-v2/operations", icon: Activity },
+      { label: "Health Center", path: "/owner-v2/health", icon: HeartPulse },
       { label: "WhatsApp", path: "/owner-v2/whatsapp", icon: MessageCircle },
     ],
   },
@@ -68,8 +72,10 @@ export const ownerConsoleAuditMap = [
   { existing: "/dashboard/products", group: "Katalog", apis: ["/products"], risk: "Aksi tulis mengubah katalog live dan selalu memakai konfirmasi." },
   { existing: "/dashboard/stock", group: "Katalog", apis: ["/stock", "/products", "/resellers", "/google-sheets/status"], risk: "Respons owner berisi password/link stok; tidak dirender oleh Console." },
   { existing: "/dashboard/accounts", group: "Pelanggan", apis: ["/accounts", "/products", "/resellers", "/stock"], risk: "Password, OTP, PIN, dan reset link sangat sensitif; tidak dipanggil dari Overview." },
+  { existing: "/reseller-v2/account-access", group: "Pelanggan", apis: ["/owner/account-access/accounts", "/owner/account-access/lookup"], risk: "Kode dan link akses sensitif; endpoint khusus Owner, hasil tidak disimpan di client atau Activity Log." },
+  { existing: "/reseller-v2/warranty", group: "Pelanggan", apis: ["/warranty-claims", "/warranty-claims/:id/replacement-candidates"], risk: "Penggantian hanya boleh memilih stok satu pool dan credential tidak dikirim melalui notifikasi." },
   { existing: "/dashboard/resellers", group: "Pelanggan", apis: ["/resellers", "/orders", "/activities", "/resellers/deposit-requests"], risk: "PII reseller dan mutasi saldo memerlukan otorisasi owner dan konfirmasi." },
-  { existing: "/dashboard/operations", group: "Operasional", apis: ["/operations/center", "/orders", "/resellers", "/google-sheets/status"], risk: "Repair dan recovery hanya dijalankan setelah konfirmasi eksplisit." },
+  { existing: "/dashboard/operations", group: "Operasional", apis: ["/system/status", "/health", "/maintenance"], risk: "Health Center hanya membaca status teknis dan tidak menjalankan repair otomatis." },
   { existing: "/dashboard/whatsapp", group: "Operasional", apis: ["/whatsapp/rentals", "/whatsapp/status"], risk: "Group JID dan data sewa hanya tersedia untuk owner." },
   { existing: "/dashboard/activities", group: "Sistem", apis: ["/activities"], risk: "Log dapat memuat identitas pelanggan dan tidak ditampilkan di Overview." },
   { existing: "/dashboard/settings", group: "Sistem", apis: ["/owner-settings", "/system/status"], risk: "Token dan credential integrasi tidak pernah dirender oleh Console." },

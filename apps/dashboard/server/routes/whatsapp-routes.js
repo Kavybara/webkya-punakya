@@ -1,3 +1,11 @@
+import {
+  addDaysToDateText,
+  daysFromRentalDuration,
+  rentalAdjustmentDays,
+  rentalAdjustmentLabel,
+} from "../services/whatsapp-rental-duration-service.js";
+import { buildWhatsappListHistory } from "../services/whatsapp-list-history-service.js";
+
 export function registerWhatsAppRoutes(app, deps) {
   const {
     applyWaPriceSync,
@@ -24,10 +32,13 @@ export function registerWhatsAppRoutes(app, deps) {
     notifyOwnerRentalChanged,
     notifyOwnerRentalJoined,
     nowText,
+    shouldEnablePakasirMaintenance,
     paymentTtlMinutes,
     previewWaPriceSync,
     pushFulfilledOrderToGoogleSheets,
     readActiveLegacyGroupLists,
+    readLegacyGroupLists,
+    readListUpdateAudit,
     readDb,
     readLegacyRentals,
     requireAuth,
@@ -133,6 +144,20 @@ export function registerWhatsAppRoutes(app, deps) {
     }
   });
 
+  app.get("/api/whatsapp/rentals/:id/list-history", requireAuth(["owner"]), async (req, res, next) => {
+    try {
+      const db = await readDb();
+      const rentals = await mergedWhatsappRentals(db, { includeExpired: true });
+      const rental = rentals.find((item) => item.id === req.params.id || item.groupJid === req.params.id);
+      const groupId = String(rental?.groupJid || rental?.id || req.params.id || "").trim();
+      const groupLists = await readLegacyGroupLists();
+      const auditEvents = await readListUpdateAudit();
+      res.json(buildWhatsappListHistory({ rentals, groupLists, auditEvents, groupId }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.post("/api/whatsapp/groups/sync", async (req, res, next) => {
     try {
       assertInboundToken(req, await readDb());
@@ -146,7 +171,10 @@ export function registerWhatsAppRoutes(app, deps) {
 
   app.post("/api/whatsapp/rentals", requireAuth(["owner"]), async (req, res) => {
     const linkGrub = cleanInviteLink(req.body.linkGrub || req.body.link || "");
-    const daysLeft = Number(req.body.daysLeft || req.body.days || 30);
+    const durationDays = daysFromRentalDuration({ months: req.body.durationMonths, days: req.body.durationDays });
+    const daysLeft = Number(durationDays || req.body.daysLeft || req.body.days || 30);
+    const startedAt = String(req.body.startedAt || todayText()).trim();
+    const endsAt = addDaysToDateText(startedAt, daysLeft);
     const inviteCode = extractInviteCode(linkGrub);
     if (!inviteCode) return res.status(400).json({ error: "Link grup WhatsApp tidak valid" });
     if (!Number.isFinite(daysLeft) || daysLeft <= 0) return res.status(400).json({ error: "Sisa hari tidak valid" });
@@ -176,8 +204,8 @@ export function registerWhatsAppRoutes(app, deps) {
           name: resolved.directory?.name || req.body.name || joinResult.groupName || id,
           owner: "",
           contact: req.body.contact || joinResult.ownerNumber || resolved.directory?.contact || "",
-          startedAt: todayText(),
-          endsAt: formatDateFromDays(daysLeft),
+          startedAt,
+          endsAt,
           daysLeft,
           monthlyPrice: 0,
           status: "active",
@@ -198,6 +226,7 @@ export function registerWhatsAppRoutes(app, deps) {
       start: created.startedAt || legacyTodayText(),
       daysLeft: created.daysLeft,
       expired: expirationFromDays(created.daysLeft),
+      status: created.status,
     });
     if (created.joinStatus === "joined") {
       const delivery = await notifyOwnerRentalJoined(await readDb(), {
@@ -215,6 +244,8 @@ export function registerWhatsAppRoutes(app, deps) {
         addedDays: created.daysLeft,
         previousDays: 0,
         totalDays: created.daysLeft,
+        newEndsAt: created.endsAt,
+        adjustmentLabel: req.body.durationMonths ? `${req.body.durationMonths} bulan` : "",
         source: "Dashboard",
       });
     }
@@ -257,6 +288,7 @@ export function registerWhatsAppRoutes(app, deps) {
       start: updated.startedAt,
       daysLeft: updated.daysLeft,
       expired: expirationFromDays(updated.status === "expired" ? 0 : updated.daysLeft),
+      status: updated.status,
     });
     const totalDays = Number(updated.daysLeft || 0);
     if (totalDays !== previousDays) {
@@ -273,22 +305,28 @@ export function registerWhatsAppRoutes(app, deps) {
   });
 
   app.post("/api/whatsapp/rentals/:id/adjust", requireAuth(["owner"]), async (req, res) => {
-    const days = Number(req.body.days || 0);
+    const days = Number(req.body.days || rentalAdjustmentDays(req.body) || 0);
     if (!Number.isFinite(days) || days === 0) return res.status(400).json({ error: "Jumlah hari tidak valid" });
     const legacyRows = await mergedWhatsappRentals(await readDb());
     const fallback = legacyRows.find((rental) => rental.id === req.params.id) || { id: req.params.id, name: req.params.id, daysLeft: 0 };
     let previousDays = Number(fallback.daysLeft || 0);
+    let previousEndsAt = String(fallback.endsAt || "");
     const updated = await updateDb((db) => {
       const index = db.whatsappRentals.findIndex((rental) => rental.id === req.params.id);
       const current = index >= 0 ? db.whatsappRentals[index] : fallback;
       previousDays = Number(normalizeRentalRuntimeDays({ ...fallback, ...current }, fallback.daysLeft).daysLeft || 0);
+      previousEndsAt = String(current.endsAt || fallback.endsAt || "");
       const nextDaysLeft = Math.max(0, previousDays + days);
       const rental = {
         ...fallback,
         ...current,
         daysLeft: nextDaysLeft,
-        endsAt: formatDateFromDays(nextDaysLeft),
-        status: nextDaysLeft > 0 ? "active" : "expired",
+        endsAt: previousEndsAt ? addDaysToDateText(previousEndsAt, days) : formatDateFromDays(nextDaysLeft),
+        status: String(current.status || fallback.status || "").toLowerCase() === "paused"
+          ? "paused"
+          : nextDaysLeft > 0
+            ? "active"
+            : "expired",
         id: req.params.id,
         groupJid: fallback.groupJid || req.params.id,
       };
@@ -301,6 +339,7 @@ export function registerWhatsAppRoutes(app, deps) {
       start: updated.startedAt,
       daysLeft: updated.daysLeft,
       expired: expirationFromDays(updated.daysLeft),
+      status: updated.status,
     });
     await notifyOwnerRentalChanged(await readDb(), {
       rental: updated,
@@ -308,6 +347,9 @@ export function registerWhatsAppRoutes(app, deps) {
       addedDays: days,
       previousDays,
       totalDays: updated.daysLeft,
+      previousEndsAt,
+      newEndsAt: updated.endsAt,
+      adjustmentLabel: rentalAdjustmentLabel(req.body) || `${days > 0 ? "+" : "-"}${Math.abs(days)} hari`,
       source: "Dashboard",
     });
     res.json(updated);
@@ -326,10 +368,11 @@ export function registerWhatsAppRoutes(app, deps) {
           const dashboardPaymentUrl = inboundResult.order.qrisUrl;
           const pakasir = await createPakasirQris(db, inboundResult.order);
           if (pakasir.providerStatus !== "created") {
-            enableMaintenanceMode(db, `Pakasir QRIS gagal: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`, "pakasir");
+            const reason = `Pakasir QRIS gagal: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`;
+            if (shouldEnablePakasirMaintenance?.(reason)) enableMaintenanceMode(db, reason, "pakasir");
             const error = new Error(`Pakasir QRIS gagal untuk order WhatsApp: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`);
             error.status = 503;
-            error.maintenance = { reason: `Pakasir QRIS gagal: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`, source: "pakasir" };
+            if (shouldEnablePakasirMaintenance?.(reason)) error.maintenance = { reason, source: "pakasir" };
             throw error;
           }
           if (payment) {

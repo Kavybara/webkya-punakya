@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   BadgeHelp,
+  BookOpenCheck,
   Grid2X2,
   KeyRound,
   LayoutDashboard,
@@ -75,6 +76,12 @@ export const resellerNavigation: ResellerNavigationGroup[] = [
     label: "Bantuan",
     items: [
       {
+        label: "Panduan",
+        shortLabel: "Panduan",
+        path: "/reseller-v2/guides",
+        icon: BookOpenCheck,
+      },
+      {
         label: "Garansi",
         shortLabel: "Bantuan",
         path: "/reseller-v2/warranty",
@@ -125,6 +132,14 @@ export const resellerAuditMap = [
     apis: ["/accounts?view=light", "/account-access/lookup"],
     sensitivity: "Kode akses, link, dan identitas akun.",
     risk: "Lookup wajib tetap diverifikasi server-side.",
+  },
+  {
+    existing: "-",
+    next: "/reseller-v2/guides",
+    group: "Bantuan",
+    apis: [],
+    sensitivity: "Tidak memuat data akun atau transaksi reseller.",
+    risk: "Rekaman panel produksi wajib memasking credential dan identitas sensitif sebelum dipublikasikan.",
   },
   {
     existing: "/reseller/warranty",

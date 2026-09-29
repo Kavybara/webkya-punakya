@@ -94,19 +94,23 @@ process.on("uncaughtException", (error) => {
 });
 
 await ensureRuntimeDirs(config);
+logStartup("Runtime WhatsApp disiapkan ...");
 
 const store = new JsonStore(config.database.dir);
+logStartup("Membuka database WhatsApp ...");
 await store.ensure();
 const groups = await store.read("groups", {});
 logSuccess(`Group database loaded (${Object.keys(groups || {}).length} groups)`);
 logRuntimeBanner({ version: "Kavya Auto Order" });
 
+logStartup("Load All Plugins ...");
 const plugins = await loadPlugins({
   pluginsDir: config.paths.pluginsDir,
   logger,
 });
 logHandler("Load All Plugins done...");
 
+logStartup("Menyiapkan koneksi WhatsApp ...");
 connection = createWhatsAppConnection({
   config,
   logger,
@@ -114,6 +118,7 @@ connection = createWhatsAppConnection({
   plugins,
 });
 
+logStartup("Menyiapkan HTTP server WhatsApp ...");
 const server = createHttpServer({
   config,
   logger,
@@ -125,6 +130,7 @@ server.listen(config.port, () => {
   logSuccess(`WhatsApp bot listening on port ${config.port}`);
 });
 
+logStartup("Menghubungkan WhatsApp Bailey ...");
 connection.connect().catch((error) => {
   connection.setLastError(error.message || "startup_failed");
   logError("WhatsApp bot startup failed", error);

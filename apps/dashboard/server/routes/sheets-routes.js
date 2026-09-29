@@ -8,6 +8,8 @@ export function registerSheetsRoutes(app, deps) {
     friendlyGoogleSheetsError,
     googleSheetsConfigured,
     googleSheetsPublicSettings,
+    googleSheetsRequiredSectionsError,
+    googleSheetsSyncHealth,
     previewAccountSheetMapping,
     readDb,
     requireAuth,
@@ -18,10 +20,14 @@ export function registerSheetsRoutes(app, deps) {
 
   app.get("/api/google-sheets/status", requireAuth(["owner"]), async (_req, res) => {
     const db = await readDb();
+    const health = googleSheetsSyncHealth(db.settings || {});
     res.json({
       configured: googleSheetsConfigured(db),
       settings: googleSheetsPublicSettings(db),
       lastSyncAt: db.settings?.googleSheetsLastSyncAt || "",
+      lastSyncAttemptAt: health.lastAttemptAt,
+      healthy: health.healthy,
+      failedSections: health.failedSections,
       lastSyncSummary: db.settings?.googleSheetsLastSyncSummary || null,
     });
   });
@@ -66,6 +72,8 @@ export function registerSheetsRoutes(app, deps) {
   app.post("/api/google-sheets/sync", requireAuth(["owner"]), async (_req, res, next) => {
     try {
       const result = await updateDb((db) => syncGoogleSheetsStockSafely(db, { reason: "manual_sync", force: true }));
+      const syncError = googleSheetsRequiredSectionsError(result, result?.failedSections || []);
+      if (syncError) throw syncError;
       res.json(result);
     } catch (error) {
       await updateDb((db) => {
@@ -109,7 +117,7 @@ export function registerSheetsRoutes(app, deps) {
       }
       const previewDb = cloneForPreview(db);
       const result = await syncGoogleSheetsStockSafely(previewDb, { silent: true, reason: "preview_sync", force: true, readOnly: true });
-      res.json({ ok: true, preview: buildSheetsSyncPreview(db, previewDb, result) });
+      res.json({ ok: result?.ok !== false, preview: buildSheetsSyncPreview(db, previewDb, result) });
     } catch (error) {
       next(error);
     }
@@ -118,6 +126,8 @@ export function registerSheetsRoutes(app, deps) {
   app.post("/api/google-sheets/netflix/sync", requireAuth(["owner"]), async (_req, res, next) => {
     try {
       const result = await updateDb((db) => syncGoogleSheetsStockSafely(db, { reason: "manual_sync", force: true }));
+      const syncError = googleSheetsRequiredSectionsError(result, ["netflix", "resellers"]);
+      if (syncError) throw syncError;
       res.json(result);
     } catch (error) {
       next(friendlyGoogleSheetsError(error));

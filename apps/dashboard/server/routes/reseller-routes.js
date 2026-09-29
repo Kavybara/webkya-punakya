@@ -20,6 +20,7 @@ export function registerResellerRoutes(app, deps) {
     notifyResellerProfileChanged,
     nowText,
     ownerIntegrationSettings,
+    shouldEnablePakasirMaintenance,
     ownerProfile,
     ownerWhatsappTarget,
     publicUser,
@@ -226,10 +227,11 @@ export function registerResellerRoutes(app, deps) {
 
         const pakasir = await createPakasirQris(draft, order);
         if (pakasir.providerStatus !== "created") {
-          enableMaintenanceMode(draft, `Pakasir QRIS gagal: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`, "pakasir");
+          const reason = `Pakasir QRIS gagal: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`;
+          if (shouldEnablePakasirMaintenance?.(reason)) enableMaintenanceMode(draft, reason, "pakasir");
           const error = new Error(`Pakasir QRIS gagal untuk deposit reseller: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`);
           error.status = 503;
-          error.maintenance = { reason: `Pakasir QRIS gagal: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`, source: "pakasir" };
+          if (shouldEnablePakasirMaintenance?.(reason)) error.maintenance = { reason, source: "pakasir" };
           throw error;
         }
 

@@ -6,6 +6,12 @@ import QRCode from "qrcode";
 import { readFile } from "node:fs/promises";
 import { normalizeWhatsAppNumber, isDirectChatJid, isGroupChatJid } from "../lib/jid.js";
 import { logCommand, logTracking, logWarning } from "../lib/panel-log.js";
+import * as rentalGate from "../lib/rental-gate.js";
+
+function isWhatsAppTransportError(error = "") {
+  const message = String(error?.message || error || "");
+  return /whatsapp_bot_not_connected|whatsapp_send_timed_out|send_timed_out|send_message_empty_result|write EPIPE|EPIPE|socket|closed|not open|connection.*(closed|lost|reset)|timed?\s*out/i.test(message);
+}
 
 function unwrapMessage(message = {}) {
   let current = message || {};
@@ -367,11 +373,25 @@ function rentalFromDirectory(data = {}, groupJid = "") {
   }) || null;
 }
 
-async function readDashboardRentalSources(config = {}) {
+export async function readDashboardRentalSources(config = {}) {
   const now = Date.now();
   if (rentalDirectoryCache.expiresAt > now) return rentalDirectoryCache.sources;
 
   const projectRoot = config.paths?.projectRoot || process.cwd();
+  const sources = [];
+  const dashboardDb = await readJsonObject(config.dashboardDatabasePath);
+  const dashboardRentals = rentalMapFromRows(dashboardDb?.whatsappRentals || []);
+  if (rentalDirectoryHasEntries(dashboardRentals)) {
+    sources.push({ name: "dashboard-db.whatsappRentals", data: dashboardRentals, authoritative: true });
+    if (!/^(1|true|yes|on)$/i.test(String(process.env.WHATSAPP_RENTAL_ALLOW_STORE_FALLBACK || "").trim())) {
+      rentalDirectoryCache = {
+        expiresAt: now + RENTAL_DIRECTORY_CACHE_MS,
+        sources,
+      };
+      return sources;
+    }
+  }
+
   const candidates = [
     process.env.WHATSAPP_RENTALS_PATH,
     path.join(projectRoot, "apps", "dashboard", "runtime", "whatsapp-database", "rentals.json"),
@@ -379,18 +399,11 @@ async function readDashboardRentalSources(config = {}) {
     path.join(projectRoot, "runtime", "whatsapp-database", "rentals.json"),
   ].filter(Boolean);
 
-  const sources = [];
   for (const filePath of [...new Set(candidates)]) {
     const data = await readJsonObject(filePath);
     if (rentalDirectoryHasEntries(data)) {
       sources.push({ name: filePath, data });
     }
-  }
-
-  const dashboardDb = await readJsonObject(config.dashboardDatabasePath);
-  const dashboardRentals = rentalMapFromRows(dashboardDb?.whatsappRentals || []);
-  if (rentalDirectoryHasEntries(dashboardRentals)) {
-    sources.push({ name: "dashboard-db.whatsappRentals", data: dashboardRentals });
   }
 
   rentalDirectoryCache = {
@@ -408,7 +421,7 @@ function shouldWarnExpiredGroup(groupJid = "") {
   return true;
 }
 
-async function shouldBlockExpiredGroup({ store, remoteJid, commandInfo, isOwner, config }) {
+export async function shouldBlockExpiredGroup({ store, remoteJid, commandInfo, isOwner, config }) {
   const rentals = await store.read("rentals", {});
   const allowOwnerRentalCommand = Boolean(isOwner && EXPIRED_GROUP_OWNER_COMMANDS.has(commandInfo.command));
   const sources = [
@@ -619,6 +632,7 @@ export async function handleIncomingMessage({
   updateGroupParticipants,
   updateGroupSubject,
   updateGroupDescription,
+  isWhatsAppReady = () => true,
   botJid = "",
 }) {
   if (!message?.message) {
@@ -640,6 +654,12 @@ export async function handleIncomingMessage({
   const commandInfo = parseCommand(text, config.commands.prefixes);
   if (fromMe && !commandInfo.prefix) {
     return { handled: false, ignored: true, own_message: true };
+  }
+  if (commandInfo.prefix && !isWhatsAppReady()) {
+    if (shouldLogInbound(text)) {
+      logTracking(`Command skipped while WhatsApp reconnecting: ${text.slice(0, 120)}`);
+    }
+    return { handled: false, ignored: true, reason: "whatsapp_not_ready" };
   }
 
   const participant = String(
@@ -690,10 +710,10 @@ export async function handleIncomingMessage({
   }
 
   if (isGroup) {
-    const expiredGate = await shouldBlockExpiredGroup({ store, remoteJid, commandInfo, isOwner, config });
+    const expiredGate = await rentalGate.shouldBlockExpiredGroup({ store, remoteJid, commandInfo, isOwner, config });
     if (expiredGate.block) {
       if (shouldWarnExpiredGroup(remoteJid)) {
-        const daysLeft = rentalDaysLeft(expiredGate.rental);
+        const daysLeft = rentalGate.rentalDaysLeft(expiredGate.rental);
         const reasonLabel = expiredGate.reason === "group_rental_missing" ? "rental tidak aktif/tidak ditemukan" : `${daysLeft} hari tersisa`;
         const sourceLabel = expiredGate.source ? ` dari ${expiredGate.source}` : "";
         logWarning(`Pesan grup tidak aktif diblokir: ${remoteJid} (${reasonLabel}${sourceLabel})`);
@@ -780,6 +800,9 @@ export async function handleIncomingMessage({
     pluginResult = await plugins.dispatch(context);
   } catch (error) {
     logWarning(`Plugin dispatch gagal untuk ${commandInfo.command || text || "unknown_message"}`, error);
+    if (isWhatsAppTransportError(error)) {
+      return { handled: true, plugin_error: true, transport_error: true };
+    }
     if (commandInfo.prefix || isGroup) {
       await context.reply("Terjadi kesalahan saat memproses pesan. Coba kirim ulang sekali lagi.");
       return { handled: true, plugin_error: true };

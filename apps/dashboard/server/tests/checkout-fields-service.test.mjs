@@ -101,6 +101,38 @@ test("validated checkout values are persisted in canonical order fields", () => 
   });
 });
 
+test("semi private checkout accepts and preserves two customer devices", () => {
+  const fields = [{
+    key: "customerDevice",
+    label: "Netflix Device (2 device)",
+    required: true,
+    minItems: 2,
+  }];
+
+  for (const input of [
+    "Samsung A15, Smart TV Samsung",
+    "Samsung A15 dan Smart TV Samsung",
+    "Samsung A15\nSmart TV Samsung",
+  ]) {
+    const validated = validateCheckoutFieldValues(fields, { customerDevice: input });
+    assert.equal(validated.ok, true, input);
+    assert.deepEqual(validated.values.customerDevice, ["Samsung A15", "Smart TV Samsung"]);
+    assert.equal(checkoutValuesForOrder(validated.values).device, "Samsung A15, Smart TV Samsung");
+  }
+});
+
+test("semi private checkout rejects only one customer device", () => {
+  const fields = [{
+    key: "customerDevice",
+    label: "Netflix Device (2 device)",
+    required: true,
+    minItems: 2,
+  }];
+  const validated = validateCheckoutFieldValues(fields, { customerDevice: "Samsung A15" });
+  assert.equal(validated.ok, false);
+  assert.match(validated.errors.customerDevice, /minimal 2 item/);
+});
+
 test("legacy checkout requirement remains supported", () => {
   const fields = checkoutFieldsForVariant({}, {
     checkoutRequirements: { customerField: "device", required: true, label: "Device Customer" },

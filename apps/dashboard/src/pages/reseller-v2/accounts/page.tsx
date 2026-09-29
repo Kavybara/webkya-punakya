@@ -6,6 +6,7 @@ import {
   EyeOff,
   PackageCheck,
   Search,
+  XCircle,
 } from "lucide-react";
 import { api, type AccountDeliveryDetail, type ApiAccount } from "../../../lib/api";
 import {
@@ -24,6 +25,7 @@ import {
 import { useSearchParams } from "react-router-dom";
 
 export const MASK_AFTER_MS = 60_000;
+type AccountView = "usable" | "expired" | "all";
 
 function dateTime(value?: string) {
   if (!value) return "-";
@@ -61,6 +63,25 @@ function accountConditionBadge(account: ApiAccount) {
   if (condition === "REPLACED") return { label: "Sudah diganti", tone: "muted" as const };
   if (condition === "DISABLED") return { label: "Dinonaktifkan", tone: "danger" as const };
   return null;
+}
+
+function accountAllowsCredentialAccess(account: ApiAccount) {
+  return ["active", "expiring"].includes(normalizeResellerAccountStatus(account));
+}
+
+function accountSortValue(account: ApiAccount) {
+  const parsed = account.expiresAt ? new Date(account.expiresAt.replace(" ", "T")).getTime() : Number.MAX_SAFE_INTEGER;
+  return Number.isNaN(parsed) ? Number.MAX_SAFE_INTEGER : parsed;
+}
+
+function sortAccountsForResellerView(accounts: ApiAccount[]) {
+  const rank = { expiring: 0, active: 1, expired: 2, inactive: 3 } as const;
+  return [...accounts].sort((left, right) => {
+    const leftStatus = normalizeResellerAccountStatus(left);
+    const rightStatus = normalizeResellerAccountStatus(right);
+    if (rank[leftStatus] !== rank[rightStatus]) return rank[leftStatus] - rank[rightStatus];
+    return accountSortValue(left) - accountSortValue(right);
+  });
 }
 
 function masked(value?: string) {
@@ -116,6 +137,7 @@ export default function ResellerV2AccountsPage() {
   const [accounts, setAccounts] = useState<ApiAccount[]>([]);
   const [selected, setSelected] = useState<ApiAccount | null>(null);
   const [query, setQuery] = useState("");
+  const [accountView, setAccountView] = useState<AccountView>("usable");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [credentialVisible, setCredentialVisible] = useState(false);
@@ -191,13 +213,18 @@ export default function ResellerV2AccountsPage() {
   }
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return accounts;
-    return accounts.filter((account) =>
-      `${account.product} ${account.variant || ""} ${accountIdentity(account)} ${account.profile || ""} ${account.orderId || account.sourceOrderId || ""}`
+    return sortAccountsForResellerView(accounts).filter((account) => {
+      const status = normalizeResellerAccountStatus(account);
+      const matchesView = accountView === "all"
+        || (accountView === "usable" && ["active", "expiring"].includes(status))
+        || (accountView === "expired" && ["expired", "inactive"].includes(status));
+      if (!matchesView) return false;
+      if (!needle) return true;
+      return `${account.product} ${account.variant || ""} ${accountIdentity(account)} ${account.profile || ""} ${account.orderId || account.sourceOrderId || ""}`
         .toLowerCase()
-        .includes(needle),
-    );
-  }, [accounts, query]);
+        .includes(needle);
+    });
+  }, [accounts, accountView, query]);
   const accountSummary = useMemo(
     () => summarizeResellerAccounts(accounts),
     [accounts],
@@ -235,6 +262,11 @@ export default function ResellerV2AccountsPage() {
           <strong>{loading ? "-" : accountSummary.expiring}</strong>
         </article>
         <article>
+          <XCircle size={18} />
+          <span>Kadaluarsa</span>
+          <strong>{loading ? "-" : accountSummary.expired + accountSummary.inactive}</strong>
+        </article>
+        <article>
           <span>Total akun</span>
           <strong>{loading ? "-" : accountSummary.total}</strong>
         </article>
@@ -255,6 +287,38 @@ export default function ResellerV2AccountsPage() {
               placeholder="Cari produk, identitas, profil, atau nomor pesanan"
             />
           </label>
+          <div className="reseller-v2-account-view-tabs" role="tablist" aria-label="Filter status akun">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={accountView === "usable"}
+              className={accountView === "usable" ? "is-active" : ""}
+              onClick={() => setAccountView("usable")}
+            >
+              Aktif & Hampir Berakhir
+              <span>{accountSummary.active + accountSummary.expiring}</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={accountView === "expired"}
+              className={accountView === "expired" ? "is-active" : ""}
+              onClick={() => setAccountView("expired")}
+            >
+              Kadaluarsa
+              <span>{accountSummary.expired + accountSummary.inactive}</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={accountView === "all"}
+              className={accountView === "all" ? "is-active" : ""}
+              onClick={() => setAccountView("all")}
+            >
+              Semua
+              <span>{accountSummary.total}</span>
+            </button>
+          </div>
         </div>
         {loading ? (
           <div className="reseller-v2-accounts-loading">
@@ -262,6 +326,13 @@ export default function ResellerV2AccountsPage() {
           </div>
         ) : filtered.length ? (
           <div className="reseller-v2-account-list">
+            <div className="reseller-v2-account-list-head" aria-hidden="true">
+              <span>Produk</span>
+              <span>Identitas</span>
+              <span>Profil</span>
+              <span>Masa aktif</span>
+              <span>Status</span>
+            </div>
             {filtered.map((account) => {
               const status = accountStatus(account);
               const condition = accountConditionBadge(account);
@@ -275,9 +346,9 @@ export default function ResellerV2AccountsPage() {
                     <strong>{account.product} {account.deliveryTemplateUnreadAt && !account.deliveryTemplateOpenedAt ? <em className="reseller-v2-new-badge">Baru</em> : null}</strong>
                     <small>{account.variant || "Paket akun"}</small>
                   </div>
-                  <span>{accountIdentity(account)}</span>
-                  <span>{account.profile || "Tanpa profil"}</span>
-                  <span>
+                  <span data-label="Identitas">{accountIdentity(account)}</span>
+                  <span data-label="Profil">{account.profile || "Tanpa profil"}</span>
+                  <span data-label="Masa aktif">
                     {account.expiresAt ? dateTime(account.expiresAt) : "-"}
                   </span>
                   <div className="reseller-v2-account-badges">
@@ -360,34 +431,40 @@ export default function ResellerV2AccountsPage() {
                   </small>
                 </div>
               </header>
-              <CredentialRow
-                label="Email / Nomor Login"
-                value={deliveryDetail?.account.loginPhone || deliveryDetail?.account.email || selected.loginPhone || selected.email}
-                visible={credentialVisible}
-                onToggle={() => setCredentialVisible((value) => !value)}
-              />
-              <CredentialRow
-                label="Password / Link"
-                value={deliveryDetail?.account.canvaLink || deliveryDetail?.account.password || selected.canvaLink || selected.password}
-                visible={credentialVisible}
-                onToggle={() => setCredentialVisible((value) => !value)}
-              />
-              <CredentialRow
-                label="Profil"
-                value={deliveryDetail?.account.profile || selected.profile}
-                visible={credentialVisible}
-                onToggle={() => setCredentialVisible((value) => !value)}
-              />
-              <CredentialRow
-                label="PIN"
-                value={deliveryDetail?.account.pin || selected.pin}
-                visible={credentialVisible}
-                onToggle={() => setCredentialVisible((value) => !value)}
-              />
-              <p>
-                Credential mengikuti data terbaru milik akun Anda. Jangan
-                bagikan kepada pihak lain.
-              </p>
+              {accountAllowsCredentialAccess(selected) ? (
+                <>
+                  <CredentialRow
+                    label="Email / Nomor Login"
+                    value={deliveryDetail?.account.loginPhone || deliveryDetail?.account.email || selected.loginPhone || selected.email}
+                    visible={credentialVisible}
+                    onToggle={() => setCredentialVisible((value) => !value)}
+                  />
+                  <CredentialRow
+                    label="Password / Link"
+                    value={deliveryDetail?.account.canvaLink || deliveryDetail?.account.password || selected.canvaLink || selected.password}
+                    visible={credentialVisible}
+                    onToggle={() => setCredentialVisible((value) => !value)}
+                  />
+                  <CredentialRow
+                    label="Profil"
+                    value={deliveryDetail?.account.profile || selected.profile}
+                    visible={credentialVisible}
+                    onToggle={() => setCredentialVisible((value) => !value)}
+                  />
+                  <CredentialRow
+                    label="PIN"
+                    value={deliveryDetail?.account.pin || selected.pin}
+                    visible={credentialVisible}
+                    onToggle={() => setCredentialVisible((value) => !value)}
+                  />
+                  <p>
+                    Credential mengikuti data terbaru milik akun Anda. Jangan
+                    bagikan kepada pihak lain.
+                  </p>
+                </>
+              ) : (
+                <ResellerEmptyState title="Akses credential sudah berakhir" description="Akun ini sudah expired atau tidak aktif, jadi password/PIN tidak lagi ditampilkan." />
+              )}
             </div>
             </> : null}
             {!deliveryLoading && !deliveryError && detailTab === "template" ? (

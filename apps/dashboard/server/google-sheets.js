@@ -28,6 +28,14 @@ import {
 } from "./google-sheets/account-condition.js";
 import { checkoutFieldsFromHeaders } from "./services/checkout-fields-service.js";
 import { planResellerSheetSync } from "./services/reseller-sheet-sync-service.js";
+import { stockIdBackfillRowFingerprint } from "./services/stock-id-backfill-service.js";
+import {
+  applyGoogleSheetsSyncState,
+  GOOGLE_SHEETS_RESELLER_LOOKUP_TTL_MS,
+  recentGoogleSheetsResellerLookup,
+  sheetReadWarningOrThrow,
+  validateSheetPoolReadColumns,
+} from "./services/google-sheets-sync-policy-service.js";
 
 export {
   CANVA_USAGE_HEADERS,
@@ -118,6 +126,7 @@ const POOLS = {
   NETFLIX_SHARED: {
     key: "NETFLIX_SHARED",
     label: "POOL: NETFLIX_SHARED",
+    aliases: ["POOL: NETFLIX_1U"],
     startColumn: 0,
     variantMatch: isNetflixSharedVariant,
     productKey: "netflix",
@@ -125,7 +134,7 @@ const POOLS = {
   NETFLIX_2U: {
     key: "NETFLIX_2U",
     label: "POOL: NETFLIX_2U",
-    startColumn: 13,
+    startColumn: 14,
     variantMatch: isNetflixTwoUserVariant,
     productKey: "netflix",
   },
@@ -190,6 +199,15 @@ const SHEET_CONFIGS = {
 };
 
 let tokenCache = { key: "", accessToken: "", expiresAt: 0 };
+let mutationObserver = null;
+
+export function setGoogleSheetsMutationObserver(observer = null) {
+  mutationObserver = typeof observer === "function" ? observer : null;
+}
+
+function observeSheetMutation(operation, payload) {
+  mutationObserver?.({ operation, payload });
+}
 
 function normalize(value = "") {
   return String(value || "").trim();
@@ -477,9 +495,20 @@ async function syncSheetResellerLookup(db, options = {}) {
 
 async function ensureSheetResellerLookup(db, options = {}) {
   if (options.resellerLookup) return options.resellerLookup;
+  if (options.reuseRecentResellerLookup) {
+    const recent = recentGoogleSheetsResellerLookup(
+      db.settings || {},
+      Date.now(),
+      Number(options.resellerLookupTtlMs || GOOGLE_SHEETS_RESELLER_LOOKUP_TTL_MS),
+    );
+    if (recent) return recent;
+  }
   try {
     return await syncSheetResellerLookup(db, options);
   } catch (error) {
+    if (options.failOnQuota) {
+      sheetReadWarningOrThrow(error, "data reseller");
+    }
     const warning = `data reseller: ${error.message || "gagal dibaca"}`;
     db.settings = db.settings || {};
     db.settings.googleSheetsResellerSync = { ok: false, rows: 0, aliases: 0, warnings: [warning], syncedAt: new Date().toISOString() };
@@ -939,19 +968,6 @@ function clearCellUpdatesByColumns(sheetName, rowNumber, columns = {}, keys = []
   return data;
 }
 
-function legacyMetadataOffsetsForPool(pool = {}) {
-  if (poolUsesUniversalAccount(pool)) return [6, 8];
-  if (poolUsesSplitPassword(pool)) return [7, 9];
-  return [9, 11];
-}
-
-function clearLegacyMetadataCells(sheetName, rowNumber, startColumn, pool = {}) {
-  return legacyMetadataOffsetsForPool(pool).map((offset) => ({
-    range: cellRange(sheetName, rowNumber, Number(startColumn || 0) + offset),
-    values: [[""]],
-  }));
-}
-
 function formulaIndexesFromRow(row = []) {
   const preserve = new Set();
   for (let index = 0; index < row.length; index += 1) {
@@ -1042,6 +1058,7 @@ async function ensureValueRangesFit(db, data = []) {
 }
 
 async function updateValues(db, data) {
+  observeSheetMutation("values.batchUpdate", { count: data.length });
   const { spreadsheetId } = googleSheetsSettings(db);
   await ensureValueRangesFit(db, data);
   return sheetsFetch(db, `${spreadsheetId}/values:batchUpdate`, {
@@ -1054,6 +1071,7 @@ async function updateValues(db, data) {
 }
 
 async function updateRawValues(db, data) {
+  observeSheetMutation("values.batchUpdate.raw", { count: data.length });
   const { spreadsheetId } = googleSheetsSettings(db);
   await ensureValueRangesFit(db, data);
   return sheetsFetch(db, `${spreadsheetId}/values:batchUpdate`, {
@@ -1072,7 +1090,7 @@ async function getSpreadsheetMeta(db) {
     return spreadsheetMetaCache.meta;
   }
   const { spreadsheetId } = googleSheetsSettings(db);
-  const meta = await sheetsFetch(db, `${spreadsheetId}?fields=sheets.properties`);
+  const meta = await sheetsFetch(db, `${spreadsheetId}?fields=sheets(properties,merges)`);
   spreadsheetMetaCache = {
     key: cacheKey,
     meta,
@@ -1105,6 +1123,7 @@ async function ensureSheetExists(db, sheetName) {
 }
 
 async function batchUpdate(db, requests) {
+  observeSheetMutation("spreadsheets.batchUpdate", { count: requests.length });
   const { spreadsheetId } = googleSheetsSettings(db);
   spreadsheetMetaCache = { key: "", meta: null, expiresAt: 0 };
   return sheetsFetch(db, `${spreadsheetId}:batchUpdate`, {
@@ -1119,10 +1138,54 @@ async function readSheetValues(db) {
   return response.values || [];
 }
 
-export async function readSheetValuesByName(db, sheetName) {
+export async function readSheetValuesByName(db, sheetName, options = {}) {
   const { spreadsheetId } = googleSheetsSettings(db);
-  const response = await sheetsFetch(db, `${spreadsheetId}/values/${encodeURIComponent(valuesRange(sheetName))}?valueRenderOption=FORMATTED_VALUE`);
+  const valueRenderOption = options.valueRenderOption === "FORMULA" ? "FORMULA" : "FORMATTED_VALUE";
+  const response = await sheetsFetch(db, `${spreadsheetId}/values/${encodeURIComponent(valuesRange(sheetName))}?valueRenderOption=${valueRenderOption}`);
   return response.values || [];
+}
+
+export async function readSheetValuesForLayout(db, sheetName, options = {}) {
+  const attempts = Math.max(1, Number(options.attempts || 2));
+  const delayMs = Math.max(0, Number(options.delayMs ?? 200));
+  const read = typeof options.read === "function" ? options.read : readSheetValuesByName;
+  const readOptions = { valueRenderOption: options.valueRenderOption };
+  let rows = [];
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      rows = await read(db, sheetName, readOptions);
+      lastError = null;
+      if (rows.length || attempt === attempts) return rows;
+    } catch (error) {
+      lastError = error;
+      if (/quota|rate.?limit|too many requests|\b429\b/i.test(String(error?.message || ""))) {
+        throw error;
+      }
+      if (attempt === attempts) throw error;
+    }
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  if (lastError) throw lastError;
+  return rows;
+}
+
+export async function readSheetValuesBatchByNames(db, sheetNames = [], options = {}) {
+  const names = [...new Set((sheetNames || []).map(normalize).filter(Boolean))];
+  if (!names.length) return new Map();
+  const { spreadsheetId } = googleSheetsSettings(db);
+  const params = new URLSearchParams();
+  for (const sheetName of names) params.append("ranges", valuesRange(sheetName));
+  params.set("valueRenderOption", options.valueRenderOption === "FORMULA" ? "FORMULA" : "FORMATTED_VALUE");
+  const response = await sheetsFetch(db, `${spreadsheetId}/values:batchGet?${params.toString()}`);
+  return new Map(names.map((sheetName, index) => [
+    sheetName,
+    response.valueRanges?.[index]?.values || [],
+  ]));
 }
 
 function hashKey(value) {
@@ -1459,7 +1522,7 @@ function hasExplicitClock(value = "") {
 }
 
 function preferPurchaseDate(account = {}, order = {}, stock = {}) {
-  const rawValue = order.paidAt || order.createdAt || account.startedAt || stock.soldAt || "";
+  const rawValue = account.warrantyAdjustedStartedAt || order.paidAt || order.createdAt || account.startedAt || stock.soldAt || "";
   const parsed = parseDateText(rawValue) || new Date();
   if (!hasExplicitClock(rawValue)) {
     const reference = parseDateText(order.paidAt || order.createdAt || account.startedAt || account.createdAt || stock.soldAt || "");
@@ -1692,6 +1755,122 @@ function dynamicPoolColumns(header = [], startColumn = 0, endColumn = header.len
   };
 }
 
+function relevantMarkerMerge(merges = [], markerRowIndex, markerColumnIndex) {
+  return (merges || []).find((range) => (
+    Number(range.startRowIndex || 0) <= markerRowIndex
+    && Number(range.endRowIndex || 0) > markerRowIndex
+    && Number(range.startColumnIndex || 0) === markerColumnIndex
+  )) || null;
+}
+
+export function analyzeNetflixPoolLayout(values = [], merges = []) {
+  const markerRowIndex = 1;
+  const headerRowIndex = 2;
+  const markerRow = values[markerRowIndex] || [];
+  const headerRow = values[headerRowIndex] || [];
+  const markers = markerRow
+    .map((value, columnIndex) => {
+      const markerText = normalize(value);
+      const key = poolKeyFromMarker(markerText);
+      return key ? { key, markerText, rowIndex: markerRowIndex, columnIndex } : null;
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.columnIndex - right.columnIndex);
+  const stockIdHeaders = headerRow
+    .map((value, columnIndex) => (
+      headerToken(value) === "STOCKID"
+        ? { columnIndex, cell: `${a1Column(columnIndex)}${headerRowIndex + 1}` }
+        : null
+    ))
+    .filter(Boolean);
+  const physicalKeys = ["NETFLIX_1U", "NETFLIX_2U", "NETFLIX_SINGLESCREEN"];
+  const pools = physicalKeys.map((poolKeyName) => {
+    const marker = markers.find((item) => item.key === poolKeyName)
+      || (poolKeyName === "NETFLIX_1U"
+        ? markers.find((item) => item.key === "NETFLIX_SHARED")
+        : null);
+    if (!marker) {
+      return {
+        pool: poolKeyName,
+        markerCell: "",
+        markerText: "",
+        startColumn: "",
+        endColumn: "",
+        stockIdCell: "",
+        status: "MISSING_MARKER",
+      };
+    }
+    const nextMarker = markers.find((item) => item.columnIndex > marker.columnIndex);
+    const merge = relevantMarkerMerge(merges, markerRowIndex, marker.columnIndex);
+    const endColumnIndex = merge
+      ? Number(merge.endColumnIndex || 0) - 1
+      : nextMarker
+        ? nextMarker.columnIndex - 1
+        : Math.max(marker.columnIndex, headerRow.length - 1);
+    const stockIdInPool = stockIdHeaders.filter((item) => (
+      item.columnIndex >= marker.columnIndex && item.columnIndex <= endColumnIndex
+    ));
+    return {
+      pool: poolKeyName,
+      markerCell: `${a1Column(marker.columnIndex)}${markerRowIndex + 1}`,
+      markerText: marker.markerText,
+      startColumn: a1Column(marker.columnIndex),
+      endColumn: a1Column(endColumnIndex),
+      stockIdCell: stockIdInPool.map((item) => item.cell).join(", "),
+      status: stockIdInPool.length === 1 ? "VALID" : stockIdInPool.length > 1 ? "OVERLAPPING" : "MISSING_STOCK_ID",
+      boundarySource: merge ? "merged_marker" : nextMarker ? "next_marker" : "last_header",
+    };
+  });
+  const sharedPhysical = pools.find((pool) => pool.pool === "NETFLIX_1U");
+  pools.splice(1, 0, {
+    ...sharedPhysical,
+    pool: "NETFLIX_SHARED",
+    markerText: sharedPhysical?.markerText || "",
+    status: sharedPhysical?.status === "MISSING_MARKER" ? "MISSING_MARKER" : sharedPhysical?.status,
+    aliasOf: "NETFLIX_1U",
+  });
+  const claimedStockIdCells = new Set(pools.flatMap((pool) => String(pool.stockIdCell || "").split(", ").filter(Boolean)));
+  const wrongPoolHeaders = stockIdHeaders
+    .filter((item) => !claimedStockIdCells.has(item.cell))
+    .map((item) => ({ cell: item.cell, status: "HEADER_IN_WRONG_POOL" }));
+  return {
+    markerRow: markerRowIndex + 1,
+    headerRow: headerRowIndex + 1,
+    markers,
+    headers: headerRow
+      .map((value, columnIndex) => (
+        normalize(value)
+          ? { cell: `${a1Column(columnIndex)}${headerRowIndex + 1}`, text: normalize(value) }
+          : null
+      ))
+      .filter(Boolean),
+    pools,
+    stockIdHeaders,
+    wrongPoolHeaders,
+    merges: (merges || []).map((range) => ({
+      startRow: Number(range.startRowIndex || 0) + 1,
+      endRow: Number(range.endRowIndex || 0),
+      startColumn: a1Column(Number(range.startColumnIndex || 0)),
+      endColumn: a1Column(Math.max(Number(range.startColumnIndex || 0), Number(range.endColumnIndex || 1) - 1)),
+    })),
+  };
+}
+
+export async function readNetflixPoolLayoutAudit(db = {}) {
+  if (!googleSheetsConfigured(db)) return { ok: false, reason: "google_sheets_not_configured" };
+  const { sheetName } = googleSheetsSettings(db);
+  const [values, meta] = await Promise.all([
+    readSheetValuesByName(db, sheetName),
+    getSpreadsheetMeta(db),
+  ]);
+  const sheet = (meta.sheets || []).find((item) => normalize(item.properties?.title) === normalize(sheetName));
+  return {
+    ok: true,
+    sheetName,
+    ...analyzeNetflixPoolLayout(values, sheet?.merges || []),
+  };
+}
+
 function checkoutRequirementsFromSheetHeader(header = [], startColumn = 0, endColumn = header.length) {
   const emailColumn = dynamicHeaderIndex(header, startColumn, endColumn, CHECKOUT_EMAIL_HEADERS);
   if (emailColumn >= 0) {
@@ -1797,7 +1976,8 @@ function inferredLoginPhone(row = [], columns = {}, startColumn = 0, endColumn =
 
 function parsePoolRows(values, pool, sheetName = "", pools = Object.values(POOLS), options = {}) {
   const markers = findPoolMarkers(values, pools);
-  const marker = markers[pool.key] || { rowIndex: 10, columnIndex: pool.startColumn };
+  const marker = markers[pool.key];
+  if (!marker) return [];
   const headerRowIndex = marker.rowIndex + 1;
   const dataStartIndex = headerRowIndex + 1;
   const header = values[headerRowIndex] || [];
@@ -1810,29 +1990,19 @@ function parsePoolRows(values, pool, sheetName = "", pools = Object.values(POOLS
   const splitPassword = inferredSchema === "split" || poolUsesSplitPassword(pool);
   const schema = splitPassword ? "split" : requireProfile ? "profile" : inferredSchema;
   const detectedColumns = dynamicPoolColumns(header, marker.columnIndex, nextStart, schema);
-  const fallbackColumn = (key, offset) => (
-    Number.isInteger(detectedColumns[key]) && detectedColumns[key] >= marker.columnIndex
-      ? detectedColumns[key]
-      : marker.columnIndex + offset
-  );
-  const columns = {
-    ...detectedColumns,
-    account: fallbackColumn("account", 0),
-    password: splitPassword ? fallbackColumn("password", 1) : -1,
-    profile: requireProfile ? fallbackColumn("profile", 1) : detectedColumns.profile,
-    date: fallbackColumn("date", 2),
-    duration: fallbackColumn("duration", 3),
-    expiresAt: fallbackColumn("expiresAt", 4),
-    device: splitPassword ? detectedColumns.device : fallbackColumn("device", 5),
-    seller: fallbackColumn("seller", splitPassword ? 5 : 6),
-    whatsapp: fallbackColumn("whatsapp", splitPassword ? 6 : 7),
-    pin: requireProfile ? fallbackColumn("pin", 8) : detectedColumns.pin,
-    orderId: fallbackColumn("orderId", splitPassword ? 7 : 9),
-    notes: fallbackColumn("notes", splitPassword ? 8 : 10),
-    stockId: Number.isInteger(detectedColumns.stockId) && detectedColumns.stockId >= marker.columnIndex
-      ? detectedColumns.stockId
-      : -1,
-  };
+  const columnValidation = validateSheetPoolReadColumns(detectedColumns, {
+    schema,
+    requireProfile: requireProfile && !splitPassword,
+  });
+  if (!columnValidation.ok) {
+    const error = new Error(`Header pool ${pool.key} tidak lengkap: ${columnValidation.missing.join(", ")}`);
+    error.code = "sheet_pool_headers_missing";
+    error.sheetName = sheetName;
+    error.pool = pool.key;
+    error.missingHeaders = columnValidation.missing;
+    throw error;
+  }
+  const columns = detectedColumns;
   const checkoutRequirements = checkoutRequirementsFromSheetHeader(header, marker.columnIndex, nextStart);
   const checkoutFields = checkoutFieldsFromSheetHeader(header, marker.columnIndex, nextStart);
   const rows = [];
@@ -2011,6 +2181,61 @@ function isArchivedSheetAccount(account = {}) {
   );
 }
 
+function validSheetOrderId(value = "") {
+  const orderId = normalize(value);
+  return /^MNL-[A-Z0-9-]{8,}$/i.test(orderId) || /^ORD-[A-Z0-9-]{8,}$/i.test(orderId);
+}
+
+function safeSheetStockId(value = "") {
+  const stockId = normalize(value);
+  return Boolean(
+    stockId
+    && stockId.length <= 160
+    && !/[\r\n@]/.test(stockId)
+    && !/^https?:\/\//i.test(stockId)
+  );
+}
+
+function manualOrderFromSheet(db = {}, payload = {}) {
+  const orderId = normalize(payload.orderId);
+  const isManualOrderId = /^MNL-[A-Z0-9-]{8,}$/i.test(orderId);
+  const isLegacyOrderId = Boolean(payload.allowLegacyOrderId && /^ORD-[A-Z0-9-]{8,}$/i.test(orderId));
+  if (!isManualOrderId && !isLegacyOrderId) return null;
+  db.manualOrders = db.manualOrders || [];
+  const existing = db.manualOrders.find((order) => normalize(order.id) === orderId);
+  const order = existing || {
+    id: orderId,
+    source: isLegacyOrderId ? "google_sheets_legacy_order_relation" : "google_sheets_manual",
+    createdAt: payload.startedAt || formatDateTime(new Date()),
+    replacementHistory: [],
+  };
+  Object.assign(order, {
+    productId: payload.product?.id || order.productId || "",
+    productName: payload.product?.name || order.productName || "",
+    variantId: payload.variant?.id || order.variantId || "",
+    variantName: payload.variant?.name || order.variantName || "",
+    variantCode: payload.variant?.code || order.variantCode || "",
+    resellerId: payload.reseller?.id || order.resellerId || "",
+    reseller: payload.reseller?.username || payload.reseller?.name || payload.seller || order.reseller || "",
+    customer: payload.seller || order.customer || "",
+    whatsapp: payload.whatsapp || order.whatsapp || "",
+    duration: payload.duration || order.duration || "",
+    durationDays: Number(payload.durationDays || order.durationDays || 0),
+    expiresAt: payload.expiresAt || order.expiresAt || "",
+    orderStatus: "completed",
+    qrisStatus: "manual",
+    paymentStatus: "manual",
+    fulfillmentStatus: "fulfilled",
+    excludedFromSalesMetrics: true,
+    sheetManualOrder: isManualOrderId,
+    sheetLegacyOrderRelation: isLegacyOrderId,
+    deliveredStockIds: [...new Set([...(order.deliveredStockIds || []), payload.stockId].filter(Boolean))],
+    updatedAt: formatDateTime(new Date()),
+  });
+  if (!existing) db.manualOrders.unshift(order);
+  return order;
+}
+
 function upsertManagedFromSheet(db, product, variant, stock, row) {
   db.managedAccounts = db.managedAccounts || [];
   const identity = sheetResellerIdentity(db, row);
@@ -2093,6 +2318,23 @@ function upsertManagedFromSheet(db, product, variant, stock, row) {
     sheetClearedAt: "",
     sheetMissingArchivedAt: "",
   });
+  if (row.orderId) {
+    account.orderId = row.orderId;
+    account.sourceOrderId = row.orderId;
+    manualOrderFromSheet(db, {
+      orderId: row.orderId,
+      product,
+      variant,
+      reseller,
+      seller: canonicalReseller || row.seller,
+      whatsapp: canonicalWhatsapp,
+      duration: account.duration,
+      durationDays: account.durationDays,
+      startedAt: account.startedAt,
+      expiresAt: account.expiresAt,
+      stockId: stock.id,
+    });
+  }
   if (existing?.source !== "google_sheets") {
     account.sheetStockKey = row.sheetStockKey;
     account.sheetSource = "google_sheets";
@@ -2844,9 +3086,16 @@ export async function syncDynamicSheetsStock(db, options = {}) {
   const meta = await getSpreadsheetMeta(db);
   const configuredNetflixSheet = googleSheetsSettings(db).sheetName;
   const knownSheets = new Set([configuredNetflixSheet, VIU_SHEET_NAME, VIDIO_SHEET_NAME, CANVA_SHEET_NAME].map(normalizeLower));
+  const requestedSheetNames = new Set(
+    (options.sheetNames || []).map(normalizeLower).filter(Boolean),
+  );
+  const requestedPoolKeys = new Set(
+    (options.poolKeys || []).map(normalizePoolMarker).filter(Boolean),
+  );
   const sheets = (meta.sheets || [])
     .map((item) => normalize(item.properties?.title))
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((sheetName) => !requestedSheetNames.size || requestedSheetNames.has(normalizeLower(sheetName)));
   const summary = {
     imported: 0,
     available: 0,
@@ -2865,11 +3114,12 @@ export async function syncDynamicSheetsStock(db, options = {}) {
 
   for (const sheetName of sheets) {
     const values = await readSheetValuesByName(db, sheetName).catch((error) => {
-      summary.warnings.push(`${sheetName}: ${error.message || "gagal dibaca"}`);
+      summary.warnings.push(sheetReadWarningOrThrow(error, sheetName));
       return [];
     });
     if (!values.length) continue;
-    let markers = findDynamicPoolMarkers(values);
+    let markers = findDynamicPoolMarkers(values)
+      .filter((marker) => !requestedPoolKeys.size || requestedPoolKeys.has(normalizePoolMarker(marker.key)));
     if (!markers.length) continue;
     if (knownSheets.has(normalizeLower(sheetName))) {
       markers = markers.filter((marker) => {
@@ -3309,7 +3559,7 @@ export async function syncLinkPoolSheetsStock(db, options = {}) {
 
   for (const sheetName of sheets) {
     const values = await readSheetValuesByName(db, sheetName).catch((error) => {
-      summary.warnings.push(`${sheetName}: ${error.message || "gagal dibaca"}`);
+      summary.warnings.push(sheetReadWarningOrThrow(error, sheetName));
       return [];
     });
     if (!values.length) continue;
@@ -3964,21 +4214,105 @@ export async function syncGoogleSheetsStock(db, options = {}) {
         available: canvaSummary.available || 0,
       };
   const dynamic = await syncDynamicSheetsStock(db, syncOptions).catch((error) => ({ ok: false, error: error.message || "dynamic_sync_failed" }));
+  const result = { netflix, viu, vidio, canva, linkPools, dynamic, disneyFormat, resellers: resellerLookup };
+  const syncedAt = new Date().toISOString();
   db.settings = db.settings || {};
-  db.settings.googleSheetsLastSyncAt = new Date().toISOString();
-  db.settings.googleSheetsLastSyncSummary = { netflix, viu, vidio, canva, linkPools, dynamic, disneyFormat, resellers: resellerLookup };
+  const health = applyGoogleSheetsSyncState(db.settings, result, syncedAt);
   if (!options.silent) {
     db.activities = db.activities || [];
     db.activities.unshift({
       id: `act-sheet-all-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       type: "stock",
-      title: "Google Sheets stock synced",
-      description: `Netflix: ${netflix.imported || 0} row. Viu: ${viu.imported || 0} row. Vidio: ${vidio.imported || 0} row. Link pool: ${linkPools.available || 0}/${linkPools.quota || 0} tersedia. Dynamic: ${dynamic.imported || 0} row. Reseller alias: ${resellerLookup.aliases || 0}.`,
-      createdAt: formatDateTime(new Date()),
+      title: health.ok ? "Google Sheets stock synced" : "Google Sheets sync tidak lengkap",
+      description: health.ok
+        ? `Netflix: ${netflix.imported || 0} row. Viu: ${viu.imported || 0} row. Vidio: ${vidio.imported || 0} row. Link pool: ${linkPools.available || 0}/${linkPools.quota || 0} tersedia. Dynamic: ${dynamic.imported || 0} row. Reseller alias: ${resellerLookup.aliases || 0}.`
+        : `Bagian gagal: ${health.failedSections.join(", ")}. Last successful sync tidak diubah.`,
+      createdAt: formatDateTime(new Date(syncedAt)),
     });
   }
-  const sections = [netflix, viu, vidio, canva, linkPools, dynamic, disneyFormat, resellerLookup];
-  return { ok: sections.every((item) => item?.ok !== false), netflix, viu, vidio, canva, linkPools, dynamic, disneyFormat, resellers: resellerLookup };
+  return { ok: health.ok, ...result, failedSections: health.failedSections };
+}
+
+export function googleSheetsProductScope(db = {}, product = {}) {
+  const productId = String(product?.id || "").trim();
+  const stockRows = (db.stock || []).filter((stock) => (
+    String(stock?.productId || "").trim() === productId
+    && String(stock?.sheetSource || "").toLowerCase() === "google_sheets"
+    && normalize(stock?.sheetName)
+  ));
+  return {
+    sheetNames: [...new Set(stockRows.map((stock) => normalize(stock.sheetName)).filter(Boolean))],
+    poolKeys: [...new Set(stockRows.map((stock) => normalizePoolMarker(stock.sheetPool)).filter(Boolean))],
+  };
+}
+
+export function googleSheetsProductSheetNames(product = {}, sheetNames = []) {
+  const aliases = productPoolAliases(product);
+  return [...new Set((sheetNames || [])
+    .map(normalize)
+    .filter(Boolean)
+    .filter((sheetName) => aliases.has(normalizePoolMarker(sheetName))))];
+}
+
+export async function syncGoogleSheetsProductStock(db, product, options = {}) {
+  if (!googleSheetsConfigured(db)) return null;
+  const syncKey = normalizeLower(options.syncKey);
+  const resellerLookup = await ensureSheetResellerLookup(db, {
+    ...options,
+    failOnQuota: true,
+  });
+  const syncOptions = {
+    ...options,
+    resellerLookup,
+    silent: true,
+  };
+  let section;
+
+  if (syncKey === "netflix") {
+    section = await syncNetflixSheetsStock(db, syncOptions);
+  } else if (syncKey === "viu") {
+    section = await syncViuSheetsStock(db, syncOptions);
+  } else if (syncKey === "vidio") {
+    section = await syncVidioSheetsStock(db, syncOptions);
+  } else if (syncKey === "canva") {
+    const linkPools = await syncLinkPoolSheetsStock(db, { ...syncOptions, keys: ["CANVA"] });
+    const canvaSummary = linkPools?.byKey?.CANVA || {};
+    section = linkPools?.ok === false
+      ? { ok: false, error: linkPools.error || "canva_sync_failed" }
+      : {
+          ok: true,
+          pools: canvaSummary.pools || 0,
+          imported: canvaSummary.usageImported || 0,
+          usageImported: canvaSummary.usageImported || 0,
+          quota: canvaSummary.quota || db.canvaPool?.quota || 0,
+          used: canvaSummary.used || db.canvaPool?.used || 0,
+          available: canvaSummary.available || 0,
+        };
+  } else {
+    const scope = googleSheetsProductScope(db, product);
+    if (!scope.sheetNames.length) {
+      const meta = await getSpreadsheetMeta(db);
+      scope.sheetNames = googleSheetsProductSheetNames(
+        product,
+        (meta.sheets || []).map((item) => item.properties?.title),
+      );
+    }
+    if (!scope.sheetNames.length) {
+      section = { ok: false, error: "product_sheet_scope_unresolved" };
+    } else {
+      section = await syncDynamicSheetsStock(db, {
+        ...syncOptions,
+        sheetNames: scope.sheetNames,
+        ...(scope.poolKeys.length ? { poolKeys: scope.poolKeys } : {}),
+      });
+    }
+  }
+
+  return {
+    ok: section?.ok !== false && resellerLookup?.ok !== false,
+    [syncKey || "dynamic"]: section,
+    resellers: resellerLookup,
+  };
 }
 
 export async function ensureDisneySheetFormat(db) {
@@ -4127,13 +4461,14 @@ function sheetRowValues(stock, account = {}, order = {}) {
     startedAt,
     durationLabel,
     expiresAt,
-    order.device || account.device || stock.device || order.email || "",
-    account.reseller || order.reseller || sheetOrderCustomer(order, account) || "",
-    normalizeWhatsapp(account.whatsapp || order.whatsapp || ""),
     stock.pin || account.pin || "",
+    order.device || account.device || stock.device || "",
+    order.reseller || account.reseller || sheetOrderCustomer(order, account) || "",
+    normalizeWhatsapp(account.whatsapp || order.whatsapp || ""),
+    order.id || account.orderId || account.sourceOrderId || "",
     "",
     sheetOrderNote(order, stock),
-    "",
+    account.stockId || stock.id || "",
   ];
 }
 
@@ -4217,17 +4552,9 @@ export function actualSheetRowUpdates(sheetName, rowNumber, rows, stock = {}, ac
     values[index] = value ?? "";
     writtenIndexes.add(index);
   };
-  const disney = isDisneyPool(pool) || isDisneySheetStock(stock, account);
-  if (disney) {
-    put(columns.loginPhone, stock.loginPhone || account.loginPhone || "");
-    put(columns.otpEmail, stock.otpEmail || account.otpEmail || stock.email || account.email || "");
-  } else if (schema === "split") {
-    put(columns.account, stock.email || account.email || "");
-    put(columns.password, stock.password || account.password || "");
-  } else {
-    put(columns.account, `${stock.email || account.email || ""}\n${stock.password || account.password || ""}`.trim());
-  }
-  put(columns.profile, stock.profile || account.profile || "");
+  // Identity and credential columns are the source data for a stock row.
+  // Fulfillment only writes assignment metadata; credential updates use the
+  // dedicated owner credential-sync path.
   put(columns.date, formatSheetPurchaseDate(purchaseDate));
   put(columns.duration, durationLabel);
   put(columns.device, order.device || account.device || stock.device || "");
@@ -4236,7 +4563,6 @@ export function actualSheetRowUpdates(sheetName, rowNumber, rows, stock = {}, ac
   put(columns.seller, order.reseller || account.reseller || sheetOrderCustomer(order, account) || "");
   // EXPIRED and NOMOR WA are owned by Sheet formulas derived from date,
   // duration, and seller. Never write them from the dashboard.
-  put(columns.pin, stock.pin || account.pin || "");
   put(columns.orderId, order.id || account.orderId || account.sourceOrderId || "");
   put(columns.notes, sheetOrderNote(order, stock));
   put(columns.stockId, account.stockId || stock.id || "");
@@ -4245,6 +4571,517 @@ export function actualSheetRowUpdates(sheetName, rowNumber, rows, stock = {}, ac
   const updates = safeCellUpdates(sheetName, rowNumber, 0, header, values, { preserveIndexes, allowHeaders })
     .filter((update) => writtenIndexes.has(columnIndexFromRange(update.range)));
   return { updates, layout };
+}
+
+export function planAccountSheetRowUpdate(sheetName, rowNumber, rows, stock = {}, account = {}, order = {}) {
+  const mapping = actualSheetRowUpdates(sheetName, rowNumber, rows, stock, account, order);
+  if (!mapping) {
+    return {
+      ok: false,
+      reason: "sheet_layout_unresolved",
+      updates: [],
+      layout: null,
+    };
+  }
+  return {
+    ok: true,
+    ...mapping,
+  };
+}
+
+export function validateReplacementTargetSheetRow(rows = [], stock = {}, options = {}) {
+  const pool = stockPool(stock);
+  const layout = actualSheetLayout(rows, stock, pool);
+  if (!layout) return { ok: false, reason: "replacement_target_layout_unresolved" };
+
+  const rowNumber = Number(stock.sheetRow || 0);
+  const row = rows[rowNumber - 1];
+  if (!rowNumber || !Array.isArray(row)) {
+    return { ok: false, reason: "replacement_target_row_missing" };
+  }
+
+  const { columns } = layout;
+  if (columns.stockId < 0) {
+    return { ok: false, reason: "replacement_target_stock_id_column_missing" };
+  }
+  const expectedStockId = normalize(stock.id);
+  const sheetStockId = readColumn(row, columns.stockId);
+  if (sheetStockId && expectedStockId && sheetStockId !== expectedStockId) {
+    return { ok: false, reason: "replacement_target_stock_id_changed" };
+  }
+  const expectedOrderId = normalize(options.orderId);
+  const sheetOrderId = readColumn(row, columns.orderId);
+  const assignedToExpectedOrder = Boolean(
+    expectedOrderId
+    && sheetOrderId === expectedOrderId
+    && (!sheetStockId || !expectedStockId || sheetStockId === expectedStockId),
+  );
+
+  const condition = normalizeAccountCondition(readColumn(row, columns.accountCondition));
+  const seller = readColumn(row, columns.seller);
+  const availability = accountConditionAvailability({ seller, condition });
+  if (!availability.available && (availability.blocked || !assignedToExpectedOrder)) {
+    return {
+      ok: false,
+      reason: availability.blocked
+        ? "replacement_target_condition_blocked"
+        : "replacement_target_already_assigned",
+    };
+  }
+
+  const assignmentColumns = [
+    columns.date,
+    columns.duration,
+    columns.device,
+    columns.customerEmail,
+    columns.customerPlan,
+    columns.seller,
+    columns.orderId,
+  ];
+  if (assignmentColumns.some((index) => readColumn(row, index)) && !assignedToExpectedOrder) {
+    return { ok: false, reason: "replacement_target_already_assigned" };
+  }
+
+  return { ok: true };
+}
+
+export function planAccountConditionSheetUpdate(sheetName, rowNumber, rows, stock = {}, condition = "") {
+  const normalized = normalizeAccountCondition(condition);
+  if (!normalized.known || normalized.empty) {
+    return { ok: false, reason: "invalid_account_condition", updates: [], layout: null };
+  }
+  const pool = stockPool(stock);
+  const layout = actualSheetLayout(rows, stock, pool);
+  if (!layout) {
+    return { ok: false, reason: "sheet_layout_unresolved", updates: [], layout: null };
+  }
+  const metadata = findStockMetadataColumns(
+    layout.header,
+    layout.startColumn,
+    layout.endColumn,
+  );
+  if (metadata.accountCondition < 0) {
+    return { ok: false, reason: "account_condition_column_missing", updates: [], layout };
+  }
+  const formulaIndexes = formulaIndexesFromRow(rows[rowNumber - 1] || []);
+  if (formulaIndexes.has(metadata.accountCondition)) {
+    return { ok: false, reason: "account_condition_formula_owned", updates: [], layout };
+  }
+  return {
+    ok: true,
+    layout,
+    updates: [{
+      range: cellRange(sheetName, rowNumber, metadata.accountCondition),
+      values: [[normalized.value]],
+    }],
+  };
+}
+
+export function planWarrantyStockReviewSheetUpdates(rowsBySheet = new Map(), stocks = []) {
+  const updates = [];
+  const stockIds = [];
+  const seenRanges = new Set();
+  for (const stock of stocks) {
+    const sheetName = normalize(stock.sheetName);
+    const rowNumber = Number(stock.sheetRow || 0);
+    if (!sheetName || !rowNumber || !rowsBySheet.has(sheetName)) {
+      return { ok: false, reason: "warranty_review_sheet_row_unresolved", updates: [], stockIds: [] };
+    }
+    const plan = planAccountConditionSheetUpdate(
+      sheetName,
+      rowNumber,
+      rowsBySheet.get(sheetName) || [],
+      stock,
+      "DIPERIKSA",
+    );
+    if (!plan.ok) {
+      return { ok: false, reason: plan.reason || "warranty_review_condition_unresolved", updates: [], stockIds: [] };
+    }
+    for (const update of plan.updates) {
+      if (seenRanges.has(update.range)) continue;
+      seenRanges.add(update.range);
+      updates.push(update);
+    }
+    stockIds.push(normalize(stock.id));
+  }
+  return { ok: true, updates, stockIds: stockIds.filter(Boolean) };
+}
+
+function parsedStockIdInventoryRow(parsed = {}, product = {}, values = [], columns = {}, schema = "") {
+  const stockIdColumn = Number(columns.stockId ?? -1);
+  if (stockIdColumn < 0) return null;
+  const rawRow = values[Number(parsed.rowNumber || 0) - 1] || [];
+  return {
+    sheetName: parsed.sheetName || "",
+    pool: parsed.pool || "",
+    productId: product.id || "",
+    productKey: product.code || product.category || "",
+    product: product.name || "",
+    rowNumber: Number(parsed.rowNumber || 0),
+    stockIdCell: cellRange(parsed.sheetName, parsed.rowNumber, stockIdColumn),
+    stockId: normalize(rawRow[stockIdColumn]),
+    account: parsed.email || parsed.loginIdentifier || parsed.loginPhone || "",
+    email: parsed.email || "",
+    loginPhone: parsed.loginPhone || "",
+    profile: parsed.profile || "",
+    profileRequired: schema === "profile",
+    orderId: parsed.orderId || "",
+    seller: parsed.seller || "",
+    accountCondition: parsed.accountCondition || "",
+    sheetStockKey: parsed.sheetStockKey || "",
+    stockIdColumn,
+    schema,
+  };
+}
+
+/**
+ * Read-only inventory used by the STOCK ID backfill planner.
+ * The regular sync runs against a structured clone so its in-memory repair
+ * behavior cannot mutate the caller's database snapshot.
+ */
+export async function readStockIdBackfillInventory(db = {}) {
+  if (!googleSheetsConfigured(db)) {
+    return { ok: false, inventory: [], reason: "google_sheets_not_configured" };
+  }
+  const meta = await getSpreadsheetMeta(db);
+  const sheetNames = (meta.sheets || [])
+    .map((item) => normalize(item.properties?.title))
+    .filter(Boolean);
+  const valuesBySheet = new Map();
+  const inventory = [];
+  const pools = [];
+  const seen = new Set();
+  const poolSeen = new Set();
+  const add = (item) => {
+    if (!item?.stockIdCell) return;
+    const identity = `${item.sheetName}:${item.pool}:${item.rowNumber}:${item.stockIdCell}`;
+    if (seen.has(identity)) return;
+    seen.add(identity);
+    inventory.push(item);
+  };
+  const addPool = (item) => {
+    const identity = `${item.sheetName}:${item.pool}:${item.headerRow}:${item.stockIdColumn}`;
+    if (poolSeen.has(identity)) return;
+    poolSeen.add(identity);
+    pools.push(item);
+  };
+
+  const batchedValues = await readSheetValuesBatchByNames(db, sheetNames);
+  for (const sheetName of sheetNames) {
+    const values = batchedValues.get(sheetName) || [];
+    valuesBySheet.set(sheetName, values);
+    const dynamicMarkers = findDynamicPoolMarkers(values);
+    const knownMarkers = Object.values(findPoolMarkers(values, Object.values(POOLS)));
+    const allMarkers = [...knownMarkers, ...dynamicMarkers];
+
+    for (const config of Object.values(SHEET_CONFIGS)) {
+      if (normalizeLower(config.sheetName(db)) !== normalizeLower(sheetName)) continue;
+      const product = productForConfig(db, config) || {};
+      const configMarkers = findPoolMarkers(values, config.pools);
+      for (const pool of config.pools) {
+        const marker = configMarkers[pool.key];
+        if (!marker) continue;
+        const parsedRows = parsePoolRows(values, pool, sheetName, config.pools, { requireProfile: config.requireProfile });
+        const header = values[marker.rowIndex + 1] || [];
+        const nextStart = allMarkers
+          .filter((item) => item.rowIndex === marker.rowIndex && item.columnIndex > marker.columnIndex)
+          .map((item) => item.columnIndex)
+          .sort((a, b) => a - b)[0] || header.length;
+        const schema = poolUsesSplitPassword(pool)
+          ? "split"
+          : config.requireProfile ? "profile" : inferDynamicPoolSchema(header, marker.columnIndex, nextStart);
+        const columns = dynamicPoolColumns(header, marker.columnIndex, nextStart, schema);
+        addPool({
+          sheetName,
+          pool: pool.key,
+          headerRow: marker.rowIndex + 2,
+          stockIdColumn: columns.stockId,
+          stockIdColumnLabel: columns.stockId >= 0 ? a1Column(columns.stockId) : "",
+          rows: parsedRows.length,
+          filled: parsedRows.filter((parsed) => {
+            const raw = values[parsed.rowNumber - 1] || [];
+            return columns.stockId >= 0 && normalize(raw[columns.stockId]);
+          }).length,
+        });
+        for (const parsed of parsedRows) {
+          add(parsedStockIdInventoryRow(parsed, product, values, columns, schema));
+        }
+      }
+    }
+
+    const markers = dynamicMarkers;
+    for (const marker of markers) {
+      const parsedKey = parseDynamicPoolKey(marker.key);
+      const productResult = findProductForDynamicPool(db, marker.key);
+      const product = productResult.product || {};
+      const pool = {
+        key: marker.key,
+        label: marker.label,
+        rowIndex: marker.rowIndex,
+        markerColumn: marker.columnIndex,
+        startColumn: marker.columnIndex,
+        sheetName,
+        productKey: parsedKey.productKey || product.code || product.name || "dynamic",
+        schema: inferDynamicPoolSchema(values[marker.rowIndex + 1] || [], marker.columnIndex),
+      };
+      const parsedRows = parseDynamicPoolRows(values, pool, markers);
+      const header = values[marker.rowIndex + 1] || [];
+      const nextStart = markers
+        .filter((item) => item.rowIndex === marker.rowIndex && item.columnIndex > marker.columnIndex)
+        .map((item) => item.columnIndex)
+        .sort((a, b) => a - b)[0] || header.length;
+      const columns = dynamicPoolColumns(header, marker.columnIndex, nextStart, pool.schema);
+      addPool({
+        sheetName,
+        pool: marker.key,
+        headerRow: marker.rowIndex + 2,
+        stockIdColumn: columns.stockId,
+        stockIdColumnLabel: columns.stockId >= 0 ? a1Column(columns.stockId) : "",
+        rows: parsedRows.length,
+        filled: parsedRows.filter((parsed) => {
+          const raw = values[parsed.rowNumber - 1] || [];
+          return columns.stockId >= 0 && normalize(raw[columns.stockId]);
+        }).length,
+      });
+      for (const parsed of parsedRows) {
+        add(parsedStockIdInventoryRow(parsed, product, values, columns, pool.schema));
+      }
+    }
+
+    for (const parsedPool of parseLinkPoolRows(values, sheetName)) {
+      const section = findLinkPoolSections(values).find((candidate) => (
+        normalizePoolMarker(candidate.key) === normalizePoolMarker(parsedPool.poolKey || parsedPool.key)
+        && parsedPool.sheetRow > candidate.headerIndex + 1
+      ));
+      const stockIdColumn = Number(section?.columns?.stockId ?? -1);
+      if (stockIdColumn < 0) continue;
+      const normalizedLinkPool = normalizePoolMarker(parsedPool.poolKey || parsedPool.key);
+      const product = normalizedLinkPool === "CANVA"
+        ? (canvaProduct(db) || {})
+        : (findProductForDynamicPool(db, parsedPool.poolKey || parsedPool.key).product || {});
+      add({
+        sheetName,
+        pool: parsedPool.poolKey || parsedPool.key || "",
+        productId: product.id || "",
+        productKey: product.code || parseDynamicPoolKey(parsedPool.poolKey || parsedPool.key).productKey || parsedPool.poolKey || parsedPool.key || "",
+        product: product.name || parsedPool.poolKey || parsedPool.key || "",
+        rowNumber: Number(parsedPool.sheetRow),
+        stockIdCell: cellRange(sheetName, parsedPool.sheetRow, stockIdColumn),
+        stockId: normalize(values[Number(parsedPool.sheetRow) - 1]?.[stockIdColumn]),
+        link: parsedPool.link || "",
+        orderId: "",
+        stockIdColumn,
+        schema: "link",
+      });
+      addPool({
+        sheetName,
+        pool: parsedPool.poolKey || parsedPool.key || "",
+        headerRow: Number(section?.headerIndex || 0) + 1,
+        stockIdColumn,
+        stockIdColumnLabel: a1Column(stockIdColumn),
+        rows: 1,
+        filled: normalize(values[Number(parsedPool.sheetRow) - 1]?.[stockIdColumn]) ? 1 : 0,
+      });
+    }
+
+    // Usage rows are reported but never guessed. Only an explicit STOCK ID
+    // relation can make one eligible.
+    for (const section of findLinkUsageSections(values)) {
+      const usageHeader = values[section.headerIndex] || [];
+      const stockIdColumn = dynamicHeaderIndex(
+        usageHeader,
+        0,
+        usageHeader.length,
+        ["STOCK ID", "STOCK_ID", "ID STOCK", "ID STOK", "STOK ID", "POOL ID"],
+      );
+      const nextHeader = findLinkUsageSections(values)
+        .filter((candidate) => candidate.headerIndex > section.headerIndex)
+        .map((candidate) => candidate.headerIndex)
+        .sort((a, b) => a - b)[0] || values.length;
+      for (let rowIndex = section.dataStartIndex; rowIndex < nextHeader; rowIndex += 1) {
+        const row = values[rowIndex] || [];
+        if (rowLooksLikeSectionMarker(row) || looksLikeLinkPoolHeader(row)) break;
+        const account = normalize(row[section.columns.email]);
+        if (!account) continue;
+        add({
+          sheetName,
+          pool: section.key,
+          productKey: parseDynamicPoolKey(section.key).productKey || section.key,
+          product: section.key,
+          rowNumber: rowIndex + 1,
+          stockIdCell: stockIdColumn >= 0 ? cellRange(sheetName, rowIndex + 1, stockIdColumn) : "",
+          stockId: stockIdColumn >= 0 ? normalize(row[stockIdColumn]) : "",
+          account,
+          orderId: normalize(row[section.columns.orderId]),
+          usageRow: true,
+          stockIdColumn,
+          schema: "usage",
+        });
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    inventory: inventory.sort((a, b) => (
+      a.sheetName.localeCompare(b.sheetName)
+      || a.pool.localeCompare(b.pool)
+      || a.rowNumber - b.rowNumber
+    )),
+    pools: pools
+      .map((pool) => ({ ...pool, empty: Math.max(0, pool.rows - pool.filled) }))
+      .sort((a, b) => a.sheetName.localeCompare(b.sheetName) || a.pool.localeCompare(b.pool)),
+    tabs: [...valuesBySheet.keys()].sort(),
+  };
+}
+
+export async function applyStockIdBackfillPlan(db = {}, plan = {}, confirmation = {}) {
+  if (
+    confirmation.confirmProduction !== true
+    || confirmation.confirmation !== "BACKFILL_STOCK_ID"
+  ) {
+    throw new Error("Apply STOCK ID memerlukan konfirmasi produksi eksplisit");
+  }
+  const exact = (plan.rows || []).filter((row) => row.status === "EXACT");
+  const batchSize = Math.max(1, Math.min(100, Number(confirmation.batchSize || 50)));
+  const batchDelayMs = Math.max(0, Number(confirmation.batchDelayMs || 0));
+  const targetCells = new Set();
+  const targetStockIds = new Set();
+  for (const row of exact) {
+    if (!row.tab || !row.row || !row.stockIdCell || !row.stockId || !row.rowFingerprint) {
+      throw new Error("Kandidat EXACT tidak memiliki koordinat, fingerprint, atau stockId lengkap");
+    }
+    if (targetCells.has(row.stockIdCell)) throw new Error(`Target cell duplikat: ${row.stockIdCell}`);
+    if (targetStockIds.has(row.stockId)) throw new Error("Stock ID kandidat duplikat");
+    targetCells.add(row.stockIdCell);
+    targetStockIds.add(row.stockId);
+  }
+
+  const affectedTabs = [...new Set(exact.map((row) => row.tab))].sort();
+  const beforeSheets = await readSheetValuesBatchByNames(db, affectedTabs);
+
+  const inventoryKey = (row) => [
+    normalizeLower(row.sheetName || row.tab),
+    normalizePoolMarker(row.pool || row.sheetPool),
+    Number(row.rowNumber || row.sheetRow || row.row || 0),
+    normalize(row.stockIdCell).toUpperCase(),
+  ].join("::");
+  const validateRows = async (rows) => {
+    const latest = await readStockIdBackfillInventory(db);
+    if (!latest?.ok) throw new Error(latest?.reason || "Inventaris Sheets gagal saat revalidasi");
+    const currentByKey = new Map(latest.inventory.map((row) => [inventoryKey(row), row]));
+    const usedIds = new Set(latest.inventory.map((row) => normalize(row.stockId)).filter(Boolean));
+    const valid = [];
+    const skipped = [];
+    for (const row of rows) {
+      const current = currentByKey.get(inventoryKey(row));
+      const reason = !current
+        ? "row atau target cell tidak lagi tersedia"
+        : normalize(current.stockId)
+          ? "target cell tidak lagi kosong"
+          : usedIds.has(row.stockId)
+            ? "Stock ID sudah digunakan row lain"
+            : stockIdBackfillRowFingerprint(current) !== row.rowFingerprint
+              ? "identitas row berubah sejak validasi"
+              : "";
+      if (reason) {
+        skipped.push({
+          status: "SKIPPED_DATA_CHANGED",
+          tab: row.tab,
+          pool: row.pool,
+          row: row.row,
+          stockIdCell: row.stockIdCell,
+          stockId: row.stockId,
+          reason,
+        });
+      } else {
+        valid.push(row);
+      }
+    }
+    return { valid, skipped };
+  };
+
+  const initial = await validateRows(exact);
+  await confirmation.onPrepared?.({
+    candidates: initial.valid,
+    skipped: initial.skipped,
+    batchSize,
+  });
+
+  const written = [];
+  const skipped = [...initial.skipped];
+  const batches = [];
+  for (let index = 0; index < initial.valid.length; index += batchSize) {
+    const proposed = initial.valid.slice(index, index + batchSize);
+    const refreshed = await validateRows(proposed);
+    skipped.push(...refreshed.skipped);
+    if (!refreshed.valid.length) continue;
+    const data = refreshed.valid.map((row) => ({ range: row.stockIdCell, values: [[row.stockId]] }));
+    await updateRawValues(db, data);
+
+    const valuesByTab = await readSheetValuesBatchByNames(
+      db,
+      [...new Set(refreshed.valid.map((row) => row.tab))],
+    );
+    const verification = refreshed.valid.map((row) => {
+      const columnIndex = columnIndexFromRange(row.stockIdCell);
+      const actual = normalize(valuesByTab.get(row.tab)?.[row.row - 1]?.[columnIndex]);
+      return {
+        tab: row.tab,
+        pool: row.pool,
+        row: row.row,
+        cell: row.stockIdCell,
+        verified: actual === row.stockId,
+      };
+    });
+    if (verification.some((item) => !item.verified)) {
+      throw new Error("Verifikasi baca ulang batch gagal; apply dihentikan");
+    }
+    written.push(...refreshed.valid);
+    batches.push({
+      batch: batches.length + 1,
+      requested: proposed.length,
+      written: refreshed.valid.length,
+      skipped: refreshed.skipped.length,
+      verified: verification.every((item) => item.verified),
+    });
+    if (batchDelayMs > 0 && index + batchSize < initial.valid.length) {
+      await new Promise((resolve) => setTimeout(resolve, batchDelayMs));
+    }
+  }
+
+  const allowedChanges = new Set(written.map((row) => normalize(row.stockIdCell).toUpperCase()));
+  const changedCells = [];
+  const afterSheets = await readSheetValuesBatchByNames(db, affectedTabs);
+  for (const tab of affectedTabs) {
+    const before = beforeSheets.get(tab) || [];
+    const after = afterSheets.get(tab) || [];
+    const rows = Math.max(before.length, after.length);
+    for (let rowIndex = 0; rowIndex < rows; rowIndex += 1) {
+      const columns = Math.max(before[rowIndex]?.length || 0, after[rowIndex]?.length || 0);
+      for (let columnIndex = 0; columnIndex < columns; columnIndex += 1) {
+        const oldValue = normalize(before[rowIndex]?.[columnIndex]);
+        const newValue = normalize(after[rowIndex]?.[columnIndex]);
+        if (oldValue === newValue) continue;
+        changedCells.push({
+          cell: cellRange(tab, rowIndex + 1, columnIndex),
+          allowed: allowedChanges.has(normalize(cellRange(tab, rowIndex + 1, columnIndex)).toUpperCase()),
+        });
+      }
+    }
+  }
+  const unexpectedChanges = changedCells.filter((item) => !item.allowed);
+  if (unexpectedChanges.length) {
+    throw new Error(`Terdeteksi ${unexpectedChanges.length} perubahan di luar cell STOCK ID`);
+  }
+  return {
+    ok: true,
+    updated: written.length,
+    skipped,
+    batches,
+    changedCells: changedCells.length,
+    unexpectedChanges: 0,
+  };
 }
 
 function columnIndexFromRange(range = "") {
@@ -4258,43 +5095,44 @@ export async function pushAccountsToGoogleSheets(db, accounts = [], order = {}) 
   const data = [];
   let updated = 0;
   const rowsBySheet = new Map();
-  async function formulaIndexesForRow(sheetName, rowNumber) {
-    if (!rowsBySheet.has(sheetName)) {
-      rowsBySheet.set(sheetName, await readSheetValuesByName(db, sheetName).catch(() => []));
-    }
-    return formulaIndexesFromRow((rowsBySheet.get(sheetName) || [])[Number(rowNumber) - 1] || []);
-  }
+  const unresolvedRows = [];
   for (const account of accounts) {
     const stock = findLinkedSheetStock(db.stock, account);
     if (!stock?.sheetStockKey || !stock.sheetRow) continue;
-    const pool = stockPool(stock);
     const sheetName = stockSheetName(db, stock);
     if (!rowsBySheet.has(sheetName)) {
-      rowsBySheet.set(sheetName, await readSheetValuesByName(db, sheetName).catch(() => []));
+      rowsBySheet.set(sheetName, await readSheetValuesForLayout(db, sheetName, { valueRenderOption: "FORMULA" }));
     }
-    const actualMapping = actualSheetRowUpdates(sheetName, Number(stock.sheetRow), rowsBySheet.get(sheetName) || [], stock, account, order);
-    if (actualMapping) {
-      if (!actualMapping.updates.length) continue;
-      stock.sheetStartColumn = actualMapping.layout.startColumn;
-      account.sheetStartColumn = actualMapping.layout.startColumn;
-      data.push(...actualMapping.updates);
-      updated += 1;
-      continue;
-    }
-    const headers = poolHeaders(pool);
-    const preserveIndexes = await formulaIndexesForRow(sheetName, stock.sheetRow);
-    const rowUpdates = safeCellUpdates(
+    const plan = planAccountSheetRowUpdate(
       sheetName,
       Number(stock.sheetRow),
-      Number(stock.sheetStartColumn ?? pool.startColumn),
-      headers,
-      sheetRowValues(stock, account, order),
-      { preserveIndexes: [...preserveIndexes] },
+      rowsBySheet.get(sheetName) || [],
+      stock,
+      account,
+      order,
     );
-    rowUpdates.push(...clearLegacyMetadataCells(sheetName, Number(stock.sheetRow), Number(stock.sheetStartColumn ?? pool.startColumn), pool));
-    if (!rowUpdates.length) continue;
-    data.push(...rowUpdates);
+    if (!plan.ok) {
+      unresolvedRows.push({
+        sheetName,
+        rowNumber: Number(stock.sheetRow),
+        pool: stock.sheetPool || "",
+        stockId: stock.id || "",
+      });
+      continue;
+    }
+    if (!plan.updates.length) continue;
+    stock.sheetStartColumn = plan.layout.startColumn;
+    account.sheetStartColumn = plan.layout.startColumn;
+    data.push(...plan.updates);
     updated += 1;
+  }
+  if (unresolvedRows.length) {
+    return {
+      ok: false,
+      reason: "sheet_layout_unresolved",
+      updated: 0,
+      unresolvedRows,
+    };
   }
   if (!data.length) return { ok: true, updated: 0, skipped: true, reason: "no_sheet_rows" };
   await updateValues(db, data);
@@ -4303,6 +5141,124 @@ export async function pushAccountsToGoogleSheets(db, accounts = [], order = {}) 
     account.googleSheetsSyncedAt = syncedAt;
   }
   return { ok: true, updated };
+}
+
+export async function syncAccountReplacementToGoogleSheets(db, options = {}) {
+  const oldAccount = options.oldAccount || {};
+  const newAccount = options.newAccount || {};
+  const order = options.order || {};
+  const oldStock = findLinkedSheetStock(db.stock, oldAccount);
+  const newStock = findLinkedSheetStock(db.stock, newAccount);
+  const oldSheetBacked = Boolean(oldStock?.sheetRow && (oldStock.sheetSource === "google_sheets" || oldStock.sheetStockKey || oldStock.sheetName));
+  const newSheetBacked = Boolean(newStock?.sheetRow && (newStock.sheetSource === "google_sheets" || newStock.sheetStockKey || newStock.sheetName));
+
+  if (!oldSheetBacked && !newSheetBacked) {
+    return { ok: true, skipped: true, reason: "replacement_not_sheet_backed", updated: 0 };
+  }
+  if (!googleSheetsConfigured(db)) {
+    return { ok: false, skipped: true, reason: "google_sheets_not_configured", updated: 0 };
+  }
+  if (!oldSheetBacked || !newSheetBacked) {
+    return { ok: false, reason: "replacement_sheet_link_incomplete", updated: 0 };
+  }
+
+  const oldSheetName = stockSheetName(db, oldStock);
+  const newSheetName = stockSheetName(db, newStock);
+  const rowsBySheet = new Map();
+  for (const sheetName of new Set([oldSheetName, newSheetName])) {
+    rowsBySheet.set(
+      sheetName,
+      await readSheetValuesForLayout(db, sheetName, { valueRenderOption: "FORMULA" }),
+    );
+  }
+
+  const conditionPlan = planAccountConditionSheetUpdate(
+    oldSheetName,
+    Number(oldStock.sheetRow),
+    rowsBySheet.get(oldSheetName) || [],
+    oldStock,
+    "REPLACED",
+  );
+  const assignmentPlan = planAccountSheetRowUpdate(
+    newSheetName,
+    Number(newStock.sheetRow),
+    rowsBySheet.get(newSheetName) || [],
+    newStock,
+    newAccount,
+    order,
+  );
+  const targetValidation = validateReplacementTargetSheetRow(
+    rowsBySheet.get(newSheetName) || [],
+    newStock,
+    { orderId: order.id },
+  );
+  if (!conditionPlan.ok || !assignmentPlan.ok || !targetValidation.ok) {
+    return {
+      ok: false,
+      reason: conditionPlan.reason || assignmentPlan.reason || targetValidation.reason || "replacement_sheet_layout_unresolved",
+      conditionPlan: { ok: conditionPlan.ok, reason: conditionPlan.reason || "" },
+      assignmentPlan: { ok: assignmentPlan.ok, reason: assignmentPlan.reason || "" },
+      targetValidation,
+      updated: 0,
+    };
+  }
+
+  const data = [...conditionPlan.updates, ...assignmentPlan.updates];
+  if (!data.length) {
+    return { ok: false, reason: "replacement_sheet_updates_empty", updated: 0 };
+  }
+  await updateValues(db, data);
+  const syncedAt = formatDateTime(new Date());
+  oldAccount.googleSheetsSyncedAt = syncedAt;
+  newAccount.googleSheetsSyncedAt = syncedAt;
+  return {
+    ok: true,
+    updated: data.length,
+    oldConditionCell: conditionPlan.updates[0]?.range || "",
+    newAssignmentCells: assignmentPlan.updates.map((update) => update.range),
+  };
+}
+
+export async function syncWarrantyStockReviewToGoogleSheets(db, options = {}) {
+  const requestedIds = new Set((options.stockIds || []).map((value) => normalize(value)).filter(Boolean));
+  const stocks = (db.stock || []).filter((stock) => requestedIds.has(normalize(stock.id)));
+  const sheetStocks = stocks.filter((stock) => Boolean(
+    stock.sheetRow && (stock.sheetSource === "google_sheets" || stock.sheetStockKey || stock.sheetName),
+  ));
+  if (!sheetStocks.length) return { ok: true, skipped: true, reason: "warranty_review_not_sheet_backed", updated: 0 };
+  if (!googleSheetsConfigured(db)) {
+    return { ok: false, reason: "google_sheets_not_configured", updated: 0 };
+  }
+
+  const rowsBySheet = new Map();
+  for (const sheetName of new Set(sheetStocks.map((stock) => stockSheetName(db, stock)))) {
+    rowsBySheet.set(
+      sheetName,
+      await readSheetValuesForLayout(db, sheetName, { valueRenderOption: "FORMULA" }),
+    );
+  }
+  const normalizedStocks = sheetStocks.map((stock) => ({
+    ...stock,
+    sheetName: stockSheetName(db, stock),
+  }));
+  const plan = planWarrantyStockReviewSheetUpdates(rowsBySheet, normalizedStocks);
+  if (!plan.ok || !plan.updates.length) {
+    return { ok: false, reason: plan.reason || "warranty_review_updates_empty", updated: 0 };
+  }
+
+  await updateValues(db, plan.updates);
+  const syncedAt = formatDateTime(new Date());
+  for (const stock of sheetStocks) {
+    stock.googleSheetsSyncedAt = syncedAt;
+    stock.warrantyReviewBlocked = false;
+  }
+  return {
+    ok: true,
+    updated: plan.updates.length,
+    stockIds: plan.stockIds,
+    conditionCells: plan.updates.map((update) => update.range),
+    syncedAt,
+  };
 }
 
 export async function previewAccountSheetMapping(db, options = {}) {
@@ -4336,7 +5292,7 @@ export async function previewAccountSheetMapping(db, options = {}) {
   let preserveIndexes = [];
   let actualMapping = null;
   if (sheetConfigured && sheetName && rowNumber) {
-    const rows = await readSheetValuesByName(db, sheetName).catch(() => []);
+    const rows = await readSheetValuesByName(db, sheetName, { valueRenderOption: "FORMULA" }).catch(() => []);
     preserveIndexes = [...formulaIndexesFromRow((rows[Number(rowNumber) - 1] || []))];
     actualMapping = actualSheetRowUpdates(sheetName, rowNumber, rows, resolvedStock, account || {}, options.order || {});
     if (actualMapping) {
@@ -4390,6 +5346,7 @@ export async function syncAccountCredentialsToGoogleSheets(db, options = {}) {
   const accountIds = new Set((options.accountIds || []).map((item) => normalize(item)).filter(Boolean));
   const dataByRange = new Map();
   const rowsBySheet = new Map();
+  const unresolvedRows = [];
 
   function includeStock(stock = {}) {
     return (
@@ -4411,7 +5368,7 @@ export async function syncAccountCredentialsToGoogleSheets(db, options = {}) {
     const password = options.password !== undefined ? options.password : target.password ?? fallback.password ?? "";
     if (!email && !password) return;
     if (!rowsBySheet.has(sheetName)) {
-      rowsBySheet.set(sheetName, await readSheetValuesByName(db, sheetName).catch(() => []));
+      rowsBySheet.set(sheetName, await readSheetValuesByName(db, sheetName, { valueRenderOption: "FORMULA" }).catch(() => []));
     }
     const rows = rowsBySheet.get(sheetName) || [];
     const layout = actualSheetLayout(rows, target.sheetRow ? target : fallback, pool);
@@ -4430,13 +5387,12 @@ export async function syncAccountCredentialsToGoogleSheets(db, options = {}) {
       }
       return;
     }
-    if (poolUsesUniversalAccount(pool)) {
-      dataByRange.set(cellRange(sheetName, sheetRow, startColumn), [[`${email}\n${password}`.trim()]]);
-    } else if (poolUsesSplitPassword(pool)) {
-      dataByRange.set(rowRange(sheetName, sheetRow, startColumn, 2), [[email, password]]);
-    } else {
-      dataByRange.set(cellRange(sheetName, sheetRow, startColumn), [[`${email}\n${password}`.trim()]]);
-    }
+    unresolvedRows.push({
+      sheetName,
+      rowNumber: sheetRow,
+      pool: (target.sheetPool || fallback.sheetPool || pool.key || ""),
+      stockId: target.id || fallback.stockId || fallback.id || "",
+    });
   }
 
   for (const stock of db.stock || []) {
@@ -4458,6 +5414,14 @@ export async function syncAccountCredentialsToGoogleSheets(db, options = {}) {
     await addRow(stock || account, account);
   }
 
+  if (unresolvedRows.length) {
+    return {
+      ok: false,
+      reason: "sheet_layout_unresolved",
+      updated: 0,
+      unresolvedRows,
+    };
+  }
   const data = [...dataByRange.entries()].map(([range, values]) => ({ range, values }));
   if (!data.length) return { ok: true, updated: 0, skipped: true, reason: "no_sheet_rows" };
   await updateValues(db, data);
@@ -5009,17 +5973,236 @@ export async function backfillGoogleSheetsOrders(db, options = {}) {
   };
 }
 
+export function deterministicManualSheetOrderId(stock = {}) {
+  const seed = [stock.sheetName, stock.sheetPool, Number(stock.sheetRow || 0), stock.id]
+    .map((value) => normalize(value))
+    .join("::");
+  return seed.replace(/:/g, "") ? `MNL-${hashKey(seed).toUpperCase()}` : "";
+}
+
+export async function backfillManualSheetOrderIds(db, options = {}) {
+  if (!googleSheetsConfigured(db)) return { ok: false, skipped: true, reason: "google_sheets_not_configured" };
+  const dryRun = options.dryRun !== false;
+  const read = typeof options.readSheetValues === "function"
+    ? options.readSheetValues
+    : (sheetName) => readSheetValuesByName(db, sheetName, { valueRenderOption: "FORMULA" });
+  const write = typeof options.writeValues === "function" ? options.writeValues : (data) => updateValues(db, data);
+  const rowsBySheet = new Map();
+  const usedOrderIds = new Set([
+    ...(db.orders || []).map((order) => normalize(order.id)),
+    ...(db.manualOrders || []).map((order) => normalize(order.id)),
+    ...(db.stock || []).map((stock) => normalize(stock.sheetOrderId)),
+  ].filter(Boolean));
+  const resultRows = [];
+  const candidates = [];
+  const stocks = (db.stock || [])
+    .filter((stock) => normalizeLower(stock.sheetSource) === "google_sheets")
+    .sort((left, right) => `${left.sheetName}:${left.sheetRow}:${left.sheetPool}`.localeCompare(`${right.sheetName}:${right.sheetRow}:${right.sheetPool}`));
+
+  for (const stock of stocks) {
+    const base = {
+      sheetName: normalize(stock.sheetName),
+      pool: normalize(stock.sheetPool),
+      row: Number(stock.sheetRow || 0),
+      stockId: normalize(stock.id),
+    };
+    if (normalizeLower(stock.status) !== "sold" || !normalize(stock.sheetSellerInput)) {
+      resultRows.push({ ...base, status: "SKIPPED", reason: "row_not_assigned_by_seller" });
+      continue;
+    }
+    if (!base.sheetName || !base.row || !base.stockId) {
+      resultRows.push({ ...base, status: "CONFLICT", reason: "sheet_row_identity_missing" });
+      continue;
+    }
+    if (!safeSheetStockId(base.stockId)) {
+      resultRows.push({ ...base, status: "CONFLICT", reason: "unsafe_database_stock_id" });
+      continue;
+    }
+    if (!rowsBySheet.has(base.sheetName)) rowsBySheet.set(base.sheetName, await read(base.sheetName));
+    const values = rowsBySheet.get(base.sheetName) || [];
+    const layout = actualSheetLayout(values, stock, stockPool(stock));
+    if (!layout || layout.columns.orderId < 0 || layout.columns.seller < 0 || layout.columns.stockId < 0) {
+      resultRows.push({ ...base, status: "CONFLICT", reason: "sheet_layout_or_required_header_unresolved" });
+      continue;
+    }
+    const sheetRow = values[base.row - 1] || [];
+    const actualSeller = normalize(sheetRow[layout.columns.seller]);
+    const actualOrderId = normalize(sheetRow[layout.columns.orderId]);
+    const actualStockId = normalize(sheetRow[layout.columns.stockId]);
+    const actualDate = normalize(sheetRow[layout.columns.date]);
+    const actualDuration = normalize(sheetRow[layout.columns.duration]);
+    const orderIdCell = cellRange(base.sheetName, base.row, layout.columns.orderId);
+    const stockIdCell = cellRange(base.sheetName, base.row, layout.columns.stockId);
+    if (!actualSeller) {
+      resultRows.push({ ...base, orderIdCell, status: "SKIPPED", reason: "seller_empty_in_live_sheet" });
+      continue;
+    }
+    if (normalizeLower(actualSeller) !== normalizeLower(stock.sheetSellerInput)) {
+      resultRows.push({ ...base, orderIdCell, status: "CONFLICT", reason: "seller_mismatch" });
+      continue;
+    }
+    const linkedAccount = (db.managedAccounts || []).find((account) => normalize(account.stockId) === base.stockId && !account.returnedToStockAt);
+    if (!actualDate || !actualDuration) {
+      resultRows.push({ ...base, orderIdCell, status: "SKIPPED", reason: "rental_date_or_duration_empty" });
+      continue;
+    }
+    if (actualStockId && normalizeLower(actualStockId) !== normalizeLower(base.stockId)) {
+      resultRows.push({ ...base, orderIdCell, status: "CONFLICT", reason: "stock_id_mismatch" });
+      continue;
+    }
+    if (!actualStockId) {
+      const normalizedPool = normalizePoolMarker(base.pool);
+      const oneUserAliases = ["NETFLIX1U", "NETFLIXSHARED"];
+      const allowsLegacyMissingStockId = [...oneUserAliases, "NETFLIX2U"].includes(normalizedPool);
+      const rowReferences = stocks.filter((candidate) => (
+        normalizeLower(candidate.sheetName) === normalizeLower(base.sheetName)
+        && Number(candidate.sheetRow || 0) === base.row
+        && (oneUserAliases.includes(normalizedPool)
+          ? oneUserAliases.includes(normalizePoolMarker(candidate.sheetPool))
+          : normalizePoolMarker(candidate.sheetPool) === normalizedPool)
+      ));
+      if (!allowsLegacyMissingStockId || rowReferences.length !== 1 || rowReferences[0] !== stock) {
+        resultRows.push({ ...base, orderIdCell, status: "CONFLICT", reason: "stock_id_missing_without_unique_netflix_row_relation" });
+        continue;
+      }
+    }
+    if (actualOrderId) {
+      if (!actualStockId && validSheetOrderId(actualOrderId)) {
+        const candidate = {
+          ...base,
+          orderIdCell,
+          stockIdCell,
+          targetOrderId: actualOrderId,
+          targetStockId: base.stockId,
+          candidateType: "stock_id_restore",
+          status: "EXACT",
+          reason: "stock_id_missing_from_sheet",
+        };
+        candidates.push({ ...candidate, stock, linkedAccount });
+        resultRows.push(candidate);
+        continue;
+      }
+      resultRows.push({ ...base, orderIdCell, status: "ALREADY_FILLED", reason: "order_id_already_present" });
+      continue;
+    }
+    const knownOrderIds = [...new Set([
+      stock.sheetOrderId,
+      linkedAccount?.orderId,
+      linkedAccount?.sourceOrderId,
+    ].map(normalize).filter(Boolean))];
+    if (knownOrderIds.length > 1) {
+      resultRows.push({ ...base, orderIdCell, status: "CONFLICT", reason: "multiple_database_order_ids" });
+      continue;
+    }
+    if (knownOrderIds.length === 1) {
+      const targetOrderId = knownOrderIds[0];
+      if (!validSheetOrderId(targetOrderId)) {
+        resultRows.push({ ...base, orderIdCell, status: "CONFLICT", reason: "invalid_database_order_id" });
+        continue;
+      }
+      const linkedOrder = [...(db.orders || []), ...(db.manualOrders || [])]
+        .find((order) => normalize(order.id) === targetOrderId);
+      const orderStockIds = new Set((linkedOrder?.deliveredStockIds || []).map(normalize).filter(Boolean));
+      const accountOrderIds = new Set([linkedAccount?.orderId, linkedAccount?.sourceOrderId].map(normalize).filter(Boolean));
+      const stockOrderMatches = normalize(stock.sheetOrderId) === targetOrderId;
+      if (!linkedOrder && !accountOrderIds.has(targetOrderId) && !stockOrderMatches) {
+        resultRows.push({ ...base, orderIdCell, status: "CONFLICT", reason: "database_order_record_missing" });
+        continue;
+      }
+      if (linkedOrder && !orderStockIds.has(base.stockId) && !accountOrderIds.has(targetOrderId)) {
+        resultRows.push({ ...base, orderIdCell, status: "CONFLICT", reason: "database_order_stock_relation_missing" });
+        continue;
+      }
+      const candidate = {
+        ...base,
+        orderIdCell,
+        stockIdCell,
+        targetOrderId,
+        targetStockId: actualStockId ? "" : base.stockId,
+        candidateType: linkedOrder ? "existing_order" : "legacy_order_reference",
+        status: "EXACT",
+        reason: "existing_order_id_missing_from_sheet",
+      };
+      candidates.push({ ...candidate, stock, linkedAccount });
+      resultRows.push(candidate);
+      continue;
+    }
+    const manualOrderId = deterministicManualSheetOrderId(stock);
+    if (!manualOrderId || usedOrderIds.has(manualOrderId)) {
+      resultRows.push({ ...base, orderIdCell, status: "CONFLICT", reason: "manual_order_id_collision" });
+      continue;
+    }
+    usedOrderIds.add(manualOrderId);
+    const candidate = {
+      ...base,
+      orderIdCell,
+      stockIdCell,
+      targetOrderId: manualOrderId,
+      targetStockId: actualStockId ? "" : base.stockId,
+      manualOrderId,
+      candidateType: "manual_order",
+      status: "EXACT",
+      reason: "assigned_sheet_row_without_order_id",
+    };
+    candidates.push({ ...candidate, stock, linkedAccount });
+    resultRows.push(candidate);
+  }
+
+  if (!dryRun && candidates.length) {
+    await write(candidates.flatMap((candidate) => [
+      candidate.targetOrderId && candidate.reason !== "stock_id_missing_from_sheet"
+        ? { range: candidate.orderIdCell, values: [[candidate.targetOrderId]] }
+        : null,
+      candidate.targetStockId ? { range: candidate.stockIdCell, values: [[candidate.targetStockId]] } : null,
+    ].filter(Boolean)));
+    for (const candidate of candidates) {
+      if (candidate.targetOrderId) candidate.stock.sheetOrderId = candidate.targetOrderId;
+      if (candidate.linkedAccount) {
+        candidate.linkedAccount.orderId = candidate.targetOrderId;
+        candidate.linkedAccount.sourceOrderId = candidate.targetOrderId;
+      }
+      if (candidate.candidateType === "existing_order") continue;
+      const product = (db.products || []).find((item) => normalize(item.id) === normalize(candidate.stock.productId)) || {};
+      const variant = (product.variants || []).find((item) => normalize(item.id) === normalize(candidate.stock.variantId)) || {};
+      const reseller = (db.resellers || []).find((item) => normalize(item.id) === normalize(candidate.stock.resellerId)) || null;
+      manualOrderFromSheet(db, {
+        orderId: candidate.targetOrderId,
+        product,
+        variant,
+        reseller,
+        seller: candidate.stock.reseller || candidate.stock.sheetSellerInput,
+        whatsapp: candidate.stock.whatsapp || "",
+        duration: candidate.stock.soldDuration || candidate.linkedAccount?.duration || "",
+        durationDays: Number(candidate.stock.soldDurationDays || candidate.linkedAccount?.durationDays || 0),
+        startedAt: candidate.stock.soldAt || candidate.linkedAccount?.startedAt || "",
+        expiresAt: candidate.stock.soldExpiresAt || candidate.linkedAccount?.expiresAt || "",
+        stockId: candidate.stock.id,
+        allowLegacyOrderId: candidate.candidateType === "legacy_order_reference",
+      });
+    }
+  }
+
+  const counts = resultRows.reduce((accumulator, row) => {
+    accumulator[row.status] = Number(accumulator[row.status] || 0) + 1;
+    return accumulator;
+  }, {});
+  return {
+    ok: true,
+    dryRun,
+    checked: resultRows.length,
+    candidates: candidates.length,
+    updated: dryRun ? 0 : candidates.length,
+    counts,
+    rows: resultRows.map(({ stock: _stock, linkedAccount: _account, ...row }) => row),
+  };
+}
+
 export async function clearAccountsInGoogleSheets(db, accounts = []) {
   if (!googleSheetsConfigured(db)) return { ok: false, skipped: true, reason: "google_sheets_not_configured" };
   const data = [];
   let updated = 0;
   const rowsBySheet = new Map();
-  async function formulaIndexesForRow(sheetName, rowNumber) {
-    if (!rowsBySheet.has(sheetName)) {
-      rowsBySheet.set(sheetName, await readSheetValuesByName(db, sheetName).catch(() => []));
-    }
-    return formulaIndexesFromRow((rowsBySheet.get(sheetName) || [])[Number(rowNumber) - 1] || []);
-  }
+  const unresolvedRows = [];
   for (const account of accounts) {
     const stock = findLinkedSheetStock(db.stock, account);
     if (["canva_link", "link_pool"].includes(String(account.accountType || "")) || ["canva_sheet", "link_pool_sheet", "canva_order", "link_pool_order"].includes(String(account.source || ""))) {
@@ -5041,7 +6224,7 @@ export async function clearAccountsInGoogleSheets(db, accounts = []) {
     const pool = stockPool(stock);
     const sheetName = stockSheetName(db, stock);
     if (!rowsBySheet.has(sheetName)) {
-      rowsBySheet.set(sheetName, await readSheetValuesByName(db, sheetName).catch(() => []));
+      rowsBySheet.set(sheetName, await readSheetValuesByName(db, sheetName, { valueRenderOption: "FORMULA" }).catch(() => []));
     }
     const layout = actualSheetLayout(rowsBySheet.get(sheetName) || [], stock, pool);
     if (layout) {
@@ -5053,25 +6236,20 @@ export async function clearAccountsInGoogleSheets(db, accounts = []) {
       updated += 1;
       continue;
     }
-    const headers = poolHeaders(pool);
-    const preserveIndexes = await formulaIndexesForRow(sheetName, stock.sheetRow);
-    const values = poolUsesUniversalAccount(pool)
-      ? [`${stock.email || account.email || ""}\n${stock.password || account.password || ""}`.trim(), "", "", "", "", "", "", stock.notes || "", ""]
-      : poolUsesSplitPassword(pool)
-        ? [stock.email || account.email || "", stock.password || account.password || "", "", "", "", "", "", stock.notes || "", ""]
-        : [`${stock.email || account.email || ""}\n${stock.password || account.password || ""}`.trim(), stock.profile || account.profile || "", "", "", "", "", "", "", stock.pin || account.pin || "", "", stock.notes || "", ""];
-    const rowUpdates = safeCellUpdates(
+    unresolvedRows.push({
       sheetName,
-      Number(stock.sheetRow),
-      Number(stock.sheetStartColumn ?? pool.startColumn),
-      headers,
-      values,
-      { preserveIndexes: [...preserveIndexes] },
-    );
-    rowUpdates.push(...clearLegacyMetadataCells(sheetName, Number(stock.sheetRow), Number(stock.sheetStartColumn ?? pool.startColumn), pool));
-    if (!rowUpdates.length) continue;
-    data.push(...rowUpdates);
-    updated += 1;
+      rowNumber: Number(stock.sheetRow),
+      pool: stock.sheetPool || pool.key || "",
+      stockId: stock.id || "",
+    });
+  }
+  if (unresolvedRows.length) {
+    return {
+      ok: false,
+      reason: "sheet_layout_unresolved",
+      updated: 0,
+      unresolvedRows,
+    };
   }
   if (!data.length) return { ok: true, updated: 0, skipped: true };
   await updateValues(db, data);

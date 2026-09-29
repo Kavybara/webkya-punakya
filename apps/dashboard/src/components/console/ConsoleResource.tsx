@@ -22,6 +22,16 @@ export function ConsoleNotice({ children, tone = "info" }: { children: ReactNode
   return <div className={`console-resource-notice is-${tone}`} role={tone === "danger" ? "alert" : "status"}>{tone === "danger" || tone === "warning" ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}{children}</div>;
 }
 
+export function ConsoleActionToast({ message, onClose }: { message: string; onClose: () => void }) {
+  useEffect(() => {
+    if (!message) return undefined;
+    const timeout = window.setTimeout(onClose, 4500);
+    return () => window.clearTimeout(timeout);
+  }, [message, onClose]);
+  if (!message) return null;
+  return <div className="console-action-toast" role="status" aria-live="polite"><CheckCircle2 size={17} /><span>{message}</span><button type="button" onClick={onClose} aria-label="Tutup notifikasi"><X size={15} /></button></div>;
+}
+
 export function ConsoleField({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
   return <label className="console-resource-field"><span>{label}</span>{children}{hint ? <small>{hint}</small> : null}</label>;
 }

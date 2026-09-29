@@ -445,7 +445,8 @@ export function stockForVariant(db, product, variant, status) {
     if (status && stock.status !== status) return false;
     if (status === "available") {
       const condition = String(stock.accountCondition || "NORMAL").trim().toUpperCase();
-      const conditionBlocked = stock.accountConditionKnown === false
+      const conditionBlocked = stock.warrantyReviewBlocked === true
+        || stock.accountConditionKnown === false
         || stock.accountConditionBlocked === true
         || ["BERMASALAH", "DIPERIKSA", "REPLACED", "DISABLED", "UNKNOWN"].includes(condition);
       if (conditionBlocked) return false;

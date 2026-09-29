@@ -481,6 +481,15 @@ async function saveListEntry(context, command) {
     command === "updatelist"
       ? `${keyword} berhasil di perbarui${mediaResult.saved ? " beserta gambar" : ""}\n\nKetik list untuk melihat daftar list.`
       : WHATSAPP_STRINGS.listSaved.replace("{keyword}", keyword);
+  await context.store.appendListUpdateAudit?.({
+    command,
+    groupJid: context.chat_jid,
+    keyword,
+    sender: context.sender || context.raw_sender_jid || "",
+    senderName: context.pushName || context.push_name || "",
+    text: savedText,
+    media: nextEntry.media || nextEntry.media_path || "",
+  });
   await context.reply(mediaResult.saved ? `${reply}\n\n_Gambar list juga sudah tersimpan._` : reply);
   return { handled: true, plugin: "group-basic", keyword };
 }
@@ -967,8 +976,15 @@ function mediaPathForEntry(entry = {}, config = {}) {
 }
 
 function listEntryMap(entries = {}) {
-  if (entries && typeof entries === "object" && !Array.isArray(entries) && entries.list && typeof entries.list === "object") {
-    const metadataKeys = new Set(["createdAt", "updatedAt", "addedAt", "list", "template", "templatelist", "setlist"]);
+  const legacyListShape =
+    entries &&
+    typeof entries === "object" &&
+    !Array.isArray(entries) &&
+    entries.list &&
+    typeof entries.list === "object" &&
+    !("text" in entries.list || "content" in entries.list || "media" in entries.list || "media_path" in entries.list || "updated_at" in entries.list);
+  if (legacyListShape) {
+    const metadataKeys = new Set(["createdAt", "updatedAt", "addedAt", "template", "templatelist", "setlist"]);
     const topLevelEntries = Object.fromEntries(
       Object.entries(entries).filter(([key, value]) => {
         if (metadataKeys.has(key)) return false;

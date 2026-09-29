@@ -194,25 +194,25 @@ export function ConsoleDataTable<Row>({
           <tbody>
             {loading ? Array.from({ length: 5 }, (_, index) => (
               <tr key={index} className="console-table-skeleton-row">
-                {selectable ? <td><span /></td> : null}
-                {activeColumns.map((column) => <td key={column.id}><span /></td>)}
+                {selectable ? <td data-label="Pilih"><span /></td> : null}
+                {activeColumns.map((column) => <td key={column.id} data-label={column.header}><span /></td>)}
               </tr>
             )) : error ? (
-              <tr><td colSpan={activeColumns.length + (selectable ? 1 : 0)}><div className="console-table-state is-error">{error}</div></td></tr>
+              <tr className="console-table-state-row"><td colSpan={activeColumns.length + (selectable ? 1 : 0)}><div className="console-table-state is-error">{error}</div></td></tr>
             ) : pageRows.length ? pageRows.map((row) => {
               const key = rowKey(row);
               return (
                 <tr key={key} className={selected.has(key) ? "is-selected" : ""}>
-                  {selectable ? <td className="console-checkbox-cell"><input type="checkbox" checked={selected.has(key)} onChange={() => setSelected((current) => {
+                  {selectable ? <td className="console-checkbox-cell" data-label="Pilih"><input type="checkbox" checked={selected.has(key)} onChange={() => setSelected((current) => {
                     const next = new Set(current);
                     next.has(key) ? next.delete(key) : next.add(key);
                     return next;
                   })} aria-label={`Pilih baris ${key}`} /></td> : null}
-                  {activeColumns.map((column) => <td key={column.id} className={column.hideOnMobile ? "console-table-mobile-hide" : ""}>{column.cell ? column.cell(row) : column.value(row)}</td>)}
+                  {activeColumns.map((column) => <td key={column.id} data-label={column.header} className={column.hideOnMobile ? "console-table-mobile-hide" : ""}>{column.cell ? column.cell(row) : column.value(row)}</td>)}
                 </tr>
               );
             }) : (
-              <tr><td colSpan={activeColumns.length + (selectable ? 1 : 0)}><div className="console-table-state">{emptyText}</div></td></tr>
+              <tr className="console-table-state-row"><td colSpan={activeColumns.length + (selectable ? 1 : 0)}><div className="console-table-state">{emptyText}</div></td></tr>
             )}
           </tbody>
         </table>

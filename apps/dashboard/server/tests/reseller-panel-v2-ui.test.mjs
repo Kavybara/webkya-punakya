@@ -48,6 +48,16 @@ test("Reseller V2 uses one shared Top Up dialog without navigating away", async 
   assert.match(navigation, /path: "\/reseller-v2\/ringkasan"/);
 });
 
+test("topbar Top Up action stays compact and never wraps", async () => {
+  const styles = await source("src/components/reseller-v2/reseller-v2.css");
+  const rule = styles.match(/\.reseller-v2-topup\s*\{([\s\S]*?)\}/)?.[1] || "";
+
+  assert.match(rule, /height:\s*40px/);
+  assert.match(rule, /flex:\s*0 0 auto/);
+  assert.match(rule, /white-space:\s*nowrap/);
+  assert.match(rule, /padding:\s*0 14px/);
+});
+
 test("account credentials are masked in a reseller-owned detail drawer", async () => {
   const accountPage = await source("src/pages/reseller-v2/accounts/page.tsx");
 
@@ -75,6 +85,34 @@ test("access provider transition resets lookup state and never auto-falls back",
   assert.match(access, /activeSource === "disney" \? disneyGroups : netflixGroups/);
   assert.doesNotMatch(access, /!hasDisney && hasNetflix/);
   assert.doesNotMatch(access, /!hasNetflix && hasDisney/);
+});
+
+test("verification remains six digits and household exposes links only", async () => {
+  const [access, server] = await Promise.all([
+    source("src/pages/reseller/accounts/page.tsx"),
+    source("server/index.js"),
+  ]);
+
+  assert.match(access, /Ambil 6 digit kode verifikasi/);
+  assert.match(access, /Verification code 6 digit/);
+  assert.match(access, /Belum ada verification code 6 digit/);
+  assert.match(access, /Ambil link household/);
+  assert.match(access, /Belum ada link household/);
+  assert.doesNotMatch(server, /fetchNetflixHouseholdCode/);
+  assert.doesNotMatch(server, /Kode akses household/);
+});
+
+test("account access rows preserve readable dark hover and keyboard focus", async () => {
+  const [access, styles] = await Promise.all([
+    source("src/pages/reseller/accounts/page.tsx"),
+    source("src/components/reseller-v2/reseller-v2.css"),
+  ]);
+
+  assert.match(access, /reseller-v2-access-account-row/);
+  assert.doesNotMatch(access, /items-center gap-3 px-5 py-4 text-left hover:bg-slate-50/);
+  assert.match(styles, /\.reseller-v2-access-account-row:hover/);
+  assert.match(styles, /\.reseller-v2-access-account-row:focus-visible/);
+  assert.match(styles, /background:\s*var\(--reseller-surface-hover\)/);
 });
 
 test("reseller resource pages separate loading error and empty states", async () => {
@@ -105,7 +143,7 @@ test("all reseller account views share one status normalizer", async () => {
 
   assert.match(overview, /summarizeResellerAccounts/);
   assert.match(accounts, /summarizeResellerAccounts/);
-  assert.match(warranty, /accountWarrantyStatus/);
+  assert.match(warranty, /warrantyInfo/);
   assert.match(access, /normalizeResellerAccountStatus/);
   assert.match(utility, /normalizeResellerAccountStatus/);
   assert.match(utility, /Hampir Berakhir/);
@@ -135,6 +173,9 @@ test("warranty display and WhatsApp payload never include credentials", async ()
   assert.match(warranty, /Nomor Pesanan/);
   assert.match(warranty, /Masa Garansi/);
   assert.match(warranty, /Kendala/);
+  assert.match(warranty, /Bukti Kendala/);
+  assert.match(warranty, /Screenshot sudah tersimpan bersama tiket/);
+  assert.doesNotMatch(warranty, /Kirim screenshot/);
 });
 
 test("public catalog and checkout return to the new reseller panel", async () => {

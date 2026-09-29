@@ -1,16 +1,16 @@
-import { useEffect, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useState, type PointerEvent, type ReactNode } from "react";
 import {
   motion,
   MotionConfig,
   useMotionTemplate,
   useMotionValue,
   useReducedMotion,
-  useSpring,
 } from "framer-motion";
 import { Link } from "react-router-dom";
 import { PageTransition } from "../../components/feature/PageTransition";
 import PublicNavbar from "../../components/feature/PublicNavbar";
-import { api } from "../../lib/api";
+import { api, type CatalogProduct } from "../../lib/api";
+import { productBrandAsset, productLogoUrl } from "../../lib/productBrandAssets";
 import ProductCatalog from "./components/ProductCatalog";
 
 const whatsappUrl = "https://wa.me/6287777655549";
@@ -44,81 +44,45 @@ function SectionHeading({ eyebrow, title, description }: { eyebrow: string; titl
   );
 }
 
-function SpectralMark() {
-  const reduceMotion = useReducedMotion();
-  const x = useMotionValue(0);
-  const y = useMotionValue(0);
-  const springX = useSpring(x, { stiffness: 120, damping: 22, mass: 0.7 });
-  const springY = useSpring(y, { stiffness: 120, damping: 22, mass: 0.7 });
-
-  const onMove = (event: MouseEvent<HTMLDivElement>) => {
-    if (reduceMotion || window.matchMedia("(hover: none), (pointer: coarse)").matches) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    x.set(((event.clientX - rect.left) / rect.width - 0.5) * 10);
-    y.set(((event.clientY - rect.top) / rect.height - 0.5) * 10);
-  };
-
+function CatalogPreview({ products, loading }: { products: CatalogProduct[]; loading: boolean }) {
+  const visibleProducts = products
+    .filter((product) => product.isActive !== false)
+    .sort((left, right) => right.stockCount - left.stockCount)
+    .slice(0, 4);
   return (
-    <motion.div
-      className="relative mx-auto h-[210px] w-full max-w-[340px] sm:h-[350px] sm:max-w-[500px] lg:h-[540px] lg:max-w-[620px]"
-      style={{ x: reduceMotion ? 0 : springX, y: reduceMotion ? 0 : springY }}
-      onMouseMove={onMove}
-      onMouseLeave={() => { x.set(0); y.set(0); }}
-      aria-hidden="true"
-    >
-      <motion.div
-        className="absolute -left-[20%] top-[17%] h-[72%] w-[72%] rounded-full"
-        style={{ background: "radial-gradient(circle, color-mix(in srgb, var(--kavya-magenta) 38%, transparent), transparent 70%)" }}
-        initial={reduceMotion ? false : { opacity: 0, scale: 0.88 }}
-        animate={reduceMotion ? undefined : { opacity: [0.34, 0.46, 0.34], scale: [1, 1.035, 1] }}
-        transition={{ opacity: { duration: 0.75, delay: 0.26 }, scale: { duration: 9, repeat: Infinity, ease: "easeInOut" } }}
-      />
-      <motion.div
-        className="absolute left-[5%] -top-[20%] h-[96%] w-[96%] rounded-full"
-        style={{ background: "radial-gradient(circle, color-mix(in srgb, var(--kavya-violet) 36%, transparent), transparent 70%)" }}
-        initial={reduceMotion ? false : { opacity: 0, scale: 0.9 }}
-        animate={reduceMotion ? undefined : { opacity: [0.34, 0.48, 0.34], y: [0, -3, 0] }}
-        transition={{ opacity: { duration: 0.78, delay: 0.3 }, y: { duration: 10, repeat: Infinity, ease: "easeInOut" } }}
-      />
-      <motion.div
-        className="absolute -bottom-[22%] right-[-22%] h-[78%] w-[78%] rounded-full"
-        style={{ background: "radial-gradient(circle, color-mix(in srgb, var(--kavya-cyan) 36%, transparent), transparent 70%)" }}
-        initial={reduceMotion ? false : { opacity: 0, scale: 0.9 }}
-        animate={reduceMotion ? undefined : { opacity: [0.3, 0.42, 0.3], x: [0, 3, 0] }}
-        transition={{ opacity: { duration: 0.8, delay: 0.34 }, x: { duration: 11, repeat: Infinity, ease: "easeInOut" } }}
-      />
-      <motion.div
-        className="absolute bottom-[5%] left-[17%] h-[48%] w-[66%] rounded-full"
-        style={{ background: "radial-gradient(ellipse, color-mix(in srgb, var(--kavya-text-primary) 18%, transparent), transparent 68%)" }}
-        initial={reduceMotion ? false : { opacity: 0 }}
-        animate={reduceMotion ? undefined : { opacity: [0.18, 0.27, 0.18] }}
-        transition={{ opacity: { duration: 8, repeat: Infinity, ease: "easeInOut", delay: 0.36 } }}
-      />
-      <motion.div
-        className="absolute inset-0 flex items-center justify-center"
-        initial={reduceMotion ? false : { opacity: 0, scale: 0.93, filter: "blur(8px)" }}
-        animate={{ opacity: 1, scale: 1, filter: "blur(0px)", y: reduceMotion ? 0 : [0, -4, 0] }}
-        transition={{ opacity: { duration: 0.62, delay: 0.16 }, scale: { duration: 0.62, delay: 0.16, ease: [0.22, 1, 0.36, 1] }, filter: { duration: 0.62, delay: 0.16 }, y: { duration: 8, repeat: Infinity, ease: "easeInOut", delay: 0.8 } }}
-      >
-        <span
-          className="select-none font-serif text-[clamp(11rem,24vw,14rem)] font-medium leading-none sm:text-[17rem] lg:text-[21rem]"
-          style={{
-            color: "var(--kavya-graphite)",
-            WebkitTextStroke: "1px var(--kavya-graphite-edge)",
-            textShadow: "-1px -1px 0 var(--kavya-graphite-edge), 0 24px 70px var(--kavya-bg-deep)",
-          }}
-        >
-          K
-        </span>
-      </motion.div>
-      <div className="absolute bottom-[18%] left-[30%] h-px w-[42%] bg-gradient-to-r from-transparent via-[var(--kavya-graphite-edge)] to-transparent" />
-    </motion.div>
+    <div className="mx-auto w-full max-w-[620px] overflow-hidden rounded-lg border border-[var(--kavya-border)] bg-[var(--kavya-surface)] shadow-2xl shadow-black/30">
+      <div className="flex min-h-12 items-center justify-between border-b border-[var(--kavya-border)] px-4">
+        <div><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--kavya-text-muted)]">Katalog aktif</p><p className="mt-0.5 text-sm font-bold text-[var(--kavya-text-primary)]">Pilihan terlaris hari ini</p></div>
+        <a href="#produk" className="text-xs font-bold text-[var(--kavya-cyan)] hover:text-white">Lihat semua</a>
+      </div>
+      <div className="grid grid-cols-2">
+        {(loading ? Array.from({ length: 4 }) : visibleProducts).map((item, index) => {
+          if (!item) return <div key={index} className="h-[118px] animate-pulse border-b border-r border-[var(--kavya-border)] bg-[var(--kavya-bg-elevated)]" />;
+          const product = item as CatalogProduct;
+          const asset = productBrandAsset(product);
+          const logo = productLogoUrl(product);
+          return (
+            <a key={product.id} href="#produk" className="group flex min-h-[118px] min-w-0 flex-col justify-between border-b border-r border-[var(--kavya-border)] p-4 transition-colors hover:bg-[var(--kavya-surface-hover)]">
+              <span className="flex items-start justify-between gap-3">
+                <span className="grid h-10 w-10 place-items-center rounded-md border border-[var(--kavya-border)] bg-[var(--kavya-bg-elevated)]">
+                  {logo ? <img src={logo} alt="" width="24" height="24" className="h-6 w-6 object-contain" /> : <i className="ri-tv-line text-[var(--kavya-text-secondary)]" />}
+                </span>
+                <span className={`mt-1 h-2 w-2 rounded-full ${product.stockCount > 0 ? "bg-[var(--kavya-cyan)]" : "bg-[var(--kavya-text-muted)]"}`} aria-label={product.stockCount > 0 ? "Stok tersedia" : "Stok habis"} />
+              </span>
+              <span className="min-w-0"><strong className="block truncate text-sm text-[var(--kavya-text-primary)]">{product.name}</strong><small className="mt-1 block truncate text-[11px] text-[var(--kavya-text-muted)]">{product.category || asset.label} / {product.stockCount} stok</small></span>
+            </a>
+          );
+        })}
+      </div>
+      {!loading && !visibleProducts.length ? <p className="p-6 text-center text-sm text-[var(--kavya-text-secondary)]">Katalog sedang diperbarui.</p> : null}
+    </div>
   );
 }
 
 function HeroSection() {
   const reduceMotion = useReducedMotion();
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
+  const [products, setProducts] = useState<CatalogProduct[]>([]);
   const [categoriesLoading, setCategoriesLoading] = useState(true);
 
   useEffect(() => {
@@ -131,6 +95,7 @@ function HeroSection() {
           .map((product) => product.category?.trim())
           .filter((category): category is string => Boolean(category))))
           .slice(0, 6);
+        setProducts(catalog);
         setAvailableCategories(categories);
       })
       .catch(() => {
@@ -147,19 +112,18 @@ function HeroSection() {
   return (
     <section
       id="beranda"
-      className="relative min-h-[94svh] overflow-hidden border-b border-[var(--kavya-border)] bg-[var(--kavya-bg)] pt-16"
-      style={{ backgroundImage: "radial-gradient(circle at 43% 52%, color-mix(in srgb, var(--kavya-violet) 4%, var(--kavya-bg-ambient)) 0%, var(--kavya-bg) 43%, var(--kavya-bg-deep) 100%)" }}
+      className="relative overflow-hidden border-b border-[var(--kavya-border)] bg-[var(--kavya-bg)] pt-16"
     >
       <div className="pointer-events-none absolute inset-0 opacity-[0.022] [background-image:radial-gradient(var(--kavya-grid-dot)_1px,transparent_1px)] [background-size:34px_34px]" aria-hidden="true" />
-      <div className="relative flex min-h-[calc(94svh-4rem)] flex-col">
+      <div className="relative flex min-h-[calc(78svh-4rem)] flex-col">
         <div className="flex w-full flex-1 items-center px-6 py-8 sm:px-10 md:py-10 lg:px-12 xl:px-16">
-          <div className="mx-auto grid w-full max-w-[1360px] items-center gap-8 md:grid-cols-[minmax(0,0.8fr)_minmax(300px,1.2fr)] md:gap-x-8 md:gap-y-7 xl:grid-cols-[30fr_42fr_28fr] xl:gap-6">
+          <div className="mx-auto grid w-full max-w-[1240px] items-center gap-10 md:grid-cols-[minmax(0,.8fr)_minmax(360px,1.2fr)] md:gap-x-12">
             <motion.div initial={reduceMotion ? false : "hidden"} animate="visible" variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.1, delayChildren: 0.06 } } }} className="relative z-10 max-w-[520px]">
-              <motion.h1 variants={revealItem} className="max-w-[520px] text-[clamp(4.5rem,7vw,7.75rem)] font-normal leading-[0.92] tracking-[-0.055em] text-[var(--kavya-text-primary)]">
+              <motion.h1 variants={revealItem} className="max-w-[520px] text-5xl font-semibold leading-[0.98] text-[var(--kavya-text-primary)] sm:text-6xl lg:text-7xl">
                 Kavya
               </motion.h1>
-              <motion.p variants={revealItem} className="mt-6 whitespace-nowrap text-[17px] font-normal leading-[1.5] text-[var(--kavya-text-secondary)] lg:text-lg xl:text-xl">
-                Produk digital, dalam satu alur.
+              <motion.p variants={revealItem} className="mt-6 max-w-[500px] text-[17px] font-normal leading-[1.6] text-[var(--kavya-text-secondary)] lg:text-lg">
+                Produk digital dengan stok, pembayaran, dan pengiriman yang tersusun dalam satu alur.
               </motion.p>
               <motion.div variants={revealItem} className="mt-8 flex flex-col gap-3 min-[430px]:flex-row">
                 <motion.a href="#produk" whileHover={reduceMotion ? undefined : { y: -2 }} whileTap={reduceMotion ? undefined : { y: 1, scale: 0.985 }} className="inline-flex min-h-12 items-center justify-center rounded-full bg-[var(--kavya-text-primary)] px-6 text-[15px] font-extrabold text-[var(--kavya-bg)] transition-colors hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">
@@ -172,20 +136,8 @@ function HeroSection() {
             </motion.div>
 
             <motion.div initial={reduceMotion ? false : { opacity: 0, scale: 0.96, filter: "blur(7px)" }} animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }} transition={{ duration: 0.68, delay: 0.14, ease: [0.22, 1, 0.36, 1] }} className="md:min-w-0">
-              <SpectralMark />
+              <CatalogPreview products={products} loading={categoriesLoading} />
             </motion.div>
-
-            <motion.aside
-              aria-label="Ringkasan Kavya"
-              initial={reduceMotion ? false : { opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.48, delay: 0.42, ease: [0.22, 1, 0.36, 1] }}
-              className="hidden gap-4 border-t border-[var(--kavya-border)] pt-5 text-[13px] font-semibold uppercase leading-6 tracking-[0.14em] text-[var(--kavya-microcopy)] sm:grid sm:grid-cols-3 md:col-span-2 xl:col-span-1 xl:-ml-2 xl:grid-cols-1 xl:border-l xl:border-t-0 xl:pl-6 xl:pt-0"
-            >
-              <p>Produk digital</p>
-              <p>Pemesanan terpusat</p>
-              <p>Akses mudah</p>
-            </motion.aside>
           </div>
         </div>
 

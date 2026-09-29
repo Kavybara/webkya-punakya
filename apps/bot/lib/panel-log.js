@@ -3,6 +3,7 @@ import os from "node:os";
 const CHECK = "[√]";
 const CROSS = "[×]";
 const WARN = "⚠️";
+const WAIT = "[~]";
 const CYAN = "\x1b[36m";
 const GREEN = "\x1b[32m";
 const YELLOW = "\x1b[33m";
@@ -109,14 +110,6 @@ function publicIpLabel() {
 }
 
 export function logRuntimeBanner({ version = "Kavya Auto Order", apiKeyStatus = "NONAKTIF" } = {}) {
-  const title = [
-    " _  __    _    __     ____   __    ",
-    "| |/ /   / \\   \\ \\   / /\\ \\ / /    ",
-    "| ' /   / _ \\   \\ \\ / /  \\ V /     ",
-    "| . \\  / ___ \\   \\ V /    | |      ",
-    "|_|\\_\\/_/   \\_\\   \\_/     |_|      ",
-  ].join("\n");
-
   const specRows = [
     ["◧ Hostname", os.hostname()],
     ["◧ Platform", os.platform()],
@@ -130,7 +123,7 @@ export function logRuntimeBanner({ version = "Kavya Auto Order", apiKeyStatus = 
 
   console.log("");
   console.log(color(horizontalLine(), CYAN));
-  console.log(color(title, CYAN));
+  console.log(color("KAVYA AUTO ORDER", `${CYAN}${BOLD}`));
   console.log(color(horizontalLine(), CYAN));
   console.log("");
   console.log(color("◧ Info Script :", `${YELLOW}${BOLD}`));
@@ -156,7 +149,7 @@ export function logCommand(name, text) {
 }
 
 export function logStartup(message) {
-  console.log(`${color(CHECK, GREEN)} ${maybeDots(message)}`);
+  console.log(`${color(WAIT, YELLOW)} ${maybeDots(message)}`);
 }
 
 export function logHandler(message) {

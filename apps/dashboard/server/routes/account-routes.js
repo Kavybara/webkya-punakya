@@ -9,12 +9,14 @@ export function registerAccountRoutes(app, deps) {
     buildManagedAccountInput,
     canonicalResellerDisplayName,
     clearAccountsInGoogleSheets,
+    createDeliveryTemplateSnapshot,
     findAccountForLookup,
     findDisneyAccountForLookup,
     gmailConnectionInfo,
     historicalAccountForLookup,
     historicalDisneyAccountForLookup,
     inactiveLookupResult,
+    isDisneyManagedAccount,
     isGmailOAuthInvalidError,
     isNetflixManagedAccount,
     isTerminalManagedAccountStatus,
@@ -26,6 +28,7 @@ export function registerAccountRoutes(app, deps) {
     orderForManagedAccount,
     primaryResellerWhatsapp,
     readDbSnapshot,
+    refreshResellerViewFromGoogleSheets,
     requireAuth,
     resellerAccessTools,
     resellerById,
@@ -36,6 +39,115 @@ export function registerAccountRoutes(app, deps) {
     updateDb,
     visibleManagedAccountsForAuth,
   } = deps;
+
+  const allowedLookupTypes = new Set(["signin", "verification", "reset", "household", "disney_otp"]);
+
+  function findDeliveryTemplateProductVariant(db, account = {}, order = {}) {
+    const productId = String(account.productId || order.productId || "").trim();
+    const variantId = String(account.variantId || order.variantId || "").trim();
+    const productName = String(account.product || order.product || "").trim().toLowerCase();
+    const variantName = String(account.variant || order.variant || "").trim().toLowerCase();
+    const variantCode = String(account.variantCode || order.variantCode || "").trim().toLowerCase();
+    const products = Array.isArray(db.products) ? db.products : [];
+    const product = products.find((item) => String(item.id || "") === productId)
+      || products.find((item) => String(item.name || "").trim().toLowerCase() === productName);
+    if (!product) return { product: null, variant: null };
+    const variants = Array.isArray(product.variants) ? product.variants : [];
+    const variant = variants.find((item) => String(item.id || "") === variantId)
+      || variants.find((item) => String(item.code || item.sku || "").trim().toLowerCase() === variantCode)
+      || variants.find((item) => String(item.name || "").trim().toLowerCase() === variantName);
+    return { product, variant: variant || null };
+  }
+
+  function snapshotNeedsLiveRender(snapshot) {
+    return !snapshot || ["not_configured", "incomplete", "invalid"].includes(String(snapshot.status || "").toLowerCase());
+  }
+
+  function accountCredentialAccessStatus(account = {}) {
+    const computedStatus = accountStatusFromDate(account.expiresAt, account.durationDays);
+    const rawStatus = String(account.status || computedStatus || "").toLowerCase();
+    const denied = computedStatus === "expired" || isTerminalManagedAccountStatus(rawStatus);
+    return {
+      allowed: !denied,
+      status: denied
+        ? (["replaced", "disabled"].includes(rawStatus) ? rawStatus : "expired")
+        : (rawStatus || computedStatus || "active"),
+    };
+  }
+
+  function redactExpiredAccountSecrets(account = {}) {
+    const access = accountCredentialAccessStatus(account);
+    if (access.allowed) return account;
+    return {
+      ...account,
+      status: access.status,
+      email: "",
+      loginPhone: "",
+      password: "",
+      canvaLink: "",
+      profile: "",
+      pin: "",
+      signInCode: "",
+      verificationCode: "",
+      resetLink: "",
+      householdLink: "",
+      deliveryTemplateSnapshot: null,
+      deliveryTemplateUnreadAt: "",
+      deliveryTemplateOpenedAt: "",
+    };
+  }
+
+  function buildLiveDeliverySnapshot(db, account = {}) {
+    const order = orderForManagedAccount(db, account) || {};
+    const { product, variant } = findDeliveryTemplateProductVariant(db, account, order);
+    if (!product || !variant) return account.deliveryTemplateSnapshot || null;
+    const snapshot = createDeliveryTemplateSnapshot({
+      order: {
+        ...order,
+        product: order.product || account.product || product.name || "",
+        productId: order.productId || account.productId || product.id || "",
+        variant: order.variant || account.variant || variant.name || "",
+        variantId: order.variantId || account.variantId || variant.id || "",
+        variantCode: order.variantCode || account.variantCode || variant.code || variant.sku || "",
+        duration: order.duration || account.duration || "",
+        durationDays: order.durationDays || account.durationDays || 0,
+        expiresAt: order.expiresAt || account.expiresAt || "",
+      },
+      product,
+      variant,
+      account,
+      renderedAt: nowText(),
+    });
+    return snapshot;
+  }
+
+  function gmailInfoForLookupResult(db, result = {}) {
+    const info = gmailConnectionInfo(db);
+    if (result?.reason !== "gmail_error") return info;
+    return {
+      ...info,
+      connected: false,
+      needsOAuth: info.mode === "oauth" && isGmailOAuthInvalidError(result?.error),
+      error: String(result?.error || "Koneksi Gmail tidak dapat digunakan."),
+    };
+  }
+
+  function inactiveAccessResponse(account, type) {
+    const result = {
+      source: "fallback",
+      kind: ["reset", "household"].includes(type) ? "link" : "code",
+      value: "",
+      reason: account.status === "replaced" ? "account_replaced" : account.status === "disabled" ? "account_disabled" : "account_expired",
+      error: account.status === "replaced" ? "Akun sudah diganti, lookup kode tidak aktif." : account.status === "disabled" ? "Akun sudah nonaktif, lookup kode tidak aktif." : "Akun sudah kedaluwarsa, lookup kode tidak aktif.",
+    };
+    return {
+      result,
+      account: safeAccountForAccess({
+        ...account,
+        status: ["replaced", "disabled"].includes(account.status) ? account.status : "expired",
+      }),
+    };
+  }
 
   app.get("/api/accounts/unread-delivery-count", requireAuth(["reseller"]), async (req, res) => {
     const db = await readDbSnapshot();
@@ -50,10 +162,28 @@ export function registerAccountRoutes(app, deps) {
   });
 
   app.get("/api/accounts/:id/delivery", requireAuth(["owner", "reseller"]), async (req, res) => {
-    const db = await readDbSnapshot();
-    const account = visibleManagedAccountsForAuth(db, req.auth).find((item) => item.id === req.params.id);
-    const snapshot = account?.deliveryTemplateSnapshot || null;
-    const result = account ? {
+    const deliveryRecord = await updateDb((db) => {
+      const account = visibleManagedAccountsForAuth(db, req.auth).find((item) => item.id === req.params.id);
+      if (!account) return null;
+      const access = accountCredentialAccessStatus(account);
+      let snapshot = access.allowed ? account.deliveryTemplateSnapshot || null : null;
+      if (access.allowed && snapshotNeedsLiveRender(snapshot)) {
+        const liveSnapshot = buildLiveDeliverySnapshot(db, account);
+        if (liveSnapshot?.status === "ready") {
+          account.deliveryTemplateSnapshot = liveSnapshot;
+          account.deliveryTemplateUnreadAt = account.deliveryTemplateUnreadAt || nowText();
+          account.deliveryTemplateOpenedAt = "";
+          snapshot = liveSnapshot;
+        }
+      }
+      return {
+        account: access.allowed ? account : redactExpiredAccountSecrets(account),
+        snapshot,
+      };
+    });
+    const account = deliveryRecord?.account || null;
+    const snapshot = deliveryRecord?.snapshot || null;
+    const payload = account ? {
       account: {
         id: account.id,
         orderId: account.orderId || account.sourceOrderId || "",
@@ -72,8 +202,8 @@ export function registerAccountRoutes(app, deps) {
       },
       deliveryTemplateSnapshot: snapshot,
     } : null;
-    if (!result) return res.status(404).json({ error: "Akun tidak ditemukan" });
-    res.json(result);
+    if (!payload) return res.status(404).json({ error: "Akun tidak ditemukan" });
+    res.json(payload);
   });
 
   app.post("/api/accounts/:id/delivery/opened", requireAuth(["reseller"]), async (req, res) => {
@@ -148,7 +278,8 @@ export function registerAccountRoutes(app, deps) {
 
   app.get("/api/accounts", requireAuth(["owner", "reseller"]), async (req, res) => {
     const db = await readDbSnapshot();
-    res.json(visibleManagedAccountsForAuth(db, req.auth));
+    const accounts = visibleManagedAccountsForAuth(db, req.auth);
+    res.json(req.auth?.role === "reseller" ? accounts.map(redactExpiredAccountSecrets) : accounts);
   });
 
   app.post("/api/accounts", requireAuth(["owner"]), async (req, res) => {
@@ -318,6 +449,102 @@ export function registerAccountRoutes(app, deps) {
     res.json(updated);
   });
 
+  app.get("/api/owner/account-access/accounts", requireAuth(["owner"]), async (req, res) => {
+    const provider = String(req.query?.provider || "netflix").trim().toLowerCase();
+    if (!["netflix", "disney"].includes(provider)) {
+      res.status(400).json({ error: "Provider lookup tidak valid" });
+      return;
+    }
+    const db = await readDbSnapshot();
+    const matchesProvider = provider === "disney" ? isDisneyManagedAccount : isNetflixManagedAccount;
+    const rows = visibleManagedAccountsForAuth(db, req.auth)
+      .filter(matchesProvider)
+      .map(safeAccountForAccess)
+      .sort((left, right) => String(left.email || left.loginPhone || "").localeCompare(String(right.email || right.loginPhone || ""), "id"));
+    res.json(rows);
+  });
+
+  app.post("/api/owner/account-access/lookup", requireAuth(["owner"]), async (req, res, next) => {
+    try {
+      const type = String(req.body.type || "signin").trim();
+      const target = String(req.body.target || req.body.email || "").trim();
+      const email = String(req.body.email || req.body.target || "").trim().toLowerCase();
+      if (!target) {
+        res.status(400).json({ error: type === "disney_otp" ? "Nomor login Disney wajib diisi" : "Email akun wajib diisi" });
+        return;
+      }
+      if (!allowedLookupTypes.has(type)) {
+        res.status(400).json({ error: "Tipe lookup tidak valid" });
+        return;
+      }
+
+      const lookupResponse = await updateDb(async (db) => {
+        await refreshResellerViewFromGoogleSheets(db, req.auth, "owner_lookup_refresh", {
+          requiredSections: type === "disney_otp" ? ["dynamic", "resellers"] : ["netflix", "resellers"],
+          throwOnFailure: true,
+          allowOwner: true,
+        });
+        const account = type === "disney_otp"
+          ? findDisneyAccountForLookup(db, req.auth, target)
+          : findAccountForLookup(db, req.auth, email);
+        if (!account) {
+          appendAccessLookupActivity(db, req.auth, {
+            email: target,
+            type,
+            result: { source: "fallback", reason: "account_not_found", value: "" },
+            status: "account_not_found",
+          });
+          return { statusCode: 404, body: { error: type === "disney_otp" ? "Nomor Disney tidak ditemukan" : "Email akun tidak ditemukan" } };
+        }
+
+        const currentStatus = accountStatusFromDate(account.expiresAt, account.durationDays);
+        if (currentStatus === "expired" || isTerminalManagedAccountStatus(account.status)) {
+          const inactive = inactiveAccessResponse(account, type);
+          appendAccessLookupActivity(db, req.auth, { account, email: target, type, result: inactive.result, status: inactive.result.reason });
+          return {
+            statusCode: 200,
+            body: {
+              ok: true,
+              type,
+              account: inactive.account,
+              result: inactive.result,
+              refreshedAt: nowText(),
+              expiresInSeconds: null,
+              gmail: gmailConnectionInfo(db),
+            },
+          };
+        }
+
+        const result = await lookupAccountAccessValue(db, account, type);
+        const gmail = gmailInfoForLookupResult(db, result);
+        appendAccessLookupActivity(db, req.auth, {
+          account,
+          email: target,
+          type,
+          result,
+          status: result?.value ? "success" : result?.reason || result?.error || "not_found",
+        });
+        return {
+          statusCode: 200,
+          body: {
+            ok: true,
+            type,
+            account: safeAccountForAccess(account),
+            result,
+            refreshedAt: nowText(),
+            expiresInSeconds: ["reset", "household"].includes(type) ? null : 15 * 60,
+            gmail,
+          },
+        };
+      });
+      res.status(lookupResponse.statusCode || 200).json(lookupResponse.body || lookupResponse);
+    } catch (error) {
+      const safeError = new Error("Akses akun sedang tidak dapat diperbarui. Coba lagi.");
+      safeError.status = Number(error?.status || 503);
+      next(safeError);
+    }
+  });
+
   app.post("/api/account-access/lookup", requireAuth(["reseller"]), async (req, res, next) => {
     try {
       const type = String(req.body.type || "signin").trim();
@@ -328,13 +555,16 @@ export function registerAccountRoutes(app, deps) {
         res.status(400).json({ error: type === "disney_otp" ? "Nomor login Disney wajib diisi" : "Email akun wajib diisi" });
         return;
       }
-      if (!["signin", "verification", "reset", "household", "disney_otp"].includes(type)) {
+      if (!allowedLookupTypes.has(type)) {
         res.status(400).json({ error: "Tipe lookup tidak valid" });
         return;
       }
 
       const lookupResponse = await updateDb(async (db) => {
-        await refreshResellerViewFromGoogleSheets(db, req.auth, "reseller_lookup_refresh");
+        await refreshResellerViewFromGoogleSheets(db, req.auth, "reseller_lookup_refresh", {
+          requiredSections: type === "disney_otp" ? ["dynamic", "resellers"] : ["netflix", "resellers"],
+          throwOnFailure: true,
+        });
         const reseller = authReseller(db, req.auth);
         if (!reseller || reseller.isActive === false) {
           return { statusCode: 404, body: { error: "Reseller tidak ditemukan atau nonaktif" } };
@@ -418,7 +648,7 @@ export function registerAccountRoutes(app, deps) {
         }
 
         const result = await lookupAccountAccessValue(db, account, type);
-        const gmailInfo = result?.reason === "gmail_error" && isGmailOAuthInvalidError(result?.error) ? { ...gmailConnectionInfo(db), connected: false, needsOAuth: true, error: result.error } : gmailConnectionInfo(db);
+        const gmailInfo = gmailInfoForLookupResult(db, result);
         if (!silent) {
           appendAccessLookupActivity(db, req.auth, { account, email: target, type, result, status: result?.value ? "success" : result?.reason || result?.error || "not_found" });
         }
@@ -437,7 +667,9 @@ export function registerAccountRoutes(app, deps) {
       });
       res.status(lookupResponse.statusCode || 200).json(lookupResponse.body || lookupResponse);
     } catch (error) {
-      next(error);
+      const safeError = new Error("Akses akun sedang tidak dapat diperbarui. Coba lagi.");
+      safeError.status = 503;
+      next(safeError);
     }
   });
 

@@ -138,10 +138,12 @@ export const config = {
     scheduled: bool(process.env.AUTO_BACKUP_SCHEDULE_ENABLED, true),
     intervalMs: Math.max(
       0,
-      number(process.env.AUTO_BACKUP_INTERVAL_MS, hoursToMs(process.env.AUTO_BACKUP_INTERVAL_HOURS, 6)),
+      number(process.env.AUTO_BACKUP_INTERVAL_MS, hoursToMs(process.env.AUTO_BACKUP_INTERVAL_HOURS, 24)),
     ),
     onReconnect: bool(process.env.AUTO_BACKUP_ON_RECONNECT, false),
     minIntervalMs: Math.max(0, number(process.env.AUTO_BACKUP_MIN_INTERVAL_MS, 30 * 60 * 1000)),
+    keep: Math.max(1, number(process.env.RUNTIME_BACKUP_KEEP, 30)),
+    deleteAfterSend: bool(process.env.AUTO_BACKUP_DELETE_AFTER_SEND, false),
     ownerNumber: normalizeWhatsAppNumber(process.env.BACKUP_OWNER_NUMBER || process.env.OWNER_WHATSAPP_NUMBER || dashboardSettings.ownerWhatsAppNumber),
   },
 };

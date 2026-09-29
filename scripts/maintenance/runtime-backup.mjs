@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import crypto from "node:crypto";
 import path from "node:path";
 import { createRuntimeBackupPayload, writeRuntimeBackupFile } from "../../packages/shared/runtime-backup.mjs";
+import { selectRuntimeBackupPostSendRemovals } from "../../packages/shared/runtime-backup-retention.mjs";
 
 const rootDir = process.cwd();
 const sendWhatsApp = process.argv.includes("--send-whatsapp");
@@ -57,6 +58,52 @@ function usableSecret(...values) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function enabled(value, fallback = false) {
+  if (value === undefined || value === null || value === "") return fallback;
+  return /^(1|true|yes|on)$/i.test(String(value).trim());
+}
+
+function isInsideOrEqual(childPath, parentPath) {
+  const child = path.resolve(childPath);
+  const parent = path.resolve(parentPath);
+  const relative = path.relative(parent, child);
+  return relative === "" || (relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+async function listBackupEntries(dirPath) {
+  const dir = path.resolve(dirPath);
+  const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+  const output = [];
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const target = path.resolve(dir, entry.name);
+    if (!isInsideOrEqual(target, dir) || target === dir) continue;
+    const info = await fs.stat(target).catch(() => null);
+    if (info) output.push({ target, name: entry.name, mtimeMs: info.mtimeMs });
+  }
+  return output;
+}
+
+async function cleanupBackupsAfterSendAttempt({ backup, transportBackup, whatsapp }) {
+  const createdNames = [backup?.filePath, transportBackup?.filePath]
+    .filter(Boolean)
+    .map((filePath) => path.basename(filePath));
+  const removals = selectRuntimeBackupPostSendRemovals(await listBackupEntries(outputDir), {
+    sent: Boolean(whatsapp?.sent),
+    deleteAfterSend: enabled(process.env.AUTO_BACKUP_DELETE_AFTER_SEND, false),
+    createdNames,
+    keep: Math.max(1, Number(process.env.RUNTIME_BACKUP_KEEP || 30)),
+    maxAgeMs: Number(process.env.RUNTIME_BACKUP_MAX_AGE_MS || 7 * 24 * 60 * 60 * 1000),
+  });
+  let removed = 0;
+  for (const entry of removals) {
+    if (!entry?.target || !isInsideOrEqual(entry.target, outputDir)) continue;
+    await fs.rm(entry.target, { force: true }).catch(() => {});
+    removed += 1;
+  }
+  return removed;
 }
 
 async function waitForWhatsAppBot({ botUrl, token }) {
@@ -154,8 +201,9 @@ async function main() {
     whatsapp = await sendBackupToOwner({ backup: transportBackup, dashboardDb: payload.dashboard })
       .catch((error) => ({ sent: false, reason: error.message || "send_failed" }));
   }
+  const removedBackupFiles = await cleanupBackupsAfterSendAttempt({ backup, transportBackup, whatsapp });
 
-  const result = { success: true, ...backup, encryptedFilePath: transportBackup?.filePath || "", whatsapp };
+  const result = { success: true, ...backup, encryptedFilePath: transportBackup?.filePath || "", whatsapp, removedBackupFiles };
   if (jsonOutput) {
     console.log(JSON.stringify(result, null, 2));
     return;
@@ -167,6 +215,9 @@ async function main() {
         ? "[√] File Backup terkirim ke owner"
         : `⚠️ File Backup belum terkirim: ${whatsapp.reason || "send_failed"}`,
     );
+    if (whatsapp.sent && removedBackupFiles) {
+      console.log("[√] File Backup lokal dihapus setelah terkirim ke owner");
+    }
   }
 }
 

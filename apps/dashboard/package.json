@@ -11,6 +11,8 @@
     "sheets:backfill": "node server/scripts/backfill-google-sheets.js",
     "sheets:audit": "node server/scripts/audit-sheet-order-rows.js",
     "sheets:history:backfill": "node server/scripts/backfill-order-history.js",
+    "sheets:stock-id:backfill": "node server/scripts/stock-id-backfill.js",
+    "sheets:manual-order-id:backfill": "node server/scripts/manual-order-id-backfill.js",
     "reseller-account:check": "node server/scripts/reseller-account-visibility-check.js",
     "whatsapp:check": "node server/scripts/whatsapp-check.js",
     "web-order:check": "node server/scripts/web-order-check.js",

@@ -9,6 +9,9 @@ export const DELIVERY_TEMPLATE_FIELDS = Object.freeze([
   "profile",
   "pin",
   "duration",
+  "duration_days",
+  "is_daily",
+  "is_monthly",
   "start_date",
   "rental_end",
   "expiry_date",
@@ -23,6 +26,10 @@ const FIELD_SET = new Set(DELIVERY_TEMPLATE_FIELDS);
 const TOKEN_PATTERN = /\{\{\s*(#if\s+)?(\/if|[\w.-]+)\s*\}\}/g;
 const CONDITIONAL_PATTERN = /\{\{\s*#if\s+([\w.-]+)\s*\}\}([\s\S]*?)\{\{\s*\/if\s*\}\}/g;
 const EMPTY_OPTIONAL_LINE = "\uE000";
+
+function normalizeTemplateTokens(source = "") {
+  return String(source || "").replace(/\{\{[\s\S]*?\}\}/g, (token) => token.replace(/\\_/g, "_"));
+}
 
 function scalar(value) {
   if (value === null || value === undefined) return "";
@@ -57,8 +64,39 @@ function templateMentionsField(source, field) {
   return new RegExp(`\\{\\{\\s*(?:#if\\s+)?${escaped}\\s*\\}\\}`).test(source);
 }
 
-export function validateDeliveryTemplate(source = "", requiredFields = []) {
+function selectDurationSpecificPlainSection(source = "", context = {}) {
   const template = String(source || "");
+  if (/\{\{\s*#if\s+is_(daily|monthly)\s*\}\}/i.test(template)) return template;
+
+  const wantDaily = hasValue(context.is_daily);
+  const wantMonthly = hasValue(context.is_monthly);
+  if (!wantDaily && !wantMonthly) return template;
+
+  const lines = template.split(/\r?\n/);
+  const headers = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const trimmed = lines[index].trim();
+    if (!trimmed || /^[\-*•○യ➝]/.test(trimmed)) continue;
+    const match = trimmed.match(/\b\d+\s*(hari|day|bulan|month|bln)\b/i);
+    if (!match) continue;
+    headers.push({
+      index,
+      kind: /hari|day/i.test(match[1]) ? "daily" : "monthly",
+    });
+  }
+  const hasDaily = headers.some((header) => header.kind === "daily");
+  const hasMonthly = headers.some((header) => header.kind === "monthly");
+  if (!hasDaily || !hasMonthly) return template;
+
+  const wantedKind = wantDaily ? "daily" : "monthly";
+  const selected = headers.find((header) => header.kind === wantedKind);
+  if (!selected) return template;
+  const next = headers.find((header) => header.index > selected.index);
+  return lines.slice(selected.index, next?.index ?? lines.length).join("\n").trim();
+}
+
+export function validateDeliveryTemplate(source = "", requiredFields = []) {
+  const template = normalizeTemplateTokens(source);
   const errors = [];
   const warnings = [];
   const stack = [];
@@ -117,12 +155,13 @@ export function validateDeliveryTemplate(source = "", requiredFields = []) {
 
 export function renderDeliveryTemplate(source = "", context = {}, options = {}) {
   const requiredFields = normalizeRequiredFields(options.requiredFields);
-  const validation = validateDeliveryTemplate(source, requiredFields);
+  const effectiveSource = selectDurationSpecificPlainSection(normalizeTemplateTokens(source), context);
+  const validation = validateDeliveryTemplate(effectiveSource, requiredFields);
   const missingFields = requiredFields.filter((requirement) => (
     !fieldsForRequirement(requirement).some((field) => hasValue(context[field]))
   ));
 
-  let text = String(source || "");
+  let text = String(effectiveSource || "");
   for (let pass = 0; pass < 20 && CONDITIONAL_PATTERN.test(text); pass += 1) {
     CONDITIONAL_PATTERN.lastIndex = 0;
     text = text.replace(CONDITIONAL_PATTERN, (_, field, body) => (
@@ -195,6 +234,23 @@ export function resolveDeliveryTemplateConfig(product = {}, variant = {}) {
       sku,
     };
   }
+  const siblingVariant = (Array.isArray(product.variants) ? product.variants : [])
+    .find((item) => String(item.id || "") !== variantId && String(item.deliveryTemplate || "").trim());
+  if (siblingVariant) {
+    return {
+      configured: true,
+      scope: "sibling_variant",
+      source: String(siblingVariant.deliveryTemplate || ""),
+      version: Math.max(1, Number(siblingVariant.deliveryTemplateVersion || 1)),
+      requiredFields: normalizeRequiredFields(siblingVariant.requiredDeliveryFields),
+      updatedAt: String(siblingVariant.deliveryTemplateUpdatedAt || siblingVariant.updatedAt || ""),
+      updatedBy: String(siblingVariant.deliveryTemplateUpdatedBy || siblingVariant.updatedBy || ""),
+      variantId,
+      sku,
+      sourceVariantId: String(siblingVariant.id || ""),
+      sourceSku: String(siblingVariant.sku || siblingVariant.code || ""),
+    };
+  }
   return {
     configured: false,
     scope: "none",
@@ -211,6 +267,15 @@ export function resolveDeliveryTemplateConfig(product = {}, variant = {}) {
 export function buildDeliveryTemplateContext({ order = {}, product = {}, variant = {}, account = {} } = {}) {
   const expiry = account.expiresAt || order.expiresAt || "";
   const loginIdentifier = account.loginPhone || account.email || account.username || "";
+  const duration = order.duration || account.duration || "";
+  const durationDays = Math.max(0, Number(order.durationDays || account.durationDays || 0));
+  const normalizedDuration = String(duration).toLowerCase();
+  const isDaily = durationDays > 0
+    ? durationDays < 30
+    : /\bhari\b|\bday\b/.test(normalizedDuration);
+  const isMonthly = durationDays > 0
+    ? durationDays >= 30
+    : /\bbulan\b|\bmonth\b|\bbln\b/.test(normalizedDuration);
   return {
     product_name: product.name || order.product || "",
     variant_name: order.customerVariant || order.variant || variant.name || "",
@@ -221,7 +286,10 @@ export function buildDeliveryTemplateContext({ order = {}, product = {}, variant
     password: account.password || account.canvaLink || account.link || "",
     profile: account.profile || "",
     pin: account.pin || "",
-    duration: order.duration || account.duration || "",
+    duration,
+    duration_days: durationDays || "",
+    is_daily: isDaily ? "1" : "",
+    is_monthly: isMonthly ? "1" : "",
     start_date: account.startedAt || order.paidAt || order.createdAt || "",
     rental_end: expiry,
     expiry_date: expiry,

@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { selectRuntimeBackupRemovals } from "../../packages/shared/runtime-backup-retention.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const runtimeDir = path.resolve(process.env.RUNTIME_DIR || path.join(root, "apps/dashboard", "runtime"));
@@ -55,17 +56,15 @@ async function cleanOldTmp() {
 }
 
 async function cleanOldBackups() {
-  const entries = (await listEntries(backupDir))
-    .filter((entry) => /^(kavya|vya)-runtime-backup-.*\.json$/i.test(entry.name))
-    .sort((a, b) => b.mtimeMs - a.mtimeMs);
-  const cutoff = Date.now() - backupMaxAgeMs;
+  const entries = selectRuntimeBackupRemovals(await listEntries(backupDir), {
+    keep: backupKeep,
+    maxAgeMs: backupMaxAgeMs,
+  });
   let removed = 0;
 
-  for (const [index, entry] of entries.entries()) {
-    if (index >= backupKeep || entry.mtimeMs <= cutoff) {
-      await rm(entry.target, { recursive: true, force: true });
-      removed += 1;
-    }
+  for (const entry of entries) {
+    await rm(entry.target, { recursive: true, force: true });
+    removed += 1;
   }
 
   return removed;

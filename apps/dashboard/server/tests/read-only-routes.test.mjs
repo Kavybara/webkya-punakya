@@ -144,6 +144,8 @@ test("managed account reads do not refresh Sheets or backfill records", async ()
     requireAuth,
     readDbSnapshot: async () => clone(original),
     visibleManagedAccountsForAuth: (db) => db.managedAccounts,
+    accountStatusFromDate: () => "active",
+    isTerminalManagedAccountStatus: () => false,
     stockForManagedAccount: () => null,
     orderForManagedAccount: () => null,
     buildAccountAuditTrail: () => [],

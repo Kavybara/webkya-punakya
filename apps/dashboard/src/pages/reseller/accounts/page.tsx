@@ -25,7 +25,7 @@ const netflixTools: Array<{ id: AccessTool; label: string; icon: string; hint: s
   { id: "signin", label: "Sign-in Code", icon: "ri-key-2-line", hint: "Ambil 4 digit kode login terbaru" },
   { id: "verification", label: "Verification Code", icon: "ri-shield-keyhole-line", hint: "Ambil 6 digit kode verifikasi" },
   { id: "reset", label: "Reset Password", icon: "ri-lock-password-line", hint: "Ambil link reset password" },
-  { id: "household", label: "Household", icon: "ri-home-wifi-line", hint: "Ambil kode/link household" },
+  { id: "household", label: "Household", icon: "ri-home-wifi-line", hint: "Ambil link household" },
 ];
 
 const disneyTools: Array<{ id: AccessTool; label: string; icon: string; hint: string }> = [
@@ -40,7 +40,7 @@ function valueLabel(type: AccessTool) {
   if (type === "signin") return "Sign-in code 4 digit";
   if (type === "verification") return "Verification code 6 digit";
   if (type === "reset") return "Link reset password";
-  if (type === "household") return "Kode/link household";
+  if (type === "household") return "Link household";
   return "Disney OTP 4 digit";
 }
 
@@ -48,7 +48,7 @@ function emptyText(type: AccessTool) {
   if (type === "signin") return "Belum ada sign-in code 4 digit untuk email ini.";
   if (type === "verification") return "Belum ada verification code 6 digit untuk email ini.";
   if (type === "reset") return "Belum ada link reset password untuk email ini.";
-  if (type === "household") return "Belum ada kode/link household untuk email ini.";
+  if (type === "household") return "Belum ada link household untuk email ini.";
   return "Belum ada Disney OTP 4 digit untuk nomor ini.";
 }
 
@@ -94,7 +94,7 @@ function isUrl(value = "") {
 }
 
 function sourceText(result: AccountAccessLookupResult) {
-  if (result.result.source === "gmail") return result.gmail.mode === "imap" || result.result.mode === "imap" ? "Diambil dari label Gmail owner via IMAP" : "Diambil dari label Gmail owner";
+  if (result.result.source === "gmail") return result.gmail.mode === "imap" || result.result.mode === "imap" ? "Diambil dari Gmail owner via IMAP" : "Diambil dari Gmail owner";
   if (result.result.source === "managed_account") return "Data lama akun tidak dipakai untuk lookup otomatis";
   if (result.result.source === "mapping") return "Diambil dari mapping backend";
   if (result.result.source === "history") return "Akun ditemukan di riwayat reseller, tetapi statusnya sudah nonaktif";
@@ -456,7 +456,7 @@ export default function ResellerAccountsPage() {
     const detail = lookupResult.result.error || (lookupResult.result.reason === "not_found"
       ? lookupResult.type === "disney_otp"
         ? "Nomor ditemukan, tapi Disney OTP terbaru belum ada di label Gmail owner."
-        : "Email ditemukan, tapi pesan/kode terbaru belum ada di label Gmail yang dipilih."
+        : "Email ditemukan, tetapi pesan/kode terbaru belum masuk ke Gmail owner. Coba lagi setelah email diterima."
       : source);
 
     return (
@@ -659,7 +659,7 @@ export default function ResellerAccountsPage() {
                     setLookupError(inactiveLookupMessage(group.primary));
                   }
                 }}
-                className={`flex w-full items-center gap-3 px-5 py-4 text-left hover:bg-slate-50 ${isExpiredAccount(group.primary) ? "opacity-75" : ""}`}
+                className={`reseller-v2-access-account-row flex w-full items-center gap-3 px-5 py-4 text-left ${isExpiredAccount(group.primary) ? "opacity-75" : ""}`}
               >
                 <span className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-50 text-slate-400">
                   <i className={activeSource === "disney" ? "ri-smartphone-line text-sm" : "ri-mail-line text-sm"} />

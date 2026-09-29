@@ -840,6 +840,7 @@ export const defaultData = {
   orders: [],
   resellers: [],
   managedAccounts: [],
+  warrantyClaims: [],
   whatsappRentals: [],
   whatsappGroupLists: [],
   whatsappMessages: [],

@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Bell,
+  CalendarClock,
   ChevronRight,
+  CircleAlert,
   LogOut,
   Menu,
   PanelLeftClose,
@@ -9,6 +11,8 @@ import {
   RefreshCw,
   Search,
   Settings,
+  ShieldAlert,
+  WifiOff,
   X,
 } from "lucide-react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
@@ -16,7 +20,24 @@ import { api } from "../../lib/api";
 import { clearSession, readSession } from "../../lib/session";
 import { ConsoleSearch } from "./ConsoleSearch";
 import { consoleNavigation } from "./navigation";
+import { buildOwnerNotifications, type OwnerNotification } from "./ownerNotifications";
 import "./console.css";
+
+const notificationSeenKey = "owner-notification-seen-v1";
+
+function notificationTime(value = "") {
+  if (!value) return "Baru saja";
+  const date = new Date(String(value).replace(" ", "T"));
+  if (Number.isNaN(date.getTime())) return "Baru saja";
+  return date.toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+function NotificationIcon({ notification }: { notification: OwnerNotification }) {
+  if (notification.kind === "warranty") return <ShieldAlert size={17} />;
+  if (notification.kind === "rental") return <CalendarClock size={17} />;
+  if (notification.kind === "connection") return <WifiOff size={17} />;
+  return <CircleAlert size={17} />;
+}
 
 function sessionOwner() {
   const session = readSession();
@@ -49,8 +70,61 @@ export function ConsoleShell({
   const [searchOpen, setSearchOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState<OwnerNotification[]>([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(true);
+  const [notificationsError, setNotificationsError] = useState("");
+  const [seenNotificationIds, setSeenNotificationIds] = useState<Set<string>>(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(notificationSeenKey) || "[]");
+      return new Set(Array.isArray(stored) ? stored.map(String) : []);
+    } catch {
+      return new Set();
+    }
+  });
   const session = sessionOwner();
   const displayName = String(session?.user?.name || session?.user?.username || "Owner");
+
+  const loadNotifications = useCallback(async () => {
+    setNotificationsLoading(true);
+    const [operations, warranties, rentals] = await Promise.allSettled([
+      api.operationsCenter(),
+      api.warrantyClaims(),
+      api.whatsappRentals(),
+    ]);
+    if ([operations, warranties, rentals].every((result) => result.status === "rejected")) {
+      setNotificationsError("Notifikasi belum dapat dimuat.");
+      setNotificationsLoading(false);
+      return;
+    }
+    setNotifications(buildOwnerNotifications({
+      operations: operations.status === "fulfilled" ? operations.value : null,
+      warranties: warranties.status === "fulfilled" ? warranties.value : [],
+      rentals: rentals.status === "fulfilled" ? rentals.value : [],
+    }));
+    setNotificationsError([operations, warranties, rentals].some((result) => result.status === "rejected") ? "Sebagian sumber belum dapat dimuat." : "");
+    setNotificationsLoading(false);
+  }, []);
+
+  const unreadNotifications = useMemo(
+    () => notifications.filter((notification) => !seenNotificationIds.has(notification.id)),
+    [notifications, seenNotificationIds],
+  );
+  const notificationBadgeCount = notificationsLoading && !notifications.length ? attentionCount : unreadNotifications.length;
+
+  const storeSeenNotifications = useCallback((next: Set<string>) => {
+    setSeenNotificationIds(next);
+    try {
+      localStorage.setItem(notificationSeenKey, JSON.stringify([...next].slice(-200)));
+    } catch {
+      // Reading notifications remains available when browser storage is blocked.
+    }
+  }, []);
+
+  const markNotificationRead = useCallback((id: string) => {
+    const next = new Set(seenNotificationIds);
+    next.add(id);
+    storeSeenNotifications(next);
+  }, [seenNotificationIds, storeSeenNotifications]);
 
   const closeOverlays = useCallback(() => {
     setDrawerOpen(false);
@@ -82,6 +156,12 @@ export function ConsoleShell({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [closeOverlays]);
+
+  useEffect(() => {
+    void loadNotifications();
+    const timer = window.setInterval(() => void loadNotifications(), 90_000);
+    return () => window.clearInterval(timer);
+  }, [loadNotifications]);
 
   if (!allowed) return null;
 
@@ -163,17 +243,31 @@ export function ConsoleShell({
               <span>{systemState === "loading" ? "Memeriksa sistem" : systemState === "unknown" ? "Status belum tersedia" : systemState === "warning" ? `${attentionCount} perlu perhatian` : "Operasional normal"}</span>
             </div>
             <div className="console-notification-wrap">
-              <button type="button" className="console-icon-button" aria-label={`${attentionCount} notifikasi operasional`} title="Notifikasi operasional" aria-expanded={notificationsOpen} onClick={() => { setProfileOpen(false); setNotificationsOpen((value) => !value); }}>
+              <button type="button" className="console-icon-button" aria-label={`${notificationBadgeCount} notifikasi belum dibaca`} title="Pusat notifikasi" aria-expanded={notificationsOpen} onClick={() => { setProfileOpen(false); setNotificationsOpen((value) => !value); }}>
                 <Bell size={18} />
-                {attentionCount ? <span className="console-notification-count">{Math.min(attentionCount, 99)}</span> : null}
+                {notificationBadgeCount ? <span className="console-notification-count">{Math.min(notificationBadgeCount, 99)}</span> : null}
               </button>
               {notificationsOpen ? (
-                <div className="console-notification-menu" role="dialog" aria-label="Notifikasi operasional">
-                  <header><div><strong>Perlu perhatian</strong><span>{attentionCount ? `${attentionCount} item pada halaman ini` : "Tidak ada peringatan pada halaman ini"}</span></div></header>
-                  <Link to="/owner-v2/operations" onClick={() => setNotificationsOpen(false)}><span>Operations Center</span><small>Audit anomali dan recovery</small></Link>
-                  <Link to="/owner-v2/orders?status=delivery-failed" onClick={() => setNotificationsOpen(false)}><span>Pesanan bermasalah</span><small>Cek pembayaran dan fulfillment</small></Link>
-                  <Link to="/owner-v2/resellers" onClick={() => setNotificationsOpen(false)}><span>Permintaan deposit</span><small>Proses antrean reseller</small></Link>
-                  <Link to="/owner-v2/integrations" onClick={() => setNotificationsOpen(false)}><span>Status integrasi</span><small>WhatsApp, Sheets, dan layanan lain</small></Link>
+                <div className="console-notification-menu" role="dialog" aria-label="Pusat notifikasi">
+                  <header>
+                    <div><strong>Pusat notifikasi</strong><span>{notifications.length ? `${unreadNotifications.length} belum dibaca / ${notifications.length} aktif` : "Tidak ada antrean aktif"}</span></div>
+                    <div className="console-notification-header-actions">
+                      <button type="button" onClick={() => void loadNotifications()} disabled={notificationsLoading} aria-label="Perbarui notifikasi"><RefreshCw size={14} className={notificationsLoading ? "console-spin" : ""} /></button>
+                      {unreadNotifications.length ? <button type="button" onClick={() => storeSeenNotifications(new Set([...seenNotificationIds, ...notifications.map((item) => item.id)]))}>Tandai dibaca</button> : null}
+                    </div>
+                  </header>
+                  {notificationsLoading && !notifications.length ? <div className="console-notification-empty"><RefreshCw className="console-spin" size={18} /><span>Memuat antrean terbaru...</span></div> : null}
+                  {notificationsError ? <div className="console-notification-warning">{notificationsError}</div> : null}
+                  {notifications.length ? <div className="console-notification-list">
+                    {notifications.map((notification) => {
+                      const unread = !seenNotificationIds.has(notification.id);
+                      return <Link key={notification.id} to={notification.href} className={`console-notification-item is-${notification.severity} ${unread ? "is-unread" : ""}`} onClick={() => { markNotificationRead(notification.id); setNotificationsOpen(false); }}>
+                        <span className="console-notification-icon"><NotificationIcon notification={notification} /></span>
+                        <span><strong>{notification.title}</strong><small>{notification.detail}</small><time>{notificationTime(notification.createdAt)}</time></span>
+                        {unread ? <i aria-label="Belum dibaca" /> : null}
+                      </Link>;
+                    })}
+                  </div> : !notificationsLoading ? <div className="console-notification-empty"><Bell size={18} /><span>Semua antrean operasional sudah bersih.</span></div> : null}
                 </div>
               ) : null}
             </div>

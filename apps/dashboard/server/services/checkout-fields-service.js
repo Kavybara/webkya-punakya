@@ -135,6 +135,12 @@ function normalizeFieldValue(field, rawValue, options = {}) {
       .map((item) => item.trim().toLowerCase())
       .filter(Boolean);
   }
+  if (field.key === "customerDevice") {
+    return raw
+      .split(/\r?\n|[,;]+|\s+\+\s+|\s+&\s+|\s+dan\s+/i)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
   if (field.key === "customerWhatsapp") {
     return options.normalizeWhatsapp ? options.normalizeWhatsapp(raw) : raw.trim();
   }
@@ -164,16 +170,22 @@ export function validateCheckoutFieldValues(fields = [], values = {}, options = 
 
 export function checkoutValuesForOrder(validatedValues = {}) {
   const customerEmails = Array.isArray(validatedValues.customerEmail) ? validatedValues.customerEmail : [];
+  const customerDevices = Array.isArray(validatedValues.customerDevice)
+    ? validatedValues.customerDevice
+    : String(validatedValues.customerDevice || "").trim()
+      ? [String(validatedValues.customerDevice).trim()]
+      : [];
+  const customerDevice = customerDevices.join(", ");
   return {
     checkoutData: {
-      customerDevice: String(validatedValues.customerDevice || ""),
+      customerDevice,
       customerEmail: customerEmails.join(", "),
       customerWhatsapp: String(validatedValues.customerWhatsapp || ""),
       customerPlan: String(validatedValues.customerPlan || ""),
     },
     email: customerEmails.join(", "),
     customerEmails,
-    device: String(validatedValues.customerDevice || ""),
+    device: customerDevice,
     customerWhatsapp: String(validatedValues.customerWhatsapp || ""),
     customerPlan: String(validatedValues.customerPlan || ""),
   };

@@ -5,6 +5,7 @@ export function registerSystemRoutes(app, deps) {
     getDbVersion,
     getPakasirCredentials,
     googleSheetsConfigured,
+    googleSheetsSyncHealth,
     maintenanceMode,
     makeId,
     mergedWhatsappRentals,
@@ -22,10 +23,14 @@ export function registerSystemRoutes(app, deps) {
   app.get("/api/health", async (_req, res) => {
     const db = await readDb();
     const pakasir = getPakasirCredentials(db);
+    const sheetsHealth = googleSheetsSyncHealth(db.settings || {});
     res.json({
       ok: true,
       googleSheetsConfigured: googleSheetsConfigured(db),
       googleSheetsLastSyncAt: db.settings?.googleSheetsLastSyncAt || "",
+      googleSheetsLastSyncAttemptAt: sheetsHealth.lastAttemptAt,
+      googleSheetsHealthy: sheetsHealth.healthy,
+      googleSheetsFailedSections: sheetsHealth.failedSections,
       ownerWhatsAppNumber: db.settings?.ownerWhatsAppNumber || process.env.OWNER_WHATSAPP_NUMBER || "",
       warrantyWhatsAppNumber: warrantyWhatsAppNumber(db),
       whatsappInboundConfigured: Boolean(firstConfigured(db.settings?.whatsappInboundToken, process.env.WHATSAPP_INBOUND_TOKEN)),

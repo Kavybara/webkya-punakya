@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BadgeHelp,
+  BookOpenCheck,
   Clock3,
   Grid2X2,
   KeyRound,
@@ -275,6 +276,12 @@ export default function ResellerV2OverviewPage() {
                   description="Laporkan kendala"
                   icon={<BadgeHelp size={18} />}
                   onClick={() => navigate("/reseller-v2/warranty")}
+                />
+                <ResellerActionCard
+                  title="Lihat Panduan"
+                  description="Video tutorial"
+                  icon={<BookOpenCheck size={18} />}
+                  onClick={() => navigate("/reseller-v2/guides")}
                 />
               </div>
             </article>

@@ -124,7 +124,7 @@ test("selects Netflix and WeTV daily/monthly templates only by stable variant id
   }
 });
 
-test("falls back to product default and reports missing configuration", () => {
+test("falls back to product default, sibling variant, and reports missing configuration", () => {
   assert.equal(
     resolveDeliveryTemplateConfig(
       { deliveryTemplate: "default {{email}}", deliveryTemplateVersion: 3 },
@@ -132,6 +132,18 @@ test("falls back to product default and reports missing configuration", () => {
     ).scope,
     "product",
   );
+  const siblingFallback = resolveDeliveryTemplateConfig(
+    {
+      variants: [
+        { id: "net-1p1u", code: "NET-1P1U", deliveryTemplate: "{{variant_name}} {{email}}", deliveryTemplateVersion: 4 },
+        { id: "net-2p1u", code: "NET-2P1U" },
+      ],
+    },
+    { id: "net-2p1u", code: "NET-2P1U", name: "Sharing 1P2U" },
+  );
+  assert.equal(siblingFallback.scope, "sibling_variant");
+  assert.equal(siblingFallback.sourceVariantId, "net-1p1u");
+  assert.equal(siblingFallback.variantId, "net-2p1u");
   assert.equal(
     resolveDeliveryTemplateConfig({}, { id: "variant-empty" }).configured,
     false,
@@ -169,6 +181,72 @@ test("builds context from real order and fulfillment account fields", () => {
   assert.equal(context.email, "netflix@example.com");
   assert.equal(context.customer_email, "buyer@example.com");
   assert.equal(context.rental_end, "2026-08-20 10:00");
+});
+
+test("renders duration-specific delivery blocks for monthly and daily orders", () => {
+  const source = [
+    "{{#if is_monthly}}NETFLIX {{variant_name}} BULANAN",
+    "25-30 Hari terhitung 1 bulan{{/if}}",
+    "{{#if is_daily}}NETFLIX {{variant_name}} HARIAN",
+    "Pembelian diatas 7 hari akan di kick pada waktu yang tidak ditentukan.{{/if}}",
+    "email :: {{email}}",
+  ].join("\n");
+  const monthlyContext = buildDeliveryTemplateContext({
+    order: { variant: "1P1U", duration: "1 Bulan", durationDays: 30 },
+    account: { email: "bulan@example.com" },
+  });
+  const dailyContext = buildDeliveryTemplateContext({
+    order: { variant: "1P1U", duration: "7 Hari", durationDays: 7 },
+    account: { email: "hari@example.com" },
+  });
+  const monthly = renderDeliveryTemplate(source, monthlyContext);
+  const daily = renderDeliveryTemplate(source, dailyContext);
+
+  assert.match(monthly.text, /BULANAN/);
+  assert.match(monthly.text, /25-30 Hari/);
+  assert.doesNotMatch(monthly.text, /HARIAN/);
+  assert.match(daily.text, /HARIAN/);
+  assert.match(daily.text, /diatas 7 hari/);
+  assert.doesNotMatch(daily.text, /BULANAN/);
+});
+
+test("selects matching plain daily or monthly section from legacy two-block templates", () => {
+  const source = [
+    "⋆°࿔ NETFLIX 1P1U 1 BULAN 𝜗𝜚⋆",
+    "യ 25-30 Hari terhitung 1 bulan",
+    "email :: {{email}}",
+    "",
+    "⋆°࿔ NETFLIX 1P1U 7 HARI 𝜗𝜚⋆",
+    "യ Pembelian diatas 7 hari akan di kick pada waktu yang tidak ditentukan.",
+    "email :: {{email}}",
+  ].join("\n");
+  const monthly = renderDeliveryTemplate(source, buildDeliveryTemplateContext({
+    order: { duration: "1 Bulan", durationDays: 30 },
+    account: { email: "bulan@example.com" },
+  }));
+  const daily = renderDeliveryTemplate(source, buildDeliveryTemplateContext({
+    order: { duration: "7 Hari", durationDays: 7 },
+    account: { email: "hari@example.com" },
+  }));
+
+  assert.match(monthly.text, /1 BULAN/);
+  assert.match(monthly.text, /25-30 Hari/);
+  assert.doesNotMatch(monthly.text, /7 HARI/);
+  assert.match(daily.text, /7 HARI/);
+  assert.match(daily.text, /diatas 7 hari/);
+  assert.doesNotMatch(daily.text, /1 BULAN/);
+});
+
+test("accepts escaped underscores when templates are pasted from markdown", () => {
+  const result = renderDeliveryTemplate(
+    "{{#if is\\_daily}}HARIAN {{variant\\_name}} {{rental\\_end}}{{/if}}",
+    buildDeliveryTemplateContext({
+      order: { variant: "1P1U", duration: "7 Hari", durationDays: 7, expiresAt: "2026-08-31 10:00" },
+    }),
+  );
+
+  assert.equal(result.ok, true);
+  assert.match(result.text, /HARIAN 1P1U 2026-08-31 10:00/);
 });
 
 test("does not stringify objects or leak raw unresolved placeholders", () => {

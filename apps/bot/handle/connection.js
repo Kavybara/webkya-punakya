@@ -20,17 +20,23 @@ function createBaileysLogger(logger) {
 }
 
 const MAX_RECONNECT_BURST = 5;
-const MAX_RECONNECT_DELAY_MS = 60_000;
+const MAX_RECONNECT_DELAY_MS = 120_000;
 const SEND_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
 const SEND_QUEUE_DELAY_MS = 750;
-const SEND_ATTEMPT_TIMEOUT_MS = 20_000;
-const COMMAND_SEND_RETRY_DELAYS_MS = [1000, 2500];
-const COMMAND_SEND_ATTEMPT_TIMEOUT_MS = 8_000;
-const STABLE_CONNECT_DELAY_MS = 15_000;
+const SEND_ATTEMPT_TIMEOUT_MS = 90_000;
+const COMMAND_SEND_RETRY_DELAYS_MS = [];
+const COMMAND_SEND_ATTEMPT_TIMEOUT_MS = 120_000;
+const STABLE_CONNECT_DELAY_MS = Math.max(5_000, Number(process.env.WHATSAPP_STABLE_CONNECT_DELAY_MS || 90_000));
 const GROUP_SYNC_MIN_INTERVAL_MS = 30 * 60 * 1000;
 const RECONNECT_WINDOW_MS = 5 * 60 * 1000;
 const RECONNECT_CIRCUIT_LIMIT = 3;
 const HEAVY_WORK_PAUSE_MS = 10 * 60 * 1000;
+const GROUP_SYNC_ON_CONNECT = /^(1|true|yes|on)$/i.test(String(process.env.WHATSAPP_GROUP_SYNC_ON_CONNECT || "").trim());
+const OWNER_STABLE_NOTIFY_ENABLED = !/^(0|false|no|off)$/i.test(String(process.env.WHATSAPP_OWNER_STABLE_NOTIFY || "true").trim());
+const OWNER_STABLE_NOTIFY_COOLDOWN_MS = Math.max(
+  60_000,
+  Number(process.env.WHATSAPP_OWNER_STABLE_NOTIFY_COOLDOWN_MS || 30 * 60 * 1000),
+);
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -52,9 +58,11 @@ function withTimeout(promise, ms, reason = "operation_timed_out") {
 function reconnectDelayMs(reason, attempt) {
   const code = Number(reason || 0);
   const safeAttempt = Math.max(1, Number(attempt || 1));
-  if (code === 403) return 30_000;
-  if (code === 428) return Math.min(MAX_RECONNECT_DELAY_MS, 15_000 + ((safeAttempt - 1) * 5000));
-  return Math.min(MAX_RECONNECT_DELAY_MS, 5000 * safeAttempt);
+  if (code === 403) return 60_000;
+  if (code === 428) return Math.min(MAX_RECONNECT_DELAY_MS, 30_000 + ((safeAttempt - 1) * 15000));
+  if (code === 408) return Math.min(MAX_RECONNECT_DELAY_MS, 20_000 + ((safeAttempt - 1) * 15000));
+  if (code === 515) return Math.min(MAX_RECONNECT_DELAY_MS, 10_000 + ((safeAttempt - 1) * 10000));
+  return Math.min(MAX_RECONNECT_DELAY_MS, 15_000 * safeAttempt);
 }
 
 function isTemporarySendError(error) {
@@ -64,11 +72,25 @@ function isTemporarySendError(error) {
 
 function shouldRecoverSendTransport(error) {
   const message = String(error?.message || error || "");
-  return /whatsapp_send_timed_out|send_timed_out|send_message_empty_result|write EPIPE|EPIPE|Timed Out/i.test(message);
+  return /whatsapp_send_timed_out|send_timed_out|send_message_empty_result|whatsapp_bot_not_connected|write EPIPE|EPIPE|Timed Out/i.test(message);
 }
 
 function debugSendEnabled() {
   return /^(1|true|yes|on)$/i.test(String(process.env.WHATSAPP_DEBUG_SEND || "").trim());
+}
+
+function parseRetryDelays(value = "", fallback = []) {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return fallback;
+  }
+  const count = Number(value);
+  if (Number.isInteger(count) && count >= 0) {
+    return fallback.slice(0, count);
+  }
+  return String(value)
+    .split(/[,\s]+/)
+    .map((item) => Number(item.trim()))
+    .filter((item) => Number.isFinite(item) && item > 0);
 }
 
 export function createWhatsAppConnection({ config, logger, store, plugins }) {
@@ -102,6 +124,10 @@ export function createWhatsAppConnection({ config, logger, store, plugins }) {
   let lastScheduledBackupAt = "";
   let lastScheduledBackupStatus = "idle";
   let lastScheduledBackupError = "";
+  let pairingRequestAttempts = 0;
+  let pairingRequestTimer = null;
+  let lastPairingCodeLogged = "";
+  let lastOwnerStableNotifyAt = 0;
 
   function setLastError(error) {
     lastError = String(error || "");
@@ -115,6 +141,22 @@ export function createWhatsAppConnection({ config, logger, store, plugins }) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
+  }
+
+  function existingPairingCode(authState = {}) {
+    return String(authState?.creds?.pairingCode || authState?.creds?.pairing_code || "").trim();
+  }
+
+  function setPairingCode(code = "") {
+    const normalized = String(code || "").replace(/\s+/g, "").trim();
+    if (!normalized) return false;
+    pairingCode = normalized;
+    connectionState = "pairing";
+    if (lastPairingCodeLogged !== normalized) {
+      lastPairingCodeLogged = normalized;
+      logTracking(`Pairing code tersedia di halaman web: ${normalized}`);
+    }
+    return true;
   }
 
   function isSocketOpen(targetSock = sock) {
@@ -142,6 +184,38 @@ export function createWhatsAppConnection({ config, logger, store, plugins }) {
 
   function backupOwnerConfigured() {
     return Boolean(config.backup?.ownerNumber || config.ownerNumbers?.[0]);
+  }
+
+  function stableNotifyOwnerNumber() {
+    return config.ownerNumbers?.[0] || config.backup?.ownerNumber || "";
+  }
+
+  async function notifyOwnerStable(reason = "whatsapp-connect", connectedSock = sock) {
+    if (!OWNER_STABLE_NOTIFY_ENABLED) return { skipped: true, reason: "stable_notify_disabled" };
+    if (connectedSock !== sock || !isSocketOpen(connectedSock) || isWarmingUp()) {
+      return { skipped: true, reason: "connection_not_stable" };
+    }
+    const ownerNumber = stableNotifyOwnerNumber();
+    if (!ownerNumber) return { skipped: true, reason: "owner_not_configured" };
+    const now = Date.now();
+    if (now - lastOwnerStableNotifyAt < OWNER_STABLE_NOTIFY_COOLDOWN_MS) {
+      return { skipped: true, reason: "stable_notify_throttled" };
+    }
+    const botNumber = normalizeWhatsAppNumber(String(jid || sock?.user?.id || "").split("@")[0].split(":")[0]) || config.botNumber || "-";
+    const text = [
+      "Kavya WhatsApp stabil.",
+      `Bot: ${botNumber}`,
+      `Status: ${connectionState}`,
+      `Alasan konek: ${reason}`,
+      `Cooldown: ${Math.round(STABLE_CONNECT_DELAY_MS / 1000)} detik selesai`,
+    ].join("\n");
+    await sendMessage(ownerNumber, text, "", "", "", "", {
+      timeoutMs: Math.max(60_000, Number(process.env.WHATSAPP_OWNER_STABLE_NOTIFY_TIMEOUT_MS || 120_000)),
+      recoverOnTimeout: false,
+    });
+    lastOwnerStableNotifyAt = now;
+    logTracking(`Notif stabil terkirim ke owner ${ownerNumber}`);
+    return { sent: true, ownerNumber };
   }
 
   async function cleanupSocket(targetSock = sock) {
@@ -248,13 +322,14 @@ export function createWhatsAppConnection({ config, logger, store, plugins }) {
     const retryDelays = Array.isArray(options.retryDelaysMs)
       ? options.retryDelaysMs
       : commandSend
-        ? COMMAND_SEND_RETRY_DELAYS_MS
-        : SEND_RETRY_DELAYS_MS;
+        ? parseRetryDelays(process.env.WHATSAPP_COMMAND_SEND_RETRIES, COMMAND_SEND_RETRY_DELAYS_MS)
+        : parseRetryDelays(process.env.WHATSAPP_SEND_RETRIES, SEND_RETRY_DELAYS_MS);
+    const envTimeout = commandSend ? process.env.WHATSAPP_COMMAND_SEND_TIMEOUT_MS : process.env.WHATSAPP_SEND_TIMEOUT_MS;
     const sendTimeoutMs = Math.max(
       1000,
-      Number(options.timeoutMs || (commandSend ? COMMAND_SEND_ATTEMPT_TIMEOUT_MS : SEND_ATTEMPT_TIMEOUT_MS)),
+      Number(options.timeoutMs || envTimeout || (commandSend ? COMMAND_SEND_ATTEMPT_TIMEOUT_MS : SEND_ATTEMPT_TIMEOUT_MS)),
     );
-    const recoverOnTimeout = options.recoverOnTimeout !== false && (commandSend || options.recoverOnTimeout === true);
+    const recoverOnTimeout = options.recoverOnTimeout !== false && options.recoverOnTimeout === true;
     const {
       commandReply: _commandReply,
       recoverOnTimeout: _recoverOnTimeout,
@@ -287,6 +362,10 @@ export function createWhatsAppConnection({ config, logger, store, plugins }) {
         lastSendError = error;
         if (debugSendEnabled()) {
           logWarning(`Send retry ${attempt + 1}/${retryDelays.length + 1} -> ${jidValue}`, error);
+        }
+        if (commandSend && shouldRecoverSendTransport(error)) {
+          logWarning(`WhatsApp send command tertahan, reconnect tanpa resend otomatis -> ${jidValue}`, error);
+          recoverTransportError(error);
         }
         if (!isTemporarySendError(error) || attempt >= retryDelays.length) {
           throw error;
@@ -599,18 +678,38 @@ export function createWhatsAppConnection({ config, logger, store, plugins }) {
     };
   }
 
-  async function requestPairingCodeIfNeeded(authState) {
+  async function requestPairingCodeIfNeeded(authState, { delayMs = 0 } = {}) {
     if (!config.pairing.enabled || !config.pairing.number || authState.creds.registered) {
       return;
     }
+    if (pairingCode || existingPairingCode(authState)) {
+      setPairingCode(pairingCode || existingPairingCode(authState));
+      return;
+    }
+    if (pairingRequestAttempts >= 5) {
+      return;
+    }
+    if (delayMs > 0) {
+      await delay(delayMs);
+      if (!sock || authState.creds.registered || pairingCode) return;
+    }
 
     try {
+      pairingRequestAttempts += 1;
       pairingCode = await sock.requestPairingCode(config.pairing.number);
-      connectionState = "pairing";
-      logTracking("Pairing code tersedia di halaman web");
+      setPairingCode(pairingCode);
     } catch (error) {
       lastError = error.message || "pairing_code_failed";
-      logWarning("Failed to request WhatsApp pairing code", error);
+      logWarning(`Failed to request WhatsApp pairing code (${pairingRequestAttempts}/5)`, error);
+      if (!pairingCode && pairingRequestAttempts < 5 && !pairingRequestTimer) {
+        pairingRequestTimer = setTimeout(() => {
+          pairingRequestTimer = null;
+          void requestPairingCodeIfNeeded(authState).catch((retryError) => {
+            lastError = retryError.message || "pairing_code_failed";
+          });
+        }, 5000);
+        pairingRequestTimer.unref?.();
+      }
     }
   }
 
@@ -639,6 +738,13 @@ export function createWhatsAppConnection({ config, logger, store, plugins }) {
 
       if (connectedSock !== sock || !isSocketOpen(connectedSock)) {
         lastGroupSyncError = "connection_not_stable";
+        return;
+      }
+      await notifyOwnerStable(reason, connectedSock).catch((error) => {
+        logWarning("Notif stabil WhatsApp ke owner gagal", error);
+      });
+      if (!GROUP_SYNC_ON_CONNECT) {
+        lastGroupSyncError = "group_sync_on_connect_disabled";
         return;
       }
       await syncJoinedGroups("whatsapp-connect").catch((error) => {
@@ -799,13 +905,23 @@ export function createWhatsAppConnection({ config, logger, store, plugins }) {
       }
 
       sock.ev.on("creds.update", saveCredentials);
-      await requestPairingCodeIfNeeded(state);
 
       sock.ev.on("connection.update", (update) => {
+        if (update.qr && config.pairing.enabled) {
+          void requestPairingCodeIfNeeded(state).catch((error) => {
+            lastError = error.message || "pairing_code_failed";
+            logWarning("WhatsApp pairing retry failed", error);
+          });
+        }
         void handleConnectionUpdate(update).catch((error) => {
           lastError = error.message || "connection_update_failed";
           logWarning("WhatsApp connection update failed", error);
         });
+      });
+
+      void requestPairingCodeIfNeeded(state, { delayMs: 3000 }).catch((error) => {
+        lastError = error.message || "pairing_code_failed";
+        logWarning("WhatsApp pairing retry failed", error);
       });
 
       sock.ev.on("messages.upsert", async ({ messages }) => {
@@ -827,9 +943,14 @@ export function createWhatsAppConnection({ config, logger, store, plugins }) {
               updateGroupParticipants,
               updateGroupSubject,
               updateGroupDescription,
+              isWhatsAppReady: () => isSocketOpen() && !isWarmingUp(),
               botJid: jid || sock?.user?.id || "",
             });
           } catch (error) {
+            if (isTemporarySendError(error)) {
+              logWarning("Inbound WhatsApp command dilewati karena koneksi belum siap", error);
+              continue;
+            }
             logWarning("Failed to process inbound WhatsApp message", error);
           }
         }

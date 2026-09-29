@@ -113,22 +113,17 @@ async function readProjectSourceBundle(rootDir) {
   const excludeDirNames = new Set([
     ".git",
     "node_modules",
+    "database",
     "runtime",
     "runtime-test-backups",
     "backups",
     "tmp",
-    "dist",
-    "build",
     "coverage",
     ".next",
     "pglite",
     "release",
     "outputs",
     "test-results",
-  ]);
-  const excludeFileNames = new Set([
-    "kavya-pterodactyl-linux-latest.tar.gz",
-    "kavya-vps-linux-latest.tar.gz",
   ]);
   const files = {};
   const skipped = [];
@@ -153,7 +148,7 @@ async function readProjectSourceBundle(rootDir) {
       }
 
       if (!entry.isFile()) continue;
-      if (excludeFileNames.has(entry.name.toLowerCase())) {
+      if (isGeneratedBackupFileName(entry.name) || /\.(?:tar\.gz|tgz|zip|enc)$/i.test(entry.name)) {
         skipped.push({ path: rel, reason: "excluded_file" });
         continue;
       }
@@ -197,21 +192,26 @@ export async function createRuntimeBackupPayload(options = {}) {
 
   const dashboardDb = await readJsonIfExists(dashboardDbPath, {});
   const whatsappRuntime = await readJsonDirectory(whatsappDbDir);
-  const whatsappSource = await readJsonDirectory(path.join(rootDir, "apps", "bot", "database"));
-  const legacyRootRuntime = await readJsonDirectory(path.join(rootDir, "runtime"));
-  const legacyDatabase = {
-    "list.json": await readJsonIfExists(path.join(rootDir, "database", "list.json"), {}),
-    "sewa.json": await readJsonIfExists(path.join(rootDir, "database", "sewa.json"), {}),
-    "group.json": await readJsonIfExists(path.join(rootDir, "database", "group.json"), {}),
-    "group_backup.json": await readJsonIfExists(path.join(rootDir, "database", "group_backup.json"), {}),
-    "additional/group participant.json": await readJsonIfExists(path.join(rootDir, "database", "additional", "group participant.json"), {}),
-  };
+  const includeLegacyData = /^(1|true|yes|on)$/i.test(String(process.env.RUNTIME_BACKUP_INCLUDE_LEGACY_DATA || ""));
+  const whatsappSource = includeLegacyData ? await readJsonDirectory(path.join(rootDir, "apps", "bot", "database")) : {};
+  const legacyRootRuntime = includeLegacyData ? await readJsonDirectory(path.join(rootDir, "runtime")) : {};
+  const legacyDatabase = includeLegacyData
+    ? {
+        "list.json": await readJsonIfExists(path.join(rootDir, "database", "list.json"), {}),
+        "sewa.json": await readJsonIfExists(path.join(rootDir, "database", "sewa.json"), {}),
+        "group.json": await readJsonIfExists(path.join(rootDir, "database", "group.json"), {}),
+        "group_backup.json": await readJsonIfExists(path.join(rootDir, "database", "group_backup.json"), {}),
+        "additional/group participant.json": await readJsonIfExists(path.join(rootDir, "database", "additional", "group participant.json"), {}),
+      }
+    : {};
   const envExample = await readTextIfExists(path.join(rootDir, ".env.example"));
 
   const fileBundles = {
-    database: await readFileBundle(path.join(rootDir, "database"), {
-      excludeDirNames: [".git", "node_modules"],
-    }),
+    database: includeLegacyData
+      ? await readFileBundle(path.join(rootDir, "database"), {
+          excludeDirNames: [".git", "node_modules"],
+        })
+      : { root: path.join(rootDir, "database"), files: {}, skipped: [{ path: "", reason: "legacy_data_disabled" }], count: 0 },
     dashboard_runtime: await readFileBundle(runtimeDir, {
       excludeDirNames: [".git", "node_modules", "backups", "tmp", "pglite", "baileys-auth"],
     }),
@@ -239,7 +239,10 @@ export async function createRuntimeBackupPayload(options = {}) {
     notes: {
       env: "Raw .env ikut disalin agar backup WhatsApp bisa dipakai memulihkan VPS baru tanpa konfigurasi ulang dari nol.",
       excluded_runtime_dirs: "Folder backup/tmp/node_modules/pglite tidak dimasukkan supaya backup tidak rekursif dan tidak membengkak.",
-      project_source: "Seluruh source project utama ikut disalin dengan pendekatan full-project backup, kecuali artefak besar dan folder runtime/temporary yang memang tidak perlu dibawa dua kali.",
+      project_source: "Seluruh source project utama ikut disalin dengan pendekatan full-project backup, kecuali artefak besar, data legacy, dan folder temporary yang memang tidak perlu dibawa dua kali.",
+      legacy_data: includeLegacyData
+        ? "Data legacy root ikut disalin karena RUNTIME_BACKUP_INCLUDE_LEGACY_DATA aktif."
+        : "Data legacy root/database/apps/bot/database tidak ikut; data aktif dipulihkan dari runtime dashboard.",
     },
     dashboard: dashboardDb,
     whatsapp_runtime: whatsappRuntime,
@@ -254,8 +257,8 @@ export async function createRuntimeBackupPayload(options = {}) {
       orders: dashboardDb?.orders?.length || 0,
       resellers: dashboardDb?.resellers?.length || 0,
       managed_accounts: dashboardDb?.managedAccounts?.length || 0,
-      whatsapp_active_rentals: activeRentalCount(legacyDatabase["sewa.json"]),
-      database_files: fileBundles.database.count,
+      whatsapp_active_rentals: Object.keys(whatsappRuntime?.["rentals.json"] || {}).length,
+      database_files: includeLegacyData ? fileBundles.database.count : 0,
       dashboard_runtime_files: fileBundles.dashboard_runtime.count,
       whatsapp_auth_files: fileBundles.whatsapp_auth.count,
       whatsapp_service_runtime_files: fileBundles.whatsapp_service_runtime.count,
@@ -361,11 +364,19 @@ async function writeUploadableArchive({ payload, outputDir, fileName }) {
 
     await writeStagedJson(stageDir, "apps/dashboard/runtime/kavya-db.json", payload.dashboard || {});
     await writeJsonDirectory(stageDir, "apps/dashboard/runtime/whatsapp-database", payload.whatsapp_runtime || {});
-    await writeJsonDirectory(stageDir, "apps/bot/database", payload.whatsapp_source || {});
-    await writeJsonDirectory(stageDir, "runtime", payload.legacy_root_runtime || {});
-    await writeJsonDirectory(stageDir, "database", payload.legacy_database || {});
+    if (Object.keys(payload.whatsapp_source || {}).length) {
+      await writeJsonDirectory(stageDir, "apps/bot/database", payload.whatsapp_source || {});
+    }
+    if (Object.keys(payload.legacy_root_runtime || {}).length) {
+      await writeJsonDirectory(stageDir, "runtime", payload.legacy_root_runtime || {});
+    }
+    if (Object.keys(payload.legacy_database || {}).length) {
+      await writeJsonDirectory(stageDir, "database", payload.legacy_database || {});
+    }
 
-    await writeFileBundle(stageDir, "database", payload.file_bundles?.database);
+    if (payload.file_bundles?.database?.count) {
+      await writeFileBundle(stageDir, "database", payload.file_bundles?.database);
+    }
     await writeFileBundle(stageDir, "apps/dashboard/runtime", payload.file_bundles?.dashboard_runtime);
     await writeFileBundle(
       stageDir,

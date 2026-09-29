@@ -896,7 +896,20 @@ export default function ProductsPage() {
     .join("\n\n");
   const credentialText = deliveredCredentialText || fulfillment.account;
   const deliverySnapshot = createdOrder?.deliveryTemplateSnapshot;
-  const deliveryTemplateText = deliverySnapshot?.status === "ready" ? deliverySnapshot.renderedText || "" : "";
+  const fallbackDeliveryText = String(createdOrder?.fulfillmentText || credentialText || "").trim();
+  const deliveryTemplateText = deliverySnapshot?.status === "ready"
+    ? deliverySnapshot.renderedText || fallbackDeliveryText
+    : fallbackDeliveryText;
+  const deliveryTemplateLabel = deliverySnapshot?.status === "ready"
+    ? "Siap dikirim ke customer"
+    : deliveryTemplateText
+      ? "Siap dari detail akun"
+      : deliverySnapshot?.status === "incomplete"
+        ? "Detail akun belum lengkap"
+        : "Template belum dikonfigurasi";
+  const deliveryTemplateEmptyText = deliverySnapshot?.status === "incomplete"
+    ? `Owner perlu melengkapi: ${(deliverySnapshot.missingFields || []).join(", ") || "detail akun"}.`
+    : "Template pengiriman untuk varian ini belum tersedia.";
   const deliveredAccountId = createdOrder?.deliveredAccounts?.[0]?.id || "";
   const deliveredAccount = createdOrder?.deliveredAccounts?.[0];
   const templateFields = new Set(deliverySnapshot?.usedFields || []);
@@ -1359,10 +1372,10 @@ export default function ProductsPage() {
                     </div>
                     <div className="min-w-0 rounded-lg border border-violet-300/15 bg-violet-300/[0.04] p-4">
                       <div className="flex min-h-11 flex-wrap items-center justify-between gap-3">
-                        <div><p className="text-sm font-semibold text-zinc-100">Template Siap Kirim</p><p className="mt-1 text-xs text-zinc-500">{deliveryTemplateText ? "Siap dikirim ke customer" : deliverySnapshot?.status === "incomplete" ? "Detail akun belum lengkap" : "Template belum dikonfigurasi"}</p></div>
+                        <div><p className="text-sm font-semibold text-zinc-100">Template Siap Kirim</p><p className="mt-1 text-xs text-zinc-500">{deliveryTemplateLabel}</p></div>
                         {deliveryTemplateText ? <button type="button" onClick={() => copyCheckoutValue("template", deliveryTemplateText)} className="min-h-9 rounded-lg bg-white px-3 text-xs font-semibold text-black hover:bg-zinc-200">{copiedValue === "template" ? "Template berhasil disalin" : "Salin Semua"}</button> : null}
                       </div>
-                      {deliveryTemplateText ? <pre className="mt-3 max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-white/[0.06] bg-black/20 p-4 font-mono text-xs leading-5 text-zinc-300">{deliveryTemplateText}</pre> : <div className="mt-3 flex min-h-36 items-center justify-center rounded-md border border-white/[0.06] bg-black/20 p-4 text-center text-sm leading-6 text-zinc-500">{deliverySnapshot?.status === "incomplete" ? `Owner perlu melengkapi: ${(deliverySnapshot.missingFields || []).join(", ") || "detail akun"}.` : "Template pengiriman untuk varian ini belum tersedia."}</div>}
+                      {deliveryTemplateText ? <pre className="mt-3 max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-white/[0.06] bg-black/20 p-4 font-mono text-xs leading-5 text-zinc-300">{deliveryTemplateText}</pre> : <div className="mt-3 flex min-h-36 items-center justify-center rounded-md border border-white/[0.06] bg-black/20 p-4 text-center text-sm leading-6 text-zinc-500">{deliveryTemplateEmptyText}</div>}
                     </div>
                   </div>
                 ) : null}

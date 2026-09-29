@@ -14,6 +14,21 @@ apps/bot/database/*.json
 runtime/
 apps/dashboard/runtime/
 release/
+
+# Per-run local test runtime directories. These contain live Baileys WhatsApp
+# session credentials (baileys-auth/) and a full production kavya-db.json with
+# customer data. They must never be committed.
+runtime-*/
+apps/*/runtime-*/
+
+# Local browser automation profiles. Contain bookmarks and cookies.
+artifacts/chrome-mobile-profile*/
+artifacts/**/chrome-mobile-profile*/
+
+# Database snapshots and repair backups. These are copies of the production
+# kavya-db.json and contain customer credentials, order records and PINs.
+artifacts/**/kavya-db*.json
+artifacts/**/kavya-db*/
 tmp/
 outputs/
 _zip_inspect/
@@ -22,6 +37,7 @@ kavya-pterodactyl-linux-latest.tar.gz
 *.tar.gz
 *.log
 smoke-*.log
+reports/stock-id-backfill-*
 
 # OS/editor noise
 .DS_Store

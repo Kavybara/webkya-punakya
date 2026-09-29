@@ -3,6 +3,33 @@ import {
   validateCheckoutFieldValues,
 } from "../services/checkout-fields-service.js";
 
+export function finalizeSuccessfulSheetRepair(repair, sheetResult, repairedAt = "") {
+  const sheetCommitFailed = Boolean(
+    sheetResult?.ok === false
+    || (sheetResult?.sheetCommitRequired && repair?.order?.googleSheetsSyncStatus !== "synced"),
+  );
+  if (sheetCommitFailed || !repair?.order) return sheetCommitFailed;
+
+  repair.order.orderStatus = "completed";
+  repair.order.deliveryStatus = "sent";
+  repair.order.fulfilledAt = repair.order.fulfilledAt || repairedAt;
+  repair.order.fulfillmentBlockedReason = "";
+  delete repair.order.stockPreflightFailedAt;
+  return false;
+}
+
+export function resolveSmokeTestReseller(db = {}, smokeLabel = "", isSmokeTestReseller = () => false) {
+  const label = String(smokeLabel || "").trim().toLowerCase();
+  if (!label) return null;
+  return (db.resellers || []).find((reseller) => (
+    reseller?.isActive !== false
+    && isSmokeTestReseller(reseller)
+    && [reseller.username, reseller.name]
+      .filter(Boolean)
+      .some((value) => String(value).trim().toLowerCase() === label)
+  )) || null;
+}
+
 export function registerOrderRoutes(app, deps) {
   const {
     addAccountDaysText,
@@ -49,6 +76,7 @@ export function registerOrderRoutes(app, deps) {
     resellerRequiredMessage,
     serializeOrderForApi,
     safeTrackingOrder,
+    shouldEnablePakasirMaintenance,
     splitCustomerEmails,
     splitDeviceNames,
     updateDb,
@@ -258,10 +286,11 @@ export function registerOrderRoutes(app, deps) {
         if (pakasir.providerStatus !== "created") {
           if (paymentPlan.depositUsed > 0) reseller.deposit = paymentPlan.depositBefore;
           for (const stock of reservedStocks) clearReservedStockState(stock);
-          enableMaintenanceMode(db, `Pakasir QRIS gagal: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`, "pakasir");
+          const reason = `Pakasir QRIS gagal: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`;
+          if (shouldEnablePakasirMaintenance?.(reason)) enableMaintenanceMode(db, reason, "pakasir");
           const error = new Error(`Pakasir QRIS gagal. Order tidak dibuat dan deposit tidak dipotong: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`);
           error.status = 503;
-          error.maintenance = { reason: `Pakasir QRIS gagal: ${pakasir.providerError || pakasir.providerStatus || "unknown_error"}`, source: "pakasir" };
+          if (shouldEnablePakasirMaintenance?.(reason)) error.maintenance = { reason, source: "pakasir" };
           throw error;
         }
         Object.assign(payment, pakasir);
@@ -340,14 +369,22 @@ export function registerOrderRoutes(app, deps) {
       const orderDurationDays = durationDays(orderDuration);
       const expiresAt = addAccountDaysText(orderDurationDays, createdAt, { keepTime: true });
       const smokeLabel = String(req.body.smokeLabel || "kya").trim().toLowerCase() || "kya";
-      const ownerWhatsapp = normalizeWhatsappNumber(req.body.whatsapp || ownerProfile.whatsapp || "");
+      const smokeReseller = resolveSmokeTestReseller(db, smokeLabel, isSmokeTestReseller);
+      if (!smokeReseller) {
+        const error = new Error("Akun smoke test reseller tidak ditemukan atau tidak aktif");
+        error.status = 400;
+        throw error;
+      }
+      const ownerWhatsapp = normalizeWhatsappNumber(
+        req.body.whatsapp || primaryResellerWhatsapp(smokeReseller) || ownerProfile.whatsapp || "",
+      );
       const quotedTotal = priceForDuration(variant, orderDuration) * qty;
       const order = {
         id: makeId("ORD").toUpperCase(),
         paymentRef: makeId("TEST").toUpperCase(),
         customer: smokeLabel,
         whatsapp: ownerWhatsapp,
-        resellerId: "",
+        resellerId: smokeReseller.id,
         reseller: smokeLabel,
         product: product.name,
         productId: product.id,
@@ -412,6 +449,7 @@ export function registerOrderRoutes(app, deps) {
         manualApprovalReason: order.manualApprovalReason,
         providerStatus: "smoke_test",
         providerWebhookStatus: "smoke_test",
+        resellerId: smokeReseller.id,
       };
       db.payments.unshift(payment);
       db.orders.unshift(order);
@@ -423,6 +461,7 @@ export function registerOrderRoutes(app, deps) {
         description: `${product.name} ${variant.name} x${qty} untuk akun internal ${smokeLabel}. Stok asli dipakai, metrik penjualan tidak dihitung.`,
         createdAt: nowText(),
         orderId: order.id,
+        resellerId: smokeReseller.id,
         whatsapp: ownerWhatsapp,
       });
       const result = await fulfillPaidOrderAndNotify(db, order.id);
@@ -543,9 +582,9 @@ export function registerOrderRoutes(app, deps) {
         createdAt: nowText(),
         orderId: repair.order.id,
       });
+      const sheetCommitFailed = finalizeSuccessfulSheetRepair(repair, sheetResult, nowText());
       for (const key of Object.keys(db)) delete db[key];
       Object.assign(db, working);
-      const sheetCommitFailed = Boolean(sheetResult.sheetCommitRequired && repair.order.googleSheetsSyncStatus !== "synced");
       return {
         ...repair,
         ok: !sheetCommitFailed,

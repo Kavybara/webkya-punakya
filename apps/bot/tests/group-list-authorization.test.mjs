@@ -79,6 +79,68 @@ test("updatelist mengizinkan admin grup berdasarkan metadata terbaru", async () 
   assert.match(fixture.replies.join("\n"), /berhasil/i);
 });
 
+test("updatelist langsung mengganti balasan keyword di grup yang sama", async () => {
+  let groupList = {
+    picsart: {
+      text: "harga lama",
+    },
+  };
+  const replies = [];
+  const base = {
+    isGroup: true,
+    isOwner: false,
+    isGroupAdmin: true,
+    groupAdminChecked: true,
+    chat_jid: "120363999999999999@g.us",
+    sender_jid: "628111111111@s.whatsapp.net",
+    raw_sender_jid: "628111111111@s.whatsapp.net",
+    sender: "628111111111",
+    pushName: "Admin Grup",
+    config: {},
+    services: {
+      getGroupParticipantInfo: async () => ({
+        checked: true,
+        is_admin: true,
+        is_super_admin: false,
+      }),
+    },
+    store: {
+      getGroupList: async () => groupList,
+      setGroupListEntry: async (_groupJid, keyword, entry) => {
+        groupList = {
+          ...groupList,
+          [String(keyword).toLowerCase()]: {
+            text: entry.text,
+            media: entry.media,
+            media_path: entry.media_path,
+          },
+        };
+      },
+    },
+    reply: async (message) => {
+      replies.push(String(message || ""));
+    },
+  };
+
+  await groupBasicPlugin.execute({
+    ...base,
+    command: "updatelist",
+    args: "picsart | harga baru 4000 dan 13000",
+    text: ".updatelist picsart | harga baru 4000 dan 13000",
+    prefix: ".",
+  });
+  await groupBasicPlugin.execute({
+    ...base,
+    command: "",
+    args: "",
+    text: "picsart",
+    prefix: "",
+  });
+
+  assert.match(replies.at(-1), /harga baru 4000 dan 13000/);
+  assert.doesNotMatch(replies.at(-1), /harga lama/);
+});
+
 test("updatelist diblokir ketika metadata grup tidak dapat diverifikasi", async () => {
   const fixture = createContext({
     isOwner: false,

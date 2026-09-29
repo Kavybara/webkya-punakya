@@ -11,16 +11,17 @@ import {
 
 test("profile pool template follows the owner sheet column order", () => {
   assert.deepEqual(SHEET_HEADERS, [
-    "ACCOUNT",
-    "Nama profil",
+    "ACCOUNT & PASSWORD",
+    "PROFIL",
     "TANGGAL",
     "DURASI",
     "EXPIRED",
-    "DEVICE",
+    "PIN",
+    "DEVICE CUSTOMER",
     "SELLER",
     "NOMOR WA",
-    "PIN",
-    "ORDER ID",
+    "ORDER ID / ID MANUAL",
+    "KONDISI AKUN",
     "CATATAN",
     "STOCK ID",
   ]);

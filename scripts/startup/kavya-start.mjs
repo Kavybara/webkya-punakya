@@ -44,8 +44,11 @@ const runtimeBackupScript = path.join(root, "scripts", "maintenance", "runtime-b
 const CHECK = "[√]";
 const CROSS = "[×]";
 const WARN = "⚠️";
+const INFO = "[i]";
+const WAIT = "[~]";
 const GREEN = "\x1b[32m";
 const YELLOW = "\x1b[33m";
+const CYAN = "\x1b[36m";
 const RED = "\x1b[31m";
 const RESET = "\x1b[0m";
 
@@ -59,6 +62,14 @@ function color(value, ansi) {
 
 function logOk(message) {
   console.log(`${color(CHECK, GREEN)} ${message}`);
+}
+
+function logInfo(message) {
+  console.log(`${color(INFO, CYAN)} ${message}`);
+}
+
+function logStep(message) {
+  console.log(`${color(WAIT, YELLOW)} ${message}`);
 }
 
 function logWarn(message) {
@@ -170,7 +181,7 @@ function npmCommand() {
 }
 
 function runSetupStep(name, command, args, options = {}) {
-  logOk(name);
+  logStep(`${name} ...`);
   const result = spawnSync(command, args, {
     cwd: options.cwd || root,
     env: { ...process.env, ...(options.env || {}) },
@@ -183,6 +194,7 @@ function runSetupStep(name, command, args, options = {}) {
     if (options.required === false) return false;
     process.exit(result.status || 1);
   }
+  logOk(`${name} selesai`);
   return true;
 }
 
@@ -206,11 +218,11 @@ function summarizeLegacyImportOutput(rawOutput = "") {
 }
 
 function runLegacyImportStep(args, options = {}) {
-  logOk("Import legacy WhatsApp lists/sewa");
+  logStep("Import legacy WhatsApp lists/sewa ...");
   const result = spawnSync("node", args, {
     cwd: options.cwd || root,
     env: { ...process.env, ...(options.env || {}) },
-    shell: process.platform === "win32",
+    shell: false,
     encoding: "utf8",
     maxBuffer: 10 * 1024 * 1024,
   });
@@ -256,6 +268,7 @@ function packageDependenciesReady(packageDir) {
 let shuttingDown = false;
 const children = [];
 const restartCounters = new Map();
+const serviceReady = new Set();
 
 function nextRestartDelayMs(name) {
   const count = (restartCounters.get(name) || 0) + 1;
@@ -310,6 +323,15 @@ function writeServiceOutput(name, chunk, stream = process.stdout) {
     if (!rawLine) continue;
     const line = rawLine.trimEnd();
     if (!shouldWriteServiceLine(name, line)) continue;
+    const cleanLine = stripAnsi(line);
+    if (name === "DASHBOARD" && !serviceReady.has(name) && /Kavya API running at/i.test(cleanLine)) {
+      serviceReady.add(name);
+      logOk("Dashboard online");
+    }
+    if (name === "WHATSAPP" && !serviceReady.has(name) && /WhatsApp bot listening on port/i.test(cleanLine)) {
+      serviceReady.add(name);
+      logOk("WhatsApp bot online");
+    }
     if (shouldSkipServicePrefix(name, line)) {
       stream.write(`${line}\n`);
     } else {
@@ -433,9 +455,11 @@ const dashboardDistPath = path.join(dashboardDir, "dist", "index.html");
 
 assertProjectTree();
 
+logStep("Menyiapkan folder runtime ...");
 for (const dir of [runtimeDir, runtimeTmpDir, runtimeBackupDir, path.dirname(dashboardDbPath), whatsappAuthDir, whatsappDatabaseDir]) {
   mkdirSync(dir, { recursive: true });
 }
+logOk("Folder runtime siap");
 
 function readDashboardDb() {
   if (!existsSync(dashboardDbPath)) return { settings: {} };
@@ -549,9 +573,23 @@ const commonEnv = {
 };
 
 if (!isDisabled(process.env.AUTO_INSTALL_ON_START, false)) {
-  if (!packageDependenciesReady(root)) runNpmSetupStep("Install root dependencies", ["install"]);
-  if (!packageDependenciesReady(dashboardDir)) runNpmSetupStep("Install dashboard dependencies", ["install"], { cwd: dashboardDir });
-  if (!packageDependenciesReady(whatsappDir)) runNpmSetupStep("Install WhatsApp dependencies", ["install"], { cwd: whatsappDir });
+  logStep("Cek dependencies ...");
+  let installedAny = false;
+  if (!packageDependenciesReady(root)) {
+    installedAny = true;
+    runNpmSetupStep("Install root dependencies", ["install"]);
+  }
+  if (!packageDependenciesReady(dashboardDir)) {
+    installedAny = true;
+    runNpmSetupStep("Install dashboard dependencies", ["install"], { cwd: dashboardDir });
+  }
+  if (!packageDependenciesReady(whatsappDir)) {
+    installedAny = true;
+    runNpmSetupStep("Install WhatsApp dependencies", ["install"], { cwd: whatsappDir });
+  }
+  if (!installedAny) logOk("Dependencies sudah siap");
+} else {
+  logInfo("Install dependencies dilewati");
 }
 cloudflaredBin = resolveCloudflaredBin();
 ensureExecutable(cloudflaredBin);
@@ -562,6 +600,8 @@ if (!existsSync(dashboardDistPath)) {
     process.exit(1);
   }
   runNpmSetupStep("Build dashboard production", ["run", "web:build"], { cwd: dashboardDir });
+} else {
+  logOk("Build dashboard sudah siap");
 }
 
 if (!isDisabled(process.env.AUTO_IMPORT_LEGACY_ON_START, false)) {
@@ -575,11 +615,13 @@ if (!isDisabled(process.env.AUTO_IMPORT_LEGACY_ON_START, false)) {
   } else {
     logWarn("scripts/deploy/import-legacy-wa-backup.mjs tidak ditemukan, import legacy dilewati.");
   }
+} else {
+  logInfo("Import legacy dilewati");
 }
 
-logOk("Start App ...");
-logOk(`Dashboard siap di port ${webPort}`);
-logOk(`WhatsApp bot siap di port ${whatsappPort}`);
+logStep("Start App ...");
+logStep(`Menyalakan Dashboard di port ${webPort} ...`);
+logStep(`Menyalakan WhatsApp bot di port ${whatsappPort} ...`);
 logOk(`Public domain : ${publicDomain}`);
 
 spawnService("DASHBOARD", "node", ["server/index.js"], {
@@ -604,7 +646,18 @@ spawnService("WHATSAPP", "node", ["index.js"], {
 
 if (cloudflaredToken) {
   logOk("Cloudflare Tunnel start dari .env");
-  spawnIsolatedService("TUNNEL", cloudflaredBin, ["tunnel", "--loglevel", process.env.CLOUDFLARED_LOG_LEVEL || "warn", "--no-autoupdate", "run", "--token", cloudflaredToken], {
+  const tunnelProtocol = firstConfigured(process.env.CLOUDFLARED_PROTOCOL, "http2");
+  spawnIsolatedService("TUNNEL", cloudflaredBin, [
+    "tunnel",
+    "--protocol",
+    tunnelProtocol,
+    "--loglevel",
+    process.env.CLOUDFLARED_LOG_LEVEL || "error",
+    "--no-autoupdate",
+    "run",
+    "--token",
+    cloudflaredToken,
+  ], {
     cwd: root,
     env: commonEnv,
     restartOnExit: true,
