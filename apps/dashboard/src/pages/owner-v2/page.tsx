@@ -13,11 +13,10 @@ import {
   Users,
   WalletCards,
   Wifi,
-  X,
 } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Link } from "react-router-dom";
-import { Badge } from "../../components/ui";
+import { Badge, DetailRow, Drawer, ErrorState, LoadingState, MetricRow, Toast } from "../../components/ui";
 import { DataTable, type DataColumn, type DataFilter } from "../../components/ui/DataTable";
 import { ConsoleShell } from "../../components/console/ConsoleShell";
 import { api, type ApiOrder, type ApiReseller, type ApiStockItem, type OperationsCenterResult, type SystemStatus } from "../../lib/api";
@@ -68,30 +67,6 @@ function fulfillmentLabel(order: ApiOrder) {
 }
 
 
-function KpiCard({
-  label,
-  value,
-  hint,
-  icon: Icon,
-  loading,
-  error,
-}: {
-  label: string;
-  value: string | number;
-  hint: string;
-  icon: typeof WalletCards;
-  loading: boolean;
-  error?: string;
-}) {
-  return (
-    <article className="console-kpi-card">
-      <div className="console-kpi-heading"><span>{label}</span><Icon size={18} /></div>
-      {loading ? <span className="console-kpi-skeleton" /> : error ? <strong className="console-kpi-error">Tidak tersedia</strong> : <strong>{value}</strong>}
-      <p>{error || hint}</p>
-    </article>
-  );
-}
-
 function SystemRow({ icon: Icon, label, detail, ok, warning = false }: { icon: typeof Server; label: string; detail: string; ok: boolean; warning?: boolean }) {
   return (
     <div className="console-system-row">
@@ -141,7 +116,6 @@ export default function OwnerConsoleOverviewPage() {
     setRefreshing(false);
     if (manual) {
       setToast(Object.keys(nextErrors).length ? "Refresh selesai dengan sebagian data gagal dimuat." : "Ringkasan berhasil diperbarui.");
-      window.setTimeout(() => setToast(""), 2800);
     }
   }, []);
 
@@ -151,13 +125,6 @@ export default function OwnerConsoleOverviewPage() {
       setRefreshing(false);
     });
   }, [loadData]);
-
-  useEffect(() => {
-    if (!selectedOrder) return;
-    const onKeyDown = (event: KeyboardEvent) => event.key === "Escape" && setSelectedOrder(null);
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedOrder]);
 
   const today = dateKey(new Date());
   const liveOrders = useMemo(() => data.orders.filter((order) => !isSmokeTest(order)), [data.orders]);
@@ -233,12 +200,15 @@ export default function OwnerConsoleOverviewPage() {
       systemState={loading ? "loading" : errors.operations || errors.system ? "unknown" : attentionCount ? "warning" : "healthy"}
       onRefresh={() => loadData(true)}
     >
-      <section className="console-kpi-grid" aria-label="Indikator utama">
-        <KpiCard label="Pendapatan hari ini" value={formatRupiah(metrics.revenueToday)} hint="Order paid non-smoke-test hari ini" icon={WalletCards} loading={loading} error={errors.orders} />
-        <KpiCard label="Pesanan hari ini" value={metrics.ordersToday} hint="Pesanan live pada hari berjalan" icon={ShoppingCart} loading={loading} error={errors.orders} />
-        <KpiCard label="Stok siap" value={metrics.ready} hint={`${metrics.reserved} reserved / ${metrics.sold} sold`} icon={PackageCheck} loading={loading} error={errors.stock} />
-        <KpiCard label="Reseller aktif" value={metrics.activeResellers} hint={`${data.resellers.length} reseller terdaftar`} icon={Users} loading={loading} error={errors.resellers} />
-      </section>
+      <MetricRow
+        label="Indikator utama"
+        items={[
+          { label: "Pendapatan hari ini", value: formatRupiah(metrics.revenueToday), hint: "Order paid non-smoke-test hari ini", icon: <WalletCards size={17} />, loading, error: errors.orders },
+          { label: "Pesanan hari ini", value: metrics.ordersToday, hint: "Pesanan live pada hari berjalan", icon: <ShoppingCart size={17} />, loading, error: errors.orders },
+          { label: "Stok siap", value: metrics.ready, hint: `${metrics.reserved} reserved / ${metrics.sold} sold`, icon: <PackageCheck size={17} />, loading, error: errors.stock },
+          { label: "Reseller aktif", value: metrics.activeResellers, hint: `${data.resellers.length} reseller terdaftar`, icon: <Users size={17} />, loading, error: errors.resellers },
+        ]}
+      />
 
       <section className="console-operational-grid">
         <article className="console-panel console-revenue-panel">
@@ -246,7 +216,7 @@ export default function OwnerConsoleOverviewPage() {
             <div><span>Pendapatan & pesanan</span><h2>7 hari terakhir</h2></div>
             <strong>{formatRupiah(revenueSeries.reduce((sum, item) => sum + item.revenue, 0))}</strong>
           </div>
-          {loading ? <div className="console-chart-skeleton" /> : errors.orders ? <div className="console-panel-error">{errors.orders}</div> : (
+          {loading ? <LoadingState label="Memuat grafik pendapatan" /> : errors.orders ? <ErrorState message={errors.orders} onRetry={() => void loadData(true)} /> : (
             <div className="console-chart-wrap" aria-label="Grafik pendapatan tujuh hari">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={revenueSeries} margin={{ top: 12, right: 8, left: -8, bottom: 0 }}>
@@ -268,20 +238,20 @@ export default function OwnerConsoleOverviewPage() {
 
         <article className="console-panel console-system-panel">
           <div className="console-panel-header"><div><span>Kondisi layanan</span><h2>Status sistem</h2></div><Server size={19} /></div>
-          {loading ? <div className="console-list-skeleton">{Array.from({ length: 4 }, (_, index) => <span key={index} />)}</div> : errors.system ? <div className="console-panel-error">{errors.system}</div> : system ? (
+          {loading ? <LoadingState label="Memuat status sistem" /> : errors.system ? <ErrorState message={errors.system} onRetry={() => void loadData(true)} /> : system ? (
             <div className="console-system-list">
               <SystemRow icon={Wifi} label="WhatsApp" detail={system.whatsapp.state || "Status koneksi"} ok={system.whatsapp.connected} />
               <SystemRow icon={Sheet} label="Google Sheets" detail={lastSync ? `Sync ${formatDateTime(lastSync)}` : "Belum ada waktu sync"} ok={Boolean(sheets?.configured && lastSync)} warning={Boolean(sheets?.configured)} />
               <SystemRow icon={Server} label="VPS" detail={`${system.server.platform} / uptime ${Math.floor(system.server.uptime / 3600)} jam`} ok={system.ok} />
               <SystemRow icon={Cloud} label="Tunnel" detail={system.tunnel.publicDomain || "Domain belum terpasang"} ok={system.tunnel.running} warning={system.tunnel.configured} />
             </div>
-          ) : <div className="console-panel-error">Status sistem belum tersedia.</div>}
+          ) : <ErrorState message="Status sistem belum tersedia." onRetry={() => void loadData(true)} />}
           <Link to="/owner-v2/integrations" className="console-panel-link">Buka status integrasi <ExternalLink size={14} /></Link>
         </article>
 
         <article className="console-panel console-stock-panel">
           <div className="console-panel-header"><div><span>Ketersediaan</span><h2>Status stok</h2></div><Boxes size={19} /></div>
-          {loading ? <div className="console-list-skeleton"><span /><span /><span /></div> : errors.stock ? <div className="console-panel-error">{errors.stock}</div> : (
+          {loading ? <LoadingState label="Memuat status stok" /> : errors.stock ? <ErrorState message={errors.stock} onRetry={() => void loadData(true)} /> : (
             <div className="console-stock-stats">
               <div><span>Ready</span><strong>{metrics.ready}</strong><i style={{ width: `${Math.min(100, metrics.ready ? 100 : 0)}%` }} /></div>
               <div><span>Reserved</span><strong>{metrics.reserved}</strong><i style={{ width: `${Math.min(100, metrics.ready + metrics.reserved ? metrics.reserved / (metrics.ready + metrics.reserved) * 100 : 0)}%` }} /></div>
@@ -293,7 +263,7 @@ export default function OwnerConsoleOverviewPage() {
 
         <article className="console-panel console-attention-panel">
           <div className="console-panel-header"><div><span>Prioritas operasional</span><h2>Attention queue</h2></div><AlertTriangle size={19} /></div>
-          {loading ? <div className="console-list-skeleton">{Array.from({ length: 5 }, (_, index) => <span key={index} />)}</div> : (
+          {loading ? <LoadingState label="Memuat antrean prioritas" /> : (
             <div className="console-attention-list">
               {attention.map((item) => (
                 <Link key={item.label} to={item.path} className={item.count ? "has-issue" : ""}>
@@ -324,34 +294,37 @@ export default function OwnerConsoleOverviewPage() {
         />
       </section>
 
-      {selectedOrder ? (
-        <div className="console-drawer-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setSelectedOrder(null)}>
-          <aside className="console-detail-drawer" role="dialog" aria-modal="true" aria-labelledby="order-drawer-title">
-            <div className="console-drawer-header">
-              <div><span>Detail pesanan</span><h2 id="order-drawer-title">{selectedOrder.id}</h2></div>
-              <button type="button" className="ui-icon-button" onClick={() => setSelectedOrder(null)} aria-label="Tutup detail"><X size={18} /></button>
+      <Drawer
+        open={Boolean(selectedOrder)}
+        title={selectedOrder?.id ?? ""}
+        eyebrow="Detail pesanan"
+        onClose={() => setSelectedOrder(null)}
+      >
+        {selectedOrder ? (
+          <>
+            <div className="console-drawer-statuses">
+              <Badge tone={isPaid(selectedOrder) ? "success" : selectedOrder.qrisStatus === "expired" ? "danger" : "warning"}>{paymentLabel(selectedOrder)}</Badge>
+              <Badge tone={fulfillmentLabel(selectedOrder) === "Selesai" ? "success" : fulfillmentLabel(selectedOrder) === "Gagal" ? "danger" : "warning"}>{fulfillmentLabel(selectedOrder)}</Badge>
             </div>
-            <div className="console-drawer-body">
-              <div className="console-drawer-statuses">
-                <Badge tone={isPaid(selectedOrder) ? "success" : selectedOrder.qrisStatus === "expired" ? "danger" : "warning"}>{paymentLabel(selectedOrder)}</Badge>
-                <Badge tone={fulfillmentLabel(selectedOrder) === "Selesai" ? "success" : fulfillmentLabel(selectedOrder) === "Gagal" ? "danger" : "warning"}>{fulfillmentLabel(selectedOrder)}</Badge>
-              </div>
-              <dl>
-                <div><dt>Customer</dt><dd>{selectedOrder.customer || "-"}</dd></div>
-                <div><dt>Produk</dt><dd>{selectedOrder.product} / {selectedOrder.variant}</dd></div>
-                <div><dt>Durasi</dt><dd>{selectedOrder.duration || "-"}</dd></div>
-                <div><dt>Total</dt><dd>{formatRupiah(Number(selectedOrder.total || 0))}</dd></div>
-                <div><dt>Waktu</dt><dd>{formatDateTime(selectedOrder.createdAt)}</dd></div>
-                <div><dt>Channel</dt><dd>{selectedOrder.channel || "-"}</dd></div>
-              </dl>
-              <div className="console-privacy-note"><PackageCheck size={16} /><span>Password, OTP, PIN, token, dan kredensial akun tidak ditampilkan pada Overview.</span></div>
-            </div>
-            <div className="console-drawer-footer"><Link to={`/owner-v2/orders?order=${encodeURIComponent(selectedOrder.id)}`}>Buka audit lengkap <ArrowUpRight size={15} /></Link></div>
-          </aside>
-        </div>
-      ) : null}
+            <dl className="ui-detail-list">
+              <DetailRow label="Customer">{selectedOrder.customer || "-"}</DetailRow>
+              <DetailRow label="Produk">{selectedOrder.product} / {selectedOrder.variant}</DetailRow>
+              <DetailRow label="Durasi">{selectedOrder.duration || "-"}</DetailRow>
+              <DetailRow label="Total">{formatRupiah(Number(selectedOrder.total || 0))}</DetailRow>
+              <DetailRow label="Waktu">{formatDateTime(selectedOrder.createdAt)}</DetailRow>
+              <DetailRow label="Channel">{selectedOrder.channel || "-"}</DetailRow>
+            </dl>
+            <div className="console-privacy-note"><PackageCheck size={16} /><span>Password, OTP, PIN, token, dan kredensial akun tidak ditampilkan pada Overview.</span></div>
+            <Link to={`/owner-v2/orders?order=${encodeURIComponent(selectedOrder.id)}`} className="console-drawer-footer">Buka audit lengkap <ArrowUpRight size={15} /></Link>
+          </>
+        ) : null}
+      </Drawer>
 
-      {toast ? <div className="console-toast" role="status"><CheckCircle2 size={16} />{toast}</div> : null}
+      <Toast
+        message={toast}
+        tone={errors.stock || errors.orders ? "warning" : "success"}
+        onClose={() => setToast("")}
+      />
     </ConsoleShell>
   );
 }

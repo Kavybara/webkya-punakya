@@ -156,10 +156,11 @@ export function Dialog({ open, title, description, eyebrow, onClose, footer, wid
   );
 }
 
-export function Drawer({ open, title, description, onClose, children }: {
+export function Drawer({ open, title, description, eyebrow, onClose, children }: {
   open: boolean;
   title: string;
   description?: string;
+  eyebrow?: string;
   onClose: () => void;
   children: ReactNode;
 }) {
@@ -170,6 +171,7 @@ export function Drawer({ open, title, description, onClose, children }: {
       variant="drawer"
       title={title}
       description={description}
+      eyebrow={eyebrow}
       closeLabel="Tutup detail"
     >
       {children}

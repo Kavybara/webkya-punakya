@@ -1406,6 +1406,9 @@
   background: var(--bg-canvas);
 }
 
+/* The pill takes its colour from the group above, like the duration chip next
+   to it. It used to hardcode #d4d4d8 here, which meant a dark theme change
+   would have left this one label stranded. */
 .reseller-guide-demo-label {
   position: absolute;
   top: 12px;
@@ -1414,7 +1417,6 @@
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 999px;
   background: rgba(7, 7, 8, 0.82);
-  color: #d4d4d8;
   pointer-events: none;
   backdrop-filter: blur(8px);
 }

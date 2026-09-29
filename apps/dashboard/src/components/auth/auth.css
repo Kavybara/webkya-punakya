@@ -81,7 +81,6 @@
 .auth-input,
 .auth-otp-row input {
   width: 100%;
-  height: 48px;
   border: 1px solid var(--border);
   border-radius: 9px;
   outline: none;
@@ -89,7 +88,7 @@
   color: var(--text-primary);
   transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
 }
-.auth-input { padding: 0 14px; font-size: 16px; }
+.auth-input { height: 48px; padding: 0 14px; font-size: 16px; }
 .auth-input::placeholder { color: var(--text-muted); opacity: 1; }
 .auth-input:hover { background: var(--surface-hover); }
 .auth-input:focus,

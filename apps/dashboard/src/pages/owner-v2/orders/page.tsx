@@ -7,19 +7,18 @@ import {
   PackageCheck,
   RefreshCw,
   ShieldAlert,
-  X,
 } from "lucide-react";
-import { Link, useSearchParams } from "react-router-dom";
-import { Badge } from "../../../components/ui";
+import { useSearchParams } from "react-router-dom";
+import { Badge, DetailRow, Dialog, DialogActions, Drawer, Field, LoadingState, MetricRow, Notice, Toast } from "../../../components/ui";
 import { DataTable, type DataColumn, type DataFilter } from "../../../components/ui/DataTable";
 import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import { api, subscribeRealtime, type ApiOrder } from "../../../lib/api";
 import { formatRupiah } from "../../../lib/format";
 import { formatDateTimeFull } from "../../../lib/format";
+import type { Tone } from "../../../components/ui";
 
 type ActionKind = "mark-paid" | "approve-manual" | "retry-delivery" | "repair-sheets" | "rerender-template";
 type PendingAction = { kind: ActionKind; order: ApiOrder } | null;
-type Tone = "success" | "warning" | "danger" | "muted";
 
 const statusOptions = [
   { value: "all", label: "Semua" },
@@ -162,17 +161,6 @@ export default function OwnerConsoleOrdersPage() {
     if (matched) openOrderDetail(matched).catch(() => undefined);
   }, [openOrderDetail, orders, requestedOrder, selectedOrder?.id]);
 
-  useEffect(() => {
-    if (!selectedOrder && !pendingAction) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      if (pendingAction) setPendingAction(null);
-      else closeOrderDetail();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeOrderDetail, pendingAction, selectedOrder]);
-
   const liveOrders = useMemo(() => orders.filter((order) => !isSmokeTest(order)), [orders]);
   const attentionCount = useMemo(() => liveOrders.filter((order) => fulfillmentLabel(order) === "Gagal" || (isPaid(order) && fulfillmentLabel(order) !== "Selesai")).length, [liveOrders]);
   const filteredOrders = useMemo(() => orders.filter((order) => matchesStatus(order, activeStatus)).sort((left, right) => (parseDate(right.createdAt)?.getTime() || 0) - (parseDate(left.createdAt)?.getTime() || 0)), [activeStatus, orders]);
@@ -226,7 +214,6 @@ export default function OwnerConsoleOrdersPage() {
       await openOrderDetail(order);
       setPendingAction(null);
       setToast(`${actionText(kind).button} berhasil dijalankan.`);
-      window.setTimeout(() => setToast(""), 2800);
     } catch (executeError) {
       setActionError(executeError instanceof Error ? executeError.message : "Tindakan gagal dijalankan.");
     } finally {
@@ -246,13 +233,17 @@ export default function OwnerConsoleOrdersPage() {
       systemState={loading ? "loading" : error ? "unknown" : attentionCount ? "warning" : "healthy"}
       onRefresh={() => loadOrders(true)}
     >
-      <section className="console-order-summary" aria-label="Ringkasan status pesanan">
-        {statusOptions.slice(0, 6).map((item) => (
-          <button key={item.value} type="button" className={activeStatus === item.value ? "is-active" : ""} onClick={() => selectStatus(item.value)}>
-            <span>{item.label}</span><strong>{counts[item.value] || 0}</strong>
-          </button>
-        ))}
-      </section>
+      <MetricRow
+        label="Ringkasan status pesanan"
+        items={statusOptions.slice(0, 6).map((item) => ({
+          label: item.label,
+          value: counts[item.value] || 0,
+          active: activeStatus === item.value,
+          loading,
+          error: error || undefined,
+          onClick: () => selectStatus(item.value),
+        }))}
+      />
 
       <section className="console-panel console-orders-page-panel" aria-labelledby="orders-table-title">
         <div className="console-panel-header console-orders-heading">
@@ -270,79 +261,94 @@ export default function OwnerConsoleOrdersPage() {
         />
       </section>
 
-      {selectedOrder ? (
-        <div className="console-drawer-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && closeOrderDetail()}>
-          <aside className="console-detail-drawer console-order-detail-drawer" role="dialog" aria-modal="true" aria-labelledby="console-order-detail-title">
-            <div className="console-drawer-header">
-              <div><span>Audit pesanan</span><h2 id="console-order-detail-title">{selectedOrder.id}</h2></div>
-              <button type="button" className="ui-icon-button" onClick={closeOrderDetail} aria-label="Tutup detail"><X size={18} /></button>
+      <Drawer
+        open={Boolean(selectedOrder)}
+        title={selectedOrder?.id ?? ""}
+        eyebrow="Audit pesanan"
+        onClose={closeOrderDetail}
+      >
+        {selectedOrder ? (
+          <>
+            <div className="console-drawer-statuses"><Badge tone={badgeTone(paymentLabel(selectedOrder))}>{paymentLabel(selectedOrder)}</Badge><Badge tone={badgeTone(fulfillmentLabel(selectedOrder))}>{fulfillmentLabel(selectedOrder)}</Badge>{isSmokeTest(selectedOrder) ? <Badge tone="info">Smoke test</Badge> : null}</div>
+            {detailLoading ? <LoadingState label="Memuat detail order" /> : null}
+            {detailError ? <Notice tone="danger">{detailError}</Notice> : null}
+            <dl className="ui-detail-list">
+              <DetailRow label="Customer">{selectedOrder.customer || "-"}</DetailRow>
+              <DetailRow label="Reseller">{selectedOrder.resellerName || selectedOrder.reseller || "Direct"}</DetailRow>
+              <DetailRow label="Produk">{selectedOrder.product} / {selectedOrder.variant}</DetailRow>
+              <DetailRow label="Durasi">{selectedOrder.duration || "-"}</DetailRow>
+              <DetailRow label="Total">{formatRupiah(Number(selectedOrder.total || 0))}</DetailRow>
+              <DetailRow label="Payment ref">{selectedOrder.paymentRef || "-"}</DetailRow>
+              <DetailRow label="Metode">{selectedOrder.paymentMethod || (Number(selectedOrder.depositUsed || 0) ? "Deposit" : "QRIS")}</DetailRow>
+              <DetailRow label="Akun terkirim">{deliveredCount}</DetailRow>
+              <DetailRow label="Template pengiriman">{selectedOrder.deliveryTemplateSnapshot?.status === "ready" ? `Siap · versi ${selectedOrder.deliveryTemplateSnapshot.templateVersion || 1}` : selectedOrder.deliveryTemplateSnapshot?.status === "incomplete" ? "Detail akun belum lengkap" : selectedOrder.deliveryTemplateSnapshot?.status === "invalid" ? "Template tidak valid" : "Belum dikonfigurasi"}</DetailRow>
+              <DetailRow label="Dibuat">{formatDateTimeFull(selectedOrder.createdAt)}</DetailRow>
+            </dl>
+            <div className="console-privacy-note"><ShieldAlert size={16} /><span>Kredensial akun disembunyikan. Password, OTP, PIN, token, dan link privat tidak dirender di Console.</span></div>
+
+            {selectedOrder.deliveryTemplateSnapshot?.status === "incomplete" ? (
+              <Notice tone="danger">
+                Field yang masih kurang: {(selectedOrder.deliveryTemplateSnapshot.missingFields || []).join(", ") || "periksa detail akun"}.
+              </Notice>
+            ) : null}
+            {selectedOrder.deliveryTemplateSnapshot?.status === "invalid" ? (
+              <Notice tone="danger">Template varian tidak valid. Perbaiki melalui Produk, lalu jalankan render ulang.</Notice>
+            ) : null}
+
+            {selectedOrder.traceEvents?.length ? (
+              <section className="console-order-trace" aria-labelledby="console-trace-title">
+                <h3 id="console-trace-title">Timeline audit</h3>
+                {selectedOrder.traceEvents.slice(-8).reverse().map((event) => (
+                  <div key={event.id}><span /><p><strong>{event.title}</strong><small>{event.detail}</small><time>{formatDateTimeFull(event.createdAt)}</time></p></div>
+                ))}
+              </section>
+            ) : null}
+
+            {selectedOrder.deliveryError ? <Notice tone="danger">{selectedOrder.deliveryError}</Notice> : null}
+            <div className="console-order-actions">
+              {!isPaid(selectedOrder) && selectedOrder.qrisStatus !== "expired" ? <button type="button" onClick={() => requestAction("mark-paid", selectedOrder)}><CircleDollarSign size={16} /> Mark paid</button> : null}
+              {selectedOrder.orderStatus !== "completed" && String(selectedOrder.qrisStatus) !== "manual" ? <button type="button" onClick={() => requestAction("approve-manual", selectedOrder)}><CheckCircle2 size={16} /> Approve manual</button> : null}
+              {fulfillmentLabel(selectedOrder) === "Gagal" ? <button type="button" onClick={() => requestAction("retry-delivery", selectedOrder)}><RefreshCw size={16} /> Retry delivery</button> : null}
+              {selectedOrder.orderStatus === "completed" && deliveredCount === 0 ? <button type="button" onClick={() => requestAction("repair-sheets", selectedOrder)}><PackageCheck size={16} /> Pulihkan Sheets</button> : null}
+              {selectedOrder.orderStatus === "completed" && deliveredCount > 0 ? <button type="button" onClick={() => requestAction("rerender-template", selectedOrder)}><RefreshCw size={16} /> Render ulang template</button> : null}
             </div>
-            <div className="console-drawer-body">
-              <div className="console-drawer-statuses"><Badge tone={badgeTone(paymentLabel(selectedOrder))}>{paymentLabel(selectedOrder)}</Badge><Badge tone={badgeTone(fulfillmentLabel(selectedOrder))}>{fulfillmentLabel(selectedOrder)}</Badge>{isSmokeTest(selectedOrder) ? <Badge tone="info">Smoke test</Badge> : null}</div>
-              {detailLoading ? <div className="console-order-detail-loading"><RefreshCw size={17} className="ui-spin" /> Memuat detail order...</div> : null}
-              {detailError ? <div className="console-inline-error">{detailError}</div> : null}
-              <dl>
-                <div><dt>Customer</dt><dd>{selectedOrder.customer || "-"}</dd></div>
-                <div><dt>Reseller</dt><dd>{selectedOrder.resellerName || selectedOrder.reseller || "Direct"}</dd></div>
-                <div><dt>Produk</dt><dd>{selectedOrder.product} / {selectedOrder.variant}</dd></div>
-                <div><dt>Durasi</dt><dd>{selectedOrder.duration || "-"}</dd></div>
-                <div><dt>Total</dt><dd>{formatRupiah(Number(selectedOrder.total || 0))}</dd></div>
-                <div><dt>Payment ref</dt><dd>{selectedOrder.paymentRef || "-"}</dd></div>
-                <div><dt>Metode</dt><dd>{selectedOrder.paymentMethod || (Number(selectedOrder.depositUsed || 0) ? "Deposit" : "QRIS")}</dd></div>
-                <div><dt>Akun terkirim</dt><dd>{deliveredCount}</dd></div>
-                <div><dt>Template pengiriman</dt><dd>{selectedOrder.deliveryTemplateSnapshot?.status === "ready" ? `Siap · versi ${selectedOrder.deliveryTemplateSnapshot.templateVersion || 1}` : selectedOrder.deliveryTemplateSnapshot?.status === "incomplete" ? "Detail akun belum lengkap" : selectedOrder.deliveryTemplateSnapshot?.status === "invalid" ? "Template tidak valid" : "Belum dikonfigurasi"}</dd></div>
-                <div><dt>Dibuat</dt><dd>{formatDateTimeFull(selectedOrder.createdAt)}</dd></div>
-              </dl>
-              <div className="console-privacy-note"><ShieldAlert size={16} /><span>Kredensial akun disembunyikan. Password, OTP, PIN, token, dan link privat tidak dirender di Console.</span></div>
+          </>
+        ) : null}
+      </Drawer>
 
-              {selectedOrder.deliveryTemplateSnapshot?.status === "incomplete" ? (
-                <div className="console-inline-error">
-                  <AlertTriangle size={15} />
-                  Field yang masih kurang: {(selectedOrder.deliveryTemplateSnapshot.missingFields || []).join(", ") || "periksa detail akun"}.
-                </div>
-              ) : null}
-              {selectedOrder.deliveryTemplateSnapshot?.status === "invalid" ? (
-                <div className="console-inline-error">
-                  <AlertTriangle size={15} />
-                  Template varian tidak valid. Perbaiki melalui Produk, lalu jalankan render ulang.
-                </div>
-              ) : null}
+      <Dialog
+        open={Boolean(pendingAction)}
+        title="Konfirmasi tindakan"
+        eyebrow="Tindakan sensitif"
+        onClose={() => setPendingAction(null)}
+      >
+        {pendingAction ? (
+          <>
+            <p className="ui-dialog-lead">{actionText(pendingAction.kind).title}</p>
+            <p className="ui-dialog-note">{actionText(pendingAction.kind).detail}</p>
+            {pendingAction.kind === "approve-manual" ? (
+              <Field label="Alasan approval" hint="Tersimpan pada audit log order." required>
+                <textarea
+                  value={actionReason}
+                  onChange={(event) => setActionReason(event.target.value)}
+                  placeholder="Tulis alasan yang dapat diaudit..."
+                  autoFocus
+                />
+              </Field>
+            ) : null}
+            {actionError ? <Notice tone="danger">{actionError}</Notice> : null}
+            <DialogActions
+              onCancel={() => setPendingAction(null)}
+              onConfirm={() => void executeAction()}
+              confirmLabel={actionText(pendingAction.kind).button}
+              busy={actionBusy}
+              danger
+            />
+          </>
+        ) : null}
+      </Dialog>
 
-              {selectedOrder.traceEvents?.length ? (
-                <section className="console-order-trace" aria-labelledby="console-trace-title">
-                  <h3 id="console-trace-title">Timeline audit</h3>
-                  {selectedOrder.traceEvents.slice(-8).reverse().map((event) => (
-                    <div key={event.id}><span /><p><strong>{event.title}</strong><small>{event.detail}</small><time>{formatDateTimeFull(event.createdAt)}</time></p></div>
-                  ))}
-                </section>
-              ) : null}
-
-              {selectedOrder.deliveryError ? <div className="console-inline-error"><AlertTriangle size={15} />{selectedOrder.deliveryError}</div> : null}
-              <div className="console-order-actions">
-                {!isPaid(selectedOrder) && selectedOrder.qrisStatus !== "expired" ? <button type="button" onClick={() => requestAction("mark-paid", selectedOrder)}><CircleDollarSign size={16} /> Mark paid</button> : null}
-                {selectedOrder.orderStatus !== "completed" && String(selectedOrder.qrisStatus) !== "manual" ? <button type="button" onClick={() => requestAction("approve-manual", selectedOrder)}><CheckCircle2 size={16} /> Approve manual</button> : null}
-                {fulfillmentLabel(selectedOrder) === "Gagal" ? <button type="button" onClick={() => requestAction("retry-delivery", selectedOrder)}><RefreshCw size={16} /> Retry delivery</button> : null}
-                {selectedOrder.orderStatus === "completed" && deliveredCount === 0 ? <button type="button" onClick={() => requestAction("repair-sheets", selectedOrder)}><PackageCheck size={16} /> Pulihkan Sheets</button> : null}
-                {selectedOrder.orderStatus === "completed" && deliveredCount > 0 ? <button type="button" onClick={() => requestAction("rerender-template", selectedOrder)}><RefreshCw size={16} /> Render ulang template</button> : null}
-              </div>
-            </div>
-          </aside>
-        </div>
-      ) : null}
-
-      {pendingAction ? (
-        <div className="console-dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setPendingAction(null)}>
-          <section className="console-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="console-confirm-title">
-            <div className="console-confirm-icon"><AlertTriangle size={20} /></div>
-            <div><span>Tindakan sensitif</span><h2 id="console-confirm-title">Konfirmasi tindakan</h2><h3>{actionText(pendingAction.kind).title}</h3><p>{actionText(pendingAction.kind).detail}</p></div>
-            {pendingAction.kind === "approve-manual" ? <label className="console-reason-field"><span>Alasan approval</span><textarea value={actionReason} onChange={(event) => setActionReason(event.target.value)} placeholder="Tulis alasan yang dapat diaudit..." autoFocus /></label> : null}
-            {actionError ? <div className="console-inline-error">{actionError}</div> : null}
-            <div className="console-confirm-actions"><button type="button" className="ui-button is-secondary" onClick={() => setPendingAction(null)} disabled={actionBusy}>Batal</button><button type="button" className="console-primary-button" onClick={executeAction} disabled={actionBusy}>{actionBusy ? "Memproses..." : actionText(pendingAction.kind).button}</button></div>
-          </section>
-        </div>
-      ) : null}
-
-      {toast ? <div className="console-toast" role="status"><CheckCircle2 size={16} />{toast}</div> : null}
+      <Toast message={toast} tone="success" onClose={() => setToast("")} />
     </ConsoleShell>
   );
 }

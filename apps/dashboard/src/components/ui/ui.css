@@ -131,6 +131,14 @@
 
 .ui-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 9px; margin-top: 20px; }
 
+/* What a dialog says before its actions. The lead is the question being asked
+   and the note is the consequence, so they are set apart from each other
+   rather than run together as one paragraph. */
+.ui-dialog-lead { margin: 0; color: var(--text-primary); font-size: 13.5px; font-weight: 650; line-height: 1.5; }
+.ui-dialog-note { margin: 6px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
+.ui-panel-body > .ui-notice { margin-top: 14px; }
+.ui-panel-body > .ui-field { margin-top: 16px; }
+
 /* A centred modal. The drawer below is the same panel pushed to the edge. */
 .ui-overlay {
   position: fixed;
@@ -256,9 +264,14 @@
   border-radius: 8px;
   background: linear-gradient(90deg, color-mix(in srgb, var(--surface-hover) 40%, transparent), var(--surface-hover), color-mix(in srgb, var(--surface-hover) 40%, transparent));
   background-size: 200% 100%;
-  animation: ui-shimmer 1.2s linear infinite;
+  animation: ui-shimmer 1.4s ease-in-out infinite;
 }
-@keyframes ui-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+/* The one shimmer. It is declared with the skeleton below rather than beside
+   each of the three that use it, so a fourth has an obvious place to find. */
+@keyframes ui-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
 .ui-command-group + .ui-command-group { margin-top: 13px; }
 .ui-command-group > p {
   margin: 0 8px 6px;
@@ -386,11 +399,6 @@
 .ui-skeleton > span:nth-child(2) { width: 88%; }
 .ui-skeleton > span:nth-child(3) { width: 64%; }
 
-@keyframes ui-shimmer {
-  from { background-position: 200% 0; }
-  to { background-position: -200% 0; }
-}
-
 .ui-spin { animation: ui-spin 900ms linear infinite; }
 @keyframes ui-spin { to { transform: rotate(360deg); } }
 
@@ -516,11 +524,35 @@
 }
 .ui-metric > small { color: var(--text-secondary); font-size: 11px; line-height: 1.45; }
 
+/* Two ways a number can be absent, kept apart because they mean different
+   things. "Loading" is a placeholder of the number's own size, so the row does
+   not jump when the value lands. "Missing" is a number that will not arrive,
+   and it is set in the muted face -- an error rendered in the display serif at
+   25px reads as a headline, which is not what happened. */
+.ui-metric-pending {
+  display: block;
+  width: 62%;
+  height: 25px;
+  margin: 3px 0;
+  border-radius: 5px;
+  background: var(--surface-hover);
+  animation: ui-pulse 1.4s ease-in-out infinite;
+}
+.ui-metric-missing { color: var(--text-muted) !important; font-family: inherit !important; font-size: 15px !important; font-weight: 600; }
+@keyframes ui-pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 0.85; } }
+
 /* A metric that is also a link must look like one, and must not move
    under the pointer. */
 .ui-metric.is-interactive { cursor: pointer; transition: border-color 150ms ease, background 150ms ease, transform 150ms ease; }
 .ui-metric.is-interactive:hover { border-color: var(--border-strong); background: var(--surface-hover); transform: translateY(-1px); }
 .ui-metric.is-interactive:active { transform: none; }
+/* The selected filter. A coloured edge, because a filled card reads as a
+   button being pressed rather than a filter that is on. */
+.ui-metric.is-interactive.is-active {
+  border-color: color-mix(in srgb, var(--accent-violet) 50%, transparent);
+  background: color-mix(in srgb, var(--accent-violet) 8%, transparent);
+}
+.ui-metric.is-interactive.is-active > strong { color: var(--text-primary); }
 
 .ui-action-card {
   display: flex;
@@ -551,9 +583,7 @@
 .ui-field > small { color: var(--text-muted); font-size: 10.5px; line-height: 1.5; }
 
 .ui-field input,
-.ui-field select,
-.ui-field textarea,
-.ui-select-wrap select {
+.ui-field select {
   width: 100%;
   min-height: 38px;
   padding: 0 11px;
@@ -565,15 +595,30 @@
   font-size: 12px;
   transition: border-color 150ms ease, background 150ms ease;
 }
-.ui-field textarea { min-height: 84px; padding: 9px 11px; line-height: 1.55; resize: vertical; }
+/* A textarea wants real vertical padding and room to breathe, so it states its
+   box outright rather than taking the single-line metrics and then overriding
+   two of them -- which is how `min-height: 38px` ended up dead one line above. */
+.ui-field textarea {
+  width: 100%;
+  min-height: 84px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-raised);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.55;
+  resize: vertical;
+  transition: border-color 150ms ease, background 150ms ease;
+}
 .ui-field input::placeholder, .ui-field textarea::placeholder { color: var(--text-muted); }
 .ui-field input:hover, .ui-field select:hover, .ui-field textarea:hover { border-color: var(--border-strong); }
 .ui-field input:focus, .ui-field select:focus, .ui-field textarea:focus { border-color: var(--accent-violet); background: var(--surface); }
 
-.ui-select-wrap { position: relative; display: inline-flex; align-items: center; }
-.ui-select-wrap select { padding-right: 28px; appearance: none; cursor: pointer; }
-.ui-select-wrap > svg { position: absolute; right: 9px; color: var(--text-muted); pointer-events: none; }
-
+/* The definition list that a run of DetailRows lives in. A <dl> carries a
+   browser margin that has no business inside a panel's padding. */
+.ui-detail-list { margin: 0; }
 .ui-detail-row { display: grid; grid-template-columns: minmax(96px, 34%) 1fr; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
 .ui-detail-row:last-child { border-bottom: 0; }
 .ui-detail-row dt { color: var(--text-muted); font-size: 11.5px; }
@@ -658,6 +703,7 @@
 @media (prefers-reduced-motion: reduce) {
   .ui-panel, .ui-panel *, .ui-command, .ui-command *, .ui-toast, .ui-metric, .ui-action-card, .ui-button, .ui-icon-button { animation: none !important; transition: none !important; }
   .ui-skeleton > span, .ui-command-skeleton span { animation: none; background: var(--bg-raised); }
+  .ui-metric-pending { animation: none; }
   .ui-metric.is-interactive:hover, .ui-action-card:hover { transform: none; }
 }
 
@@ -692,10 +738,24 @@
 .ui-table-search input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; color: var(--text-primary); font-size: 12px; }
 .ui-table-search input::placeholder { color: var(--text-muted); }
 .ui-table-tools { display: flex; align-items: center; gap: 8px; }
+/* The DataTable toolbar: a filter select with a chevron drawn over it, and the
+   column button beside it. Both are the same control at a deliberately smaller
+   size than a form field -- the wrap used to be declared twice in this file, a
+   hundred lines apart, and the later copy quietly shrank every select that
+   matched it. One place, one size. */
 .ui-select-wrap { position: relative; display: inline-flex; align-items: center; }
-.ui-select-wrap select, .ui-tool-button { height: 37px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-raised); color: var(--text-secondary); font-size: 11px; cursor: pointer; }
-.ui-select-wrap select { min-width: 130px; padding: 0 30px 0 10px; appearance: none; }
-.ui-select-wrap svg { position: absolute; right: 9px; pointer-events: none; }
+.ui-select-wrap select,
+.ui-tool-button {
+  height: 37px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+.ui-select-wrap select { min-width: 130px; padding: 0 30px 0 11px; appearance: none; }
+.ui-select-wrap > svg { position: absolute; right: 9px; color: var(--text-muted); pointer-events: none; }
 .ui-tool-button { display: inline-flex; align-items: center; gap: 7px; padding: 0 10px; }
 .ui-tool-button:hover { border-color: var(--border-strong); color: var(--text-primary); }
 .ui-column-menu-wrap { position: relative; }
