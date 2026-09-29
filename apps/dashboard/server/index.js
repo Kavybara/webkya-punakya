@@ -9166,8 +9166,82 @@ app.listen(port, host, () => {
   console.log(`Kavya API running at http://${host}:${port}`);
   console.log(`Database: ${databasePath}`);
 });
-setTimeout(runRentalReminderJob, 10_000);
-setInterval(runRentalReminderJob, 60 * 60 * 1000);
+
+/**
+ * Schedule one of the background jobs, or do not.
+ *
+ * This server is not a library you can start read-only. Starting it writes to
+ * the real database, the real Google Sheets, and sends real WhatsApp messages:
+ * the expiry job fires five seconds after boot, the payment sync at fifteen,
+ * and the rest follow every thirty seconds to the hour. Running a second
+ * instance next to the production one -- which is what a local `npm run dev`
+ * used to do -- means two processes expiring the same pending orders, syncing
+ * the same payments, and writing the same spreadsheet at once.
+ *
+ * So the jobs are opt-out rather than opt-in, and switching them off is a
+ * single environment variable:
+ *
+ *   DISABLE_BACKGROUND_JOBS=1 npm run dev
+ *
+ * The API still serves every request, which is all a UI review needs. The one
+ * thing it will not do is move on its own -- nothing expires, nothing syncs,
+ * nothing messages anyone. Anything that changes state still has to be
+ * requested by hand through the API, which is the point.
+ */
+const backgroundJobsDisabled = ["1", "true", "yes", "on"]
+  .includes(String(process.env.DISABLE_BACKGROUND_JOBS || "").trim().toLowerCase());
+
+const scheduledJobs = [];
+
+/**
+ * Run `job` once after `firstDelayMs`, then every `everyMs`.
+ *
+ * Named per job so a developer reading the startup log can see exactly which
+ * ones are running, rather than inferring it from the absence of output.
+ */
+function scheduleJob(name, job, firstDelayMs, everyMs) {
+  if (backgroundJobsDisabled) {
+    scheduledJobs.push({ name, status: "skipped" });
+    return;
+  }
+  setTimeout(job, firstDelayMs);
+  setInterval(job, everyMs);
+  scheduledJobs.push({ name, status: "scheduled" });
+}
+
+/**
+ * Print what the schedule actually came to, once every job has declared itself.
+ *
+ * This runs after the last `scheduleJob` call on purpose. Announcing "jobs are
+ * active" before they are registered would be a claim the log could not back up
+ * -- a job added below, or a `scheduleJob` that returned early, would leave the
+ * banner lying. The list is built from the same calls that armed the timers, so
+ * it is the schedule rather than a summary of the schedule.
+ */
+function reportScheduledJobs() {
+  const running = scheduledJobs.filter((entry) => entry.status === "scheduled").map((entry) => entry.name);
+  const skipped = scheduledJobs.filter((entry) => entry.status === "skipped").map((entry) => entry.name);
+
+  if (backgroundJobsDisabled) {
+    console.warn(
+      `[jobs] DISABLE_BACKGROUND_JOBS is set -- none of the ${scheduledJobs.length} background jobs will run. `
+      + "The API serves requests, but nothing expires, syncs, or messages anyone on its own.",
+    );
+  } else {
+    console.warn(
+      `[jobs] Background jobs are ACTIVE -- this process writes to the database, writes to Google Sheets, `
+      + `and sends WhatsApp messages: ${running.join(", ")}. Set DISABLE_BACKGROUND_JOBS=1 for a read-only run.`,
+    );
+  }
+
+  // A job that declared itself and then did not arm a timer is a bug in
+  // `scheduleJob`, and the one place it would be visible is this line.
+  if (skipped.length > 0 && !backgroundJobsDisabled) {
+    console.warn(`[jobs] ${skipped.length} job(s) declared but not scheduled: ${skipped.join(", ")}`);
+  }
+}
+
+scheduleJob("rental-reminder", runRentalReminderJob, 10_000, 60 * 60 * 1000);
 
 let googleSheetsStockSyncRunning = false;
 
@@ -9200,8 +9274,7 @@ async function runGoogleSheetsStockSyncJob() {
   }
 }
 
-setTimeout(runGoogleSheetsStockSyncJob, 20_000);
-setInterval(runGoogleSheetsStockSyncJob, 3 * 60 * 1000);
+scheduleJob("google-sheets-stock-sync", runGoogleSheetsStockSyncJob, 20_000, 3 * 60 * 1000);
 
 async function runReadOnlySheetsAuditJob() {
   try {
@@ -9212,8 +9285,7 @@ async function runReadOnlySheetsAuditJob() {
   }
 }
 
-setTimeout(runReadOnlySheetsAuditJob, 30_000);
-setInterval(runReadOnlySheetsAuditJob, 10 * 60 * 1000);
+scheduleJob("sheets-audit", runReadOnlySheetsAuditJob, 30_000, 10 * 60 * 1000);
 
 let pakasirPaymentSyncRunning = false;
 
@@ -9268,8 +9340,7 @@ async function runPakasirPaymentSyncJob() {
   }
 }
 
-setTimeout(runPakasirPaymentSyncJob, 15_000);
-setInterval(runPakasirPaymentSyncJob, 30_000);
+scheduleJob("pakasir-payment-sync", runPakasirPaymentSyncJob, 15_000, 30_000);
 
 async function runExpiredOrderMaintenanceJob() {
   try {
@@ -9287,10 +9358,8 @@ async function runActivityArchiveJob() {
   }
 }
 
-setTimeout(runExpiredOrderMaintenanceJob, 5_000);
-setInterval(runExpiredOrderMaintenanceJob, 30_000);
-setTimeout(runActivityArchiveJob, 60_000);
-setInterval(runActivityArchiveJob, 60 * 60 * 1000);
+scheduleJob("expired-order-maintenance", runExpiredOrderMaintenanceJob, 5_000, 30_000);
+scheduleJob("activity-archive", runActivityArchiveJob, 60_000, 60 * 60 * 1000);
 
 let fulfillmentRepairRunning = false;
 
@@ -9349,8 +9418,7 @@ async function runFulfillmentRepairJob() {
   }
 }
 
-setTimeout(runFulfillmentRepairJob, 20_000);
-setInterval(runFulfillmentRepairJob, 45_000);
+scheduleJob("fulfillment-repair", runFulfillmentRepairJob, 20_000, 45_000);
 
 let warrantyOverdueAlertRunning = false;
 
@@ -9403,8 +9471,7 @@ async function runWarrantyOverdueAlertJob() {
   }
 }
 
-setTimeout(runWarrantyOverdueAlertJob, 90_000);
-setInterval(runWarrantyOverdueAlertJob, 15 * 60 * 1000);
+scheduleJob("warranty-overdue-alert", runWarrantyOverdueAlertJob, 90_000, 15 * 60 * 1000);
 
 let whatsappHealthAlertRunning = false;
 
@@ -9431,5 +9498,6 @@ async function runWhatsAppHealthAlertJob() {
   }
 }
 
-setTimeout(runWhatsAppHealthAlertJob, 45_000);
-setInterval(runWhatsAppHealthAlertJob, 2 * 60 * 1000);
+scheduleJob("whatsapp-health-alert", runWhatsAppHealthAlertJob, 45_000, 2 * 60 * 1000);
+
+reportScheduledJobs();
