@@ -424,13 +424,13 @@ function BalanceCard({
     // `id="saldo"` is a live anchor, not decoration: the shell links to
     // `/reseller-v2/ringkasan#saldo` and this page scrolls to it from the
     // "Saldo tersedia" metric above.
-    <article id="saldo" className="ui-card is-balance">
+    <article id="saldo" className="ui-card ui-balance">
       <div>
         <span>Saldo reseller</span>
         <h2>{loading ? <LoadingSkeleton /> : balance}</h2>
         <p>{held ? `Saldo tertahan ${held}` : "Siap digunakan untuk transaksi."}</p>
       </div>
-      <div className="is-actions">
+      <div className="ui-balance-actions">
         <button type="button" className="ui-button is-primary" onClick={onTopUp}>Top Up</button>
         <button type="button" className="ui-button is-secondary" onClick={onHistory}>Riwayat saldo</button>
       </div>

@@ -49,10 +49,6 @@ textarea {
     color: var(--text-muted);
   }
 
-  .kavya-sticky-shell {
-    @apply sticky top-16 z-30 py-3 shadow-sm shadow-slate-950/5 backdrop-blur md:py-4;
-    background-color: var(--surface-glass);
-  }
 }
 
 @media (max-width: 767px) {
@@ -201,41 +197,14 @@ textarea {
   }
 }
 
-.animate-drawer-in {
-  animation: drawer-in 0.22s ease-out both;
-}
 
-.animate-fade-in {
-  animation: fade-in 0.2s ease-out both;
-}
 
-.animate-float-slow {
-  animation: float-slow 6s ease-in-out infinite;
-}
 
-.animate-float-medium {
-  animation: float-medium 4s ease-in-out infinite;
-}
 
-.animate-float-fast {
-  animation: float-fast 3s ease-in-out infinite;
-}
 
-.animate-pulse-glow {
-  animation: pulse-glow 4s ease-in-out infinite;
-}
 
-.animate-spin-slow {
-  animation: spin-slow 20s linear infinite;
-}
 
-.animate-spin-reverse {
-  animation: spin-reverse 25s linear infinite;
-}
 
-.animate-toast-rise {
-  animation: toast-rise 2.2s ease-in-out both;
-}
 
 @media (prefers-reduced-motion: reduce) {
   html {

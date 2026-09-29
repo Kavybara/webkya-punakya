@@ -171,6 +171,22 @@
 .ui-card > h3 { margin: 0 0 4px; color: var(--text-primary); font-size: 13px; font-weight: 650; }
 .ui-card > p { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.55; }
 
+/* A card whose number is the reason it exists: the figure and its two
+   actions sit side by side, and stack on a narrow screen. */
+.ui-balance { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.ui-balance > div > span { color: var(--text-muted); font-size: 10px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
+.ui-balance h2 {
+  margin: 4px 0 0;
+  color: var(--text-primary);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 27px;
+  font-weight: 400;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+.ui-balance p { margin: 5px 0 0; color: var(--text-secondary); font-size: 11px; }
+.ui-balance-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 8px; }
+
 /* ------------------------------------------------------------------ *
  * 3. States
  *
@@ -515,6 +531,9 @@
   .ui-toast { right: 12px; left: 12px; bottom: 12px; max-width: none; }
   .ui-metric-row { grid-template-columns: repeat(auto-fit, minmax(142px, 1fr)); }
   .ui-detail-row { grid-template-columns: 1fr; gap: 2px; }
+  .ui-balance { align-items: flex-start; flex-direction: column; }
+  .ui-balance-actions { width: 100%; }
+  .ui-balance-actions > .ui-button { flex: 1; }
 }
 
 /* ------------------------------------------------------------------ *
