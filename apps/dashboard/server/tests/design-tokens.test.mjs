@@ -145,6 +145,20 @@ test("a colour that already has a token is not spelled out again", () => {
   assert.deepEqual(offenders, [], `token value written out by hand: ${offenders.join(", ")}`);
 });
 
+test("every Tailwind colour points at a token that exists", () => {
+  // A typo here is invisible. `var(--text-prmary)` is not an error to
+  // Tailwind, PostCSS or the browser; it compiles, ships, and renders as
+  // nothing at all, so `text-primary` would quietly stop colouring text and
+  // nobody would find out until the page looked wrong.
+  const config = fs.readFileSync(path.resolve("tailwind.config.js"), "utf8");
+  const declared = new Set([...LIGHT, ...DARK]);
+  const dangling = [...config.matchAll(/var\((--[a-z0-9-]+)\)/g)]
+    .map((match) => match[1])
+    .filter((name) => !declared.has(name));
+
+  assert.deepEqual([...new Set(dangling)], [], `tailwind.config.js points at an undeclared token`);
+});
+
 test("the dark roots are declared once, as a single selector list", () => {
   // The four dark roots are the same colour. The moment a fifth stylesheet
   // grows its own copy we are back to four vocabularies.
