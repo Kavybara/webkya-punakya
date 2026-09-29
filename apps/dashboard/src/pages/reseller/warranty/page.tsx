@@ -22,7 +22,7 @@ const fallbackWarrantyNumber = "6285194629029";
 const inputClass =
   "mt-2 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:border-emerald-300";
 const readonlyInputClass =
-  "mt-2 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-slate-800 outline-none";
+  "mt-2 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-slate-800 outline-none focus:border-emerald-300 focus:ring-2 focus:ring-emerald-200/50";
 
 function cleanWhatsapp(value = "") {
   const digits = String(value || "").replace(/[^\d]/g, "");

@@ -1174,7 +1174,7 @@ export default function ProductsPage() {
                       <button type="button" onClick={() => changeQuantity(quantity - 1)} disabled={quantity <= 1} className="flex h-11 w-11 items-center justify-center text-zinc-400 hover:bg-white/[0.05] hover:text-white disabled:cursor-not-allowed disabled:text-zinc-700" aria-label="Kurangi jumlah akun">
                         <i className="ri-subtract-line" />
                       </button>
-                      <input value={quantity} onChange={(event) => changeQuantity(Number(event.target.value))} className="h-11 w-12 border-x border-white/10 bg-transparent text-center text-sm font-semibold text-white outline-none" inputMode="numeric" aria-label="Jumlah akun" />
+                      <input value={quantity} onChange={(event) => changeQuantity(Number(event.target.value))} className="h-11 w-12 border-x border-white/10 bg-transparent text-center text-sm font-semibold text-white outline-none focus-visible:relative focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-400/70" inputMode="numeric" aria-label="Jumlah akun" />
                       <button type="button" onClick={() => changeQuantity(quantity + 1)} disabled={quantity >= (selection?.variant.stockCount || 1)} className="flex h-11 w-11 items-center justify-center text-zinc-400 hover:bg-white/[0.05] hover:text-white disabled:cursor-not-allowed disabled:text-zinc-700" aria-label="Tambah jumlah akun">
                         <i className="ri-add-line" />
                       </button>
@@ -1438,7 +1438,7 @@ export default function ProductsPage() {
                   </button>
                 ))}
               </div>
-              <select value={sort} onChange={(event) => setSort(event.target.value)} className="h-9 rounded-md border border-gray-100 bg-[#f7f1e8] px-3 text-xs outline-none">
+              <select value={sort} onChange={(event) => setSort(event.target.value)} className="h-9 rounded-md border border-gray-100 bg-[#f7f1e8] px-3 text-xs outline-none focus:border-red-200 focus:ring-2 focus:ring-red-200/40">
                 <option>Termurah</option>
                 <option>Termahal</option>
                 <option>Stok</option>
