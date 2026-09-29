@@ -677,8 +677,16 @@
  *
  * One ring, everywhere, on :focus-visible only -- so it appears for a
  * keyboard and stays out of the way of a mouse.
+ *
+ * The two shell roots are in the list on purpose. They wrap every control
+ * either console renders, so a feature page gets a visible focus indicator
+ * by existing rather than by remembering to ask. The alternative -- an
+ * allowlist of kit classes -- meant a new button was invisible to keyboard
+ * users until someone noticed, and nothing failed when it was.
  * ------------------------------------------------------------------ */
 
+.ui-shell :focus-visible,
+.auth-shell :focus-visible,
 .ui-panel :focus-visible,
 .ui-command :focus-visible,
 .ui-badge:focus-visible,

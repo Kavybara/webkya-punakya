@@ -239,3 +239,16 @@ test("the shared shell keeps the access rule and the sign-out honest", async () 
   assert.match(source, /localStorage\.setItem\(COLLAPSE_KEY/, "the collapsed width must persist");
 });
 
+
+test("every control inside a shell gets the focus ring without opting in", async () => {
+  const { css } = await kit();
+
+  // The ring used to be an allowlist of kit classes, which meant a control a
+  // feature page added was invisible to a keyboard user until somebody
+  // noticed, and nothing failed when it was. The two shell roots wrap every
+  // control either console renders, so being inside one is enough.
+  const ring = css.match(/:focus-visible[^{]*\{([\s\S]*?)\}/g)?.join("\n") || "";
+  assert.match(ring, /\.ui-shell\s+:focus-visible/, "the signed-in frame must give its controls a focus ring");
+  assert.match(ring, /\.auth-shell\s+:focus-visible/, "the sign-in shell must give its controls a focus ring");
+  assert.match(ring, /outline:\s*2px solid/, "the ring must stay visible against the dark surfaces");
+});
