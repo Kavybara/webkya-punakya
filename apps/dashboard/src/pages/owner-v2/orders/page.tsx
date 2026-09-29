@@ -10,7 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
-import { ConsoleDataTable, type ConsoleColumn, type ConsoleFilter } from "../../../components/console/ConsoleDataTable";
+import { DataTable, type DataColumn, type DataFilter } from "../../../components/ui/DataTable";
 import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import { api, subscribeRealtime, type ApiOrder } from "../../../lib/api";
 import { formatRupiah } from "../../../lib/format";
@@ -181,7 +181,7 @@ export default function OwnerConsoleOrdersPage() {
 
   const counts = useMemo(() => Object.fromEntries(statusOptions.map((item) => [item.value, liveOrders.filter((order) => matchesStatus(order, item.value)).length])), [liveOrders]);
 
-  const columns = useMemo<Array<ConsoleColumn<ApiOrder>>>(() => [
+  const columns = useMemo<Array<DataColumn<ApiOrder>>>(() => [
     { id: "id", header: "Order ID", value: (order) => order.id, sortable: true, cell: (order) => <button type="button" className="console-order-link" onClick={() => openOrderDetail(order)}>{order.id}</button> },
     { id: "customer", header: "Customer", value: (order) => order.customer || order.resellerName || order.reseller || "-", sortable: true, cell: (order) => <span className="console-product-cell"><strong>{order.customer || "-"}</strong><small>{order.resellerName || order.reseller || "Direct"}</small></span> },
     { id: "product", header: "Produk", value: (order) => `${order.product} ${order.variant}`, sortable: true, cell: (order) => <span className="console-product-cell"><strong>{order.product}</strong><small>{order.variant} / {order.duration}</small></span> },
@@ -192,7 +192,7 @@ export default function OwnerConsoleOrdersPage() {
     { id: "action", header: "Aksi", value: () => "Detail", cell: (order) => <button type="button" className="console-row-action" onClick={() => openOrderDetail(order)} aria-label={`Buka detail ${order.id}`}><ArrowUpRight size={15} /></button> },
   ], [openOrderDetail]);
 
-  const filters = useMemo<Array<ConsoleFilter<ApiOrder>>>(() => [
+  const filters = useMemo<Array<DataFilter<ApiOrder>>>(() => [
     { id: "payment", label: "Pembayaran", options: [{ label: "Dibayar", value: "Dibayar" }, { label: "Manual", value: "Manual" }, { label: "Menunggu", value: "Menunggu" }, { label: "Expired", value: "Expired" }], value: paymentLabel },
     { id: "fulfillment", label: "Fulfillment", options: [{ label: "Selesai", value: "Selesai" }, { label: "Diproses", value: "Diproses" }, { label: "Gagal", value: "Gagal" }], value: fulfillmentLabel },
   ], []);
@@ -260,7 +260,7 @@ export default function OwnerConsoleOrdersPage() {
         <div className="console-panel-header console-orders-heading">
           <div><span>Penjualan</span><h2 id="orders-table-title">Daftar pesanan</h2></div>
         </div>
-        <ConsoleDataTable
+        <DataTable
           rows={filteredOrders}
           columns={columns}
           filters={filters}

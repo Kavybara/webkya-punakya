@@ -1886,64 +1886,6 @@
   background: transparent;
   color: var(--text-secondary);
 }
-.reseller-v2-data-search {
-  display: flex;
-  min-height: 42px;
-  align-items: center;
-  gap: 8px;
-  padding: 0 11px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.reseller-v2-data-search input {
-  min-width: 0;
-  flex: 1;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--text-primary);
-}
-.reseller-v2-table-scroll {
-  overflow-x: auto;
-}
-.reseller-v2-table-scroll table {
-  width: 100%;
-  border-collapse: collapse;
-}
-.reseller-v2-table-scroll th,
-.reseller-v2-table-scroll td {
-  padding: 12px;
-  border-bottom: 1px solid var(--border);
-  font-size: 10px;
-  text-align: left;
-}
-.reseller-v2-card-list {
-  display: none;
-}
-.reseller-v2-data footer {
-  display: flex;
-  min-height: 50px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  color: var(--text-muted);
-  font-size: 10px;
-}
-.reseller-v2-data footer div {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.reseller-v2-data footer button {
-  display: grid;
-  width: 36px;
-  height: 36px;
-  place-items: center;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: transparent;
-  color: var(--text-secondary);
-}
 .reseller-v2-bottom-nav,
 .reseller-v2-mobile-only,
 .reseller-v2-mobile-backdrop {
@@ -2164,23 +2106,6 @@
   .reseller-v2-bottom-nav a.is-active {
     background: color-mix(in srgb, var(--accent-violet) 12%, transparent);
     color: #ddd6fe;
-  }
-  .reseller-v2-table-scroll {
-    display: none;
-  }
-  .reseller-v2-card-list {
-    display: grid;
-    gap: 8px;
-    margin-top: 10px;
-  }
-  .reseller-v2-card-list article {
-    padding: 12px;
-    border: 1px solid var(--border);
-    border-radius: 9px;
-  }
-  .reseller-v2-data footer button {
-    width: 44px;
-    height: 44px;
   }
   .reseller-v2-drawer {
     inset: auto 0 0;

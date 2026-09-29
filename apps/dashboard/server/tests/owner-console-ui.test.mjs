@@ -225,7 +225,7 @@ test("Owner Console removes automatic account replacement", async () => {
 });
 
 test("data tables only show row selection when a real bulk action exists", async () => {
-  const table = await source("components/console/ConsoleDataTable.tsx");
+  const table = await source("components/ui/DataTable.tsx");
   // Selection UI must be conditional on an actual bulkAction being supplied,
   // so read-only tables never render checkboxes. Assert the conditional and
   // the checkbox cell rather than one exact JSX class string.
@@ -237,7 +237,7 @@ test("data tables only show row selection when a real bulk action exists", async
 
 test("shared data tables keep column context on narrow screens", async () => {
   const [table, styles] = await Promise.all([
-    source("components/console/ConsoleDataTable.tsx"),
+    source("components/ui/DataTable.tsx"),
     source("components/console/console.css"),
   ]);
   // Every body cell must carry its column header as data-label, and the
@@ -245,7 +245,7 @@ test("shared data tables keep column context on narrow screens", async () => {
   // that scrolls horizontally stays readable.
   assert.match(table, /data-label=\{column\.header\}/);
   assert.match(styles, /content:\s*attr\(data-label\)/);
-  assert.match(styles, /\.console-table-scroll tbody tr/);
+  assert.match(styles, /\.ui-table-scroll tbody tr/);
 });
 
 test("public store aliases reach the live catalog instead of the not-found page", async () => {

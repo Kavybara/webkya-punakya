@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, Columns3, Search } from "lucide-react";
 
-export type ConsoleColumn<Row> = {
+/**
+ * The one table both consoles use.
+ *
+ * It used to be the owner's, named `ConsoleDataTable`, with a separate
+ * stripped-down `ResellerDataTable` beside it. The reseller's had no
+ * sorting, no filters, no column visibility, no bulk selection and a fixed
+ * page size -- so a reseller could not do the first thing you do with a
+ * list of orders. One implementation, one set of `ui-*` classes, and the
+ * difference disappears.
+ */
+export type DataColumn<Row> = {
   id: string;
   header: string;
   value: (row: Row) => string | number;
@@ -10,14 +20,14 @@ export type ConsoleColumn<Row> = {
   hideOnMobile?: boolean;
 };
 
-export type ConsoleFilter<Row> = {
+export type DataFilter<Row> = {
   id: string;
   label: string;
   options: Array<{ label: string; value: string }>;
   value: (row: Row) => string;
 };
 
-export function ConsoleDataTable<Row>({
+export function DataTable<Row>({
   rows,
   columns,
   rowKey,
@@ -29,9 +39,9 @@ export function ConsoleDataTable<Row>({
   bulkAction,
 }: {
   rows: Row[];
-  columns: Array<ConsoleColumn<Row>>;
+  columns: Array<DataColumn<Row>>;
   rowKey: (row: Row) => string;
-  filters?: Array<ConsoleFilter<Row>>;
+  filters?: Array<DataFilter<Row>>;
   loading?: boolean;
   error?: string;
   emptyText?: string;
@@ -93,7 +103,7 @@ export function ConsoleDataTable<Row>({
     });
   }, [rowKey, rows]);
 
-  function toggleSort(column: ConsoleColumn<Row>) {
+  function toggleSort(column: DataColumn<Row>) {
     if (!column.sortable) return;
     setSort((current) => current?.id === column.id
       ? { id: column.id, direction: current.direction === "asc" ? "desc" : "asc" }
@@ -101,15 +111,15 @@ export function ConsoleDataTable<Row>({
   }
 
   return (
-    <div className="console-table-shell">
-      <div className="console-table-toolbar">
-        <label className="console-table-search">
+    <div className="ui-table-shell">
+      <div className="ui-table-toolbar">
+        <label className="ui-table-search">
           <Search size={16} aria-hidden="true" />
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cari pada tabel..." aria-label="Cari pada tabel" />
         </label>
-        <div className="console-table-tools">
+        <div className="ui-table-tools">
           {filters.map((filter) => (
-            <label key={filter.id} className="console-select-wrap">
+            <label key={filter.id} className="ui-select-wrap">
               <span className="sr-only">{filter.label}</span>
               <select value={filterValues[filter.id] || ""} onChange={(event) => setFilterValues((current) => ({ ...current, [filter.id]: event.target.value }))}>
                 <option value="">{filter.label}: Semua</option>
@@ -118,12 +128,12 @@ export function ConsoleDataTable<Row>({
               <ChevronDown size={14} aria-hidden="true" />
             </label>
           ))}
-          <div className="console-column-menu-wrap">
-            <button type="button" className="console-tool-button" onClick={() => setColumnMenuOpen((value) => !value)} aria-expanded={columnMenuOpen}>
+          <div className="ui-column-menu-wrap">
+            <button type="button" className="ui-tool-button" onClick={() => setColumnMenuOpen((value) => !value)} aria-expanded={columnMenuOpen}>
               <Columns3 size={16} /> Kolom
             </button>
             {columnMenuOpen ? (
-              <div className="console-column-menu">
+              <div className="ui-column-menu">
                 {columns.map((column) => (
                   <button
                     key={column.id}
@@ -146,7 +156,7 @@ export function ConsoleDataTable<Row>({
       </div>
 
       {selectable && selected.size ? (
-        <div className="console-selection-bar">
+        <div className="ui-selection-bar">
           <strong>{selected.size} baris dipilih</strong>
           <span>{bulkAction?.hint}</span>
           <div>
@@ -165,11 +175,11 @@ export function ConsoleDataTable<Row>({
         </div>
       ) : null}
 
-      <div className="console-table-scroll">
+      <div className="ui-table-scroll">
         <table>
           <thead>
             <tr>
-              {selectable ? <th className="console-checkbox-cell">
+              {selectable ? <th className="ui-checkbox-cell">
                 <input
                   type="checkbox"
                   checked={allPageSelected}
@@ -182,7 +192,7 @@ export function ConsoleDataTable<Row>({
                 />
               </th> : null}
               {activeColumns.map((column) => (
-                <th key={column.id} className={column.hideOnMobile ? "console-table-mobile-hide" : ""}>
+                <th key={column.id} className={column.hideOnMobile ? "ui-table-mobile-hide" : ""}>
                   <button type="button" onClick={() => toggleSort(column)} disabled={!column.sortable}>
                     {column.header}
                     {sort?.id === column.id ? <span aria-label={sort.direction === "asc" ? "Urut naik" : "Urut turun"}>{sort.direction === "asc" ? <ArrowUp size={11} /> : <ArrowDown size={11} />}</span> : null}
@@ -193,32 +203,32 @@ export function ConsoleDataTable<Row>({
           </thead>
           <tbody>
             {loading ? Array.from({ length: 5 }, (_, index) => (
-              <tr key={index} className="console-table-skeleton-row">
+              <tr key={index} className="ui-table-skeleton-row">
                 {selectable ? <td data-label="Pilih"><span /></td> : null}
                 {activeColumns.map((column) => <td key={column.id} data-label={column.header}><span /></td>)}
               </tr>
             )) : error ? (
-              <tr className="console-table-state-row"><td colSpan={activeColumns.length + (selectable ? 1 : 0)}><div className="console-table-state is-error">{error}</div></td></tr>
+              <tr className="ui-table-state-row"><td colSpan={activeColumns.length + (selectable ? 1 : 0)}><div className="ui-table-state is-error">{error}</div></td></tr>
             ) : pageRows.length ? pageRows.map((row) => {
               const key = rowKey(row);
               return (
                 <tr key={key} className={selected.has(key) ? "is-selected" : ""}>
-                  {selectable ? <td className="console-checkbox-cell" data-label="Pilih"><input type="checkbox" checked={selected.has(key)} onChange={() => setSelected((current) => {
+                  {selectable ? <td className="ui-checkbox-cell" data-label="Pilih"><input type="checkbox" checked={selected.has(key)} onChange={() => setSelected((current) => {
                     const next = new Set(current);
                     next.has(key) ? next.delete(key) : next.add(key);
                     return next;
                   })} aria-label={`Pilih baris ${key}`} /></td> : null}
-                  {activeColumns.map((column) => <td key={column.id} data-label={column.header} className={column.hideOnMobile ? "console-table-mobile-hide" : ""}>{column.cell ? column.cell(row) : column.value(row)}</td>)}
+                  {activeColumns.map((column) => <td key={column.id} data-label={column.header} className={column.hideOnMobile ? "ui-table-mobile-hide" : ""}>{column.cell ? column.cell(row) : column.value(row)}</td>)}
                 </tr>
               );
             }) : (
-              <tr className="console-table-state-row"><td colSpan={activeColumns.length + (selectable ? 1 : 0)}><div className="console-table-state">{emptyText}</div></td></tr>
+              <tr className="ui-table-state-row"><td colSpan={activeColumns.length + (selectable ? 1 : 0)}><div className="ui-table-state">{emptyText}</div></td></tr>
             )}
           </tbody>
         </table>
       </div>
 
-      <div className="console-table-footer">
+      <div className="ui-table-footer">
         <span>{processedRows.length ? `${(page - 1) * pageSize + 1}-${Math.min(page * pageSize, processedRows.length)} dari ${processedRows.length}` : "0 baris"}</span>
         <div>
           <label>

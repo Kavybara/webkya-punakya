@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MessageSquareWarning, Plus, RefreshCw, ShieldCheck } from "lucide-react";
-import { ConsoleDataTable, type ConsoleColumn, type ConsoleFilter } from "../../../components/console/ConsoleDataTable";
+import { DataTable, type DataColumn, type DataFilter } from "../../../components/ui/DataTable";
 import { ConsoleActionToast, ConsoleBadge, ConsoleDialog, ConsoleDialogActions, ConsoleField, ConsoleMetrics, ConsoleNotice } from "../../../components/console/ConsoleResource";
 import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import {
@@ -411,7 +411,7 @@ export default function OwnerConsoleWarrantyPage() {
     }
   }
 
-  const columns = useMemo<Array<ConsoleColumn<WarrantyClaim>>>(() => [
+  const columns = useMemo<Array<DataColumn<WarrantyClaim>>>(() => [
     { id: "claim", header: "Klaim", value: (row) => row.id, sortable: true, cell: (row) => <span className="console-product-cell"><strong>{row.id}</strong><small>{formatDateTimeFull(row.createdAt)}</small></span> },
     { id: "reseller", header: "Reseller", value: (row) => row.resellerName || row.resellerId || "-", sortable: true, cell: (row) => <span className="console-product-cell"><strong>{row.resellerName || row.resellerId || "-"}</strong><small>{row.accountIdentity || "Identitas dimasking"}</small></span> },
     { id: "product", header: "Produk", value: (row) => `${row.product} ${row.variant}`, sortable: true, cell: (row) => <span className="console-product-cell"><strong>{row.product || "-"}</strong><small>{row.variant || "-"}</small></span> },
@@ -420,7 +420,7 @@ export default function OwnerConsoleWarrantyPage() {
     { id: "notification", header: "Sumber", value: (row) => row.submissionSource || row.ownerNotificationStatus || "pending", hideOnMobile: true, cell: (row) => row.submissionSource === "owner_manual_whatsapp" ? <ConsoleBadge tone="info">WhatsApp manual</ConsoleBadge> : <ConsoleBadge tone={row.ownerNotificationStatus === "sent" ? "success" : row.ownerNotificationStatus === "failed" ? "danger" : "warning"}>{row.ownerNotificationStatus === "sent" ? "WA terkirim" : row.ownerNotificationStatus === "failed" ? "WA gagal" : "Dashboard"}</ConsoleBadge> },
     { id: "actions", header: "Aksi", value: () => "", cell: (row) => <div className="console-row-actions"><button type="button" onClick={() => openClaim(row)} aria-label={`Kelola ${row.id}`}><ShieldCheck size={15} /></button></div> },
   ], []);
-  const filters = useMemo<Array<ConsoleFilter<WarrantyClaim>>>(() => [{ id: "status", label: "Status", options: ["submitted", "reviewing", "replaced", "resolved", "rejected"].map((value) => ({ label: statusLabel(value), value })), value: (row) => row.status === "waiting_evidence" ? "reviewing" : row.status }], []);
+  const filters = useMemo<Array<DataFilter<WarrantyClaim>>>(() => [{ id: "status", label: "Status", options: ["submitted", "reviewing", "replaced", "resolved", "rejected"].map((value) => ({ label: statusLabel(value), value })), value: (row) => row.status === "waiting_evidence" ? "reviewing" : row.status }], []);
 
   const activeClaims = useMemo(() => claims.filter((claim) => activeStatuses.has(claim.status)), [claims]);
   const historyClaims = useMemo(() => claims.filter((claim) => !activeStatuses.has(claim.status)), [claims]);
@@ -444,7 +444,7 @@ export default function OwnerConsoleWarrantyPage() {
     <ConsoleActionToast message={message} onClose={clearMessage} />
     <section className="console-panel">
       <div className="console-panel-header"><div><span>Warranty Center</span><h2>{claimView === "active" ? "Antrean klaim aktif" : "Riwayat klaim"}</h2></div><div className="console-panel-toolbar-actions"><button type="button" aria-pressed={claimView === "active"} onClick={() => setClaimView("active")}>Antrean Aktif ({activeClaims.length})</button><button type="button" aria-pressed={claimView === "history"} onClick={() => setClaimView("history")}>Riwayat ({historyClaims.length})</button><button type="button" onClick={() => openManualClaim().catch(() => undefined)}><Plus size={15} /> Tambah klaim manual</button><button type="button" onClick={load}><RefreshCw size={15} /> Perbarui</button></div></div>
-      <ConsoleDataTable rows={visibleClaims} columns={columns} filters={filters} rowKey={(row) => row.id} loading={loading} error={error} emptyText={claimView === "active" ? "Tidak ada klaim yang perlu ditangani." : "Belum ada riwayat klaim selesai."} initialPageSize={10} />
+      <DataTable rows={visibleClaims} columns={columns} filters={filters} rowKey={(row) => row.id} loading={loading} error={error} emptyText={claimView === "active" ? "Tidak ada klaim yang perlu ditangani." : "Belum ada riwayat klaim selesai."} initialPageSize={10} />
     </section>
 
     {manualOpen ? <ConsoleDialog title="Tambah klaim manual" eyebrow="Dari WhatsApp reseller" onClose={closeManualClaim} wide footer={<ConsoleDialogActions onCancel={closeManualClaim} onConfirm={() => submitManualClaim().catch(() => undefined)} confirmLabel="Buat klaim" busy={busy || manualLoading || manualEvidenceBusy} />}>

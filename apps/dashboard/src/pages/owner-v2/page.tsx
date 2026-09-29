@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Link } from "react-router-dom";
-import { ConsoleDataTable, type ConsoleColumn, type ConsoleFilter } from "../../components/console/ConsoleDataTable";
+import { DataTable, type DataColumn, type DataFilter } from "../../components/ui/DataTable";
 import { ConsoleShell } from "../../components/console/ConsoleShell";
 import { api, type ApiOrder, type ApiReseller, type ApiStockItem, type OperationsCenterResult, type SystemStatus } from "../../lib/api";
 import { formatRupiah, formatRupiahCompact } from "../../lib/format";
@@ -204,7 +204,7 @@ export default function OwnerConsoleOverviewPage() {
   const attentionCount = attention.reduce((sum, item) => sum + item.count, 0);
   const recentOrders = useMemo(() => [...liveOrders].sort((left, right) => (parseDate(right.createdAt)?.getTime() || 0) - (parseDate(left.createdAt)?.getTime() || 0)).slice(0, 10), [liveOrders]);
 
-  const orderColumns = useMemo<Array<ConsoleColumn<ApiOrder>>>(() => [
+  const orderColumns = useMemo<Array<DataColumn<ApiOrder>>>(() => [
     { id: "id", header: "Order ID", value: (order) => order.id, sortable: true, cell: (order) => <button type="button" className="console-order-link" onClick={() => setSelectedOrder(order)}>{order.id}</button> },
     { id: "customer", header: "Customer", value: (order) => order.customer || order.resellerName || order.reseller || "-", sortable: true },
     { id: "product", header: "Produk", value: (order) => `${order.product} ${order.variant}`, sortable: true, cell: (order) => <span className="console-product-cell"><strong>{order.product}</strong><small>{order.variant}</small></span> },
@@ -216,7 +216,7 @@ export default function OwnerConsoleOverviewPage() {
     { id: "time", header: "Waktu", value: (order) => parseDate(order.createdAt)?.getTime() || 0, sortable: true, hideOnMobile: true, cell: (order) => formatDateTime(order.createdAt) },
     { id: "action", header: "Aksi", value: () => "Detail", cell: (order) => <button type="button" className="console-row-action" onClick={() => setSelectedOrder(order)} aria-label={`Lihat detail ${order.id}`}><ArrowUpRight size={15} /></button> },
   ], []);
-  const orderFilters = useMemo<Array<ConsoleFilter<ApiOrder>>>(() => [
+  const orderFilters = useMemo<Array<DataFilter<ApiOrder>>>(() => [
     { id: "payment", label: "Pembayaran", options: [{ label: "Dibayar", value: "Dibayar" }, { label: "Menunggu", value: "Menunggu" }, { label: "Expired", value: "Expired" }], value: paymentLabel },
     { id: "fulfillment", label: "Fulfillment", options: [{ label: "Selesai", value: "Selesai" }, { label: "Diproses", value: "Diproses" }, { label: "Gagal", value: "Gagal" }], value: fulfillmentLabel },
   ], []);
@@ -314,7 +314,7 @@ export default function OwnerConsoleOverviewPage() {
           <div><span>Aktivitas penjualan</span><h2 id="recent-orders-title">Pesanan terbaru</h2></div>
           <Link to="/owner-v2/orders">Lihat semua pesanan <ArrowUpRight size={15} /></Link>
         </div>
-        <ConsoleDataTable
+        <DataTable
           rows={recentOrders}
           columns={orderColumns}
           filters={orderFilters}
