@@ -186,6 +186,25 @@ test("checkout revalidates the HttpOnly session without weakening cookie transpo
   assert.match(apiClient, /"\/auth\/session"/);
 });
 
+test("starting a catalog order checks live stock first", async () => {
+  const checkout = await source("src/pages/products/page.tsx");
+
+  // `prechecking` was declared, read in the guard and used for the button's
+  // `disabled`, but never set -- so it was permanently false and the guard it
+  // sat in guarded nothing. The client method it was reaching for existed too,
+  // with no caller. Both are now wired: the flag is set, and the check runs
+  // before the customer is sent to fill in their details for stock that may be
+  // gone.
+  assert.match(checkout, /setPrechecking\(true\)/, "the busy flag must actually be raised");
+  assert.match(checkout, /setPrechecking\(false\)/, "and lowered again, or the button sticks disabled");
+  assert.match(checkout, /await api\.precheckCatalog\(/, "the precheck must be awaited before navigating");
+  assert.match(checkout, /Number\(check\.stockCount \|\| 0\) < 1/, "a definite out-of-stock must stop the customer");
+
+  // The flag is only worth having if it is cleared on the way out as well as
+  // the way in, so assert the pair rather than any single occurrence.
+  assert.match(checkout, /finally\s*\{\s*setPrechecking\(false\);?\s*\}/, "the flag clears in a finally, not only on success");
+});
+
 test("warranty display and WhatsApp payload never include credentials", async () => {
   const warranty = await source("src/pages/reseller-v2/warranty/page.tsx");
 

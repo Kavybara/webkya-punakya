@@ -710,20 +710,48 @@ export default function ProductsPage() {
   async function startCatalogOrder() {
     if (!catalogSelection || prechecking) return;
     setError("");
-    const session = readSession();
-    const params = new URLSearchParams({
-      productId: catalogSelection.product.id,
-      variantId: catalogSelection.variant.id,
-      duration: catalogSelection.duration,
-      qty: "1",
-      from: session?.role === "reseller" ? "reseller" : "products",
-    });
-    const target = `/reseller/checkout?${params.toString()}`;
-    if (session?.role === "reseller") {
-      navigate(target);
-      return;
+    setPrechecking(true);
+    try {
+      // Ask for live stock before the customer spends their time filling in
+      // their details for a package that may have sold out since the catalog
+      // was loaded. The endpoint validates that the product exists, and only
+      // reaches for Google Sheets when the cached count is actually cold, so a
+      // warm catalog costs one cheap read.
+      const check = await api.precheckCatalog({
+        productId: catalogSelection.product.id,
+        variantId: catalogSelection.variant.id,
+      });
+
+      if (Number(check.stockCount || 0) < 1) {
+        setError("Stok paket ini habis. Pilih paket lain atau cek lagi nanti.");
+        // Re-read so the card stops advertising stock that is gone.
+        await loadCatalog().catch(() => undefined);
+        return;
+      }
+
+      const session = readSession();
+      const params = new URLSearchParams({
+        productId: catalogSelection.product.id,
+        variantId: catalogSelection.variant.id,
+        duration: catalogSelection.duration,
+        qty: "1",
+        from: session?.role === "reseller" ? "reseller" : "products",
+      });
+      const target = `/reseller/checkout?${params.toString()}`;
+      if (session?.role === "reseller") {
+        navigate(target);
+        return;
+      }
+      navigate(`/login?next=${encodeURIComponent(target)}`);
+    } catch (cause) {
+      // The precheck is advice, not the gate -- creating the order validates
+      // stock server-side anyway. So a failed check shows its reason and lets
+      // the customer through, rather than blocking a sale because a read timed
+      // out. Only a definite "no stock" above stops them.
+      setError(cause instanceof Error ? `${cause.message} Lanjut saja jika yakin paket tersedia.` : "Pemeriksaan stok gagal. Coba lagi.");
+    } finally {
+      setPrechecking(false);
     }
-    navigate(`/login?next=${encodeURIComponent(target)}`);
   }
 
   function changeQuantity(nextQuantity: number) {
