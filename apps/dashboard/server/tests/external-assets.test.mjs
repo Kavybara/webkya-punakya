@@ -4,13 +4,23 @@ import path from "node:path";
 import test from "node:test";
 
 /**
- * index.html loads icon fonts from a third-party CDN, which makes them
- * render-blocking and hands a third party a say in how the app looks.
- * Font Awesome had been loaded that way for some time with no `fa-` class
- * anywhere in the source: pure cost, pure supply-chain surface.
+ * No icon font is loaded from a CDN.
  *
- * This checks the rule rather than the one instance, so a font cannot be
- * re-added without something actually using it.
+ * There were two. Font Awesome had been linked for a long time with no `fa-`
+ * class anywhere in the source -- pure cost, pure supply-chain surface.
+ * Remixicon was actually used, across every legacy page, and was the reason a
+ * render-blocking third-party stylesheet sat in the head of a page that renders
+ * money and order state.
+ *
+ * Both are gone. Icons come from `lucide-react`, which is bundled, tree-shaken
+ * to the glyphs actually imported, and served from our own origin.
+ *
+ * The first version of this test only failed when a font was linked *and* its
+ * classes were used -- so the unused Font Awesome link passed, and then so did
+ * the Remixicon link the moment its last caller was deleted. That is a test
+ * that reports success precisely when there is nothing to report. The rule is
+ * now absolute: none of these class prefixes may appear in the source, and none
+ * of these packages may be linked.
  */
 
 const INDEX = fs.readFileSync(path.resolve("index.html"), "utf8");
@@ -31,14 +41,17 @@ function sourceText(dir) {
 
 const SOURCE = sourceText(path.resolve("src")).join("\n");
 
-test("no unused icon font is loaded from a CDN", () => {
+test("no icon font is loaded from a CDN, and none of their classes survive", () => {
   for (const { packageName, marker } of CDN_ICON_FONTS) {
-    const linked = new RegExp(`cdnjs[^"']*${packageName}`, "i").test(INDEX);
-    const used = marker.test(SOURCE);
-    assert.equal(
-      linked && used,
-      used,
-      `index.html loads ${packageName} from a CDN but no ${marker} class is used in src/`,
+    assert.doesNotMatch(
+      INDEX,
+      new RegExp(`cdnjs[^"']*${packageName}`, "i"),
+      `index.html links ${packageName} from a CDN -- icons come from lucide-react`,
+    );
+    assert.doesNotMatch(
+      SOURCE,
+      marker,
+      `a ${packageName} class is back in src/; icons come from lucide-react, not a font CDN`,
     );
   }
 });

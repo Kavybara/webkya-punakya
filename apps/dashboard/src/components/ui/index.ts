@@ -12,6 +12,8 @@ export { Button } from "./Button";
 export type { ButtonWeight } from "./Button";
 export { CommandKeyHint, CommandPalette } from "./CommandPalette";
 export type { CommandGroup, CommandHit } from "./CommandPalette";
+export { DataTable } from "./DataTable";
+export type { DataColumn, DataFilter } from "./DataTable";
 export { DetailRow, Field } from "./Field";
 export { ActionCard, Metric, MetricRow } from "./Metric";
 export { ConfirmDialog, Dialog, DialogActions, Drawer, useOverlayFocus } from "./Overlay";

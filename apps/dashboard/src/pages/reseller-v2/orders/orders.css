@@ -1,0 +1,271 @@
+/*
+ * The reseller's order history.
+ *
+ * Every rule here is prefixed `reseller-v2-orders-`. The kit owns `.ui-`; a
+ * feature page that reaches into it is how the kit ends up carrying a rule
+ * that only makes sense on one screen.
+ *
+ * Colours come from the tokens in `src/styles/tokens.css`. Nothing here names
+ * a hex value -- a page that spells one out is a page the palette cannot move.
+ */
+
+.reseller-v2-orders {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* --- the transaction reference ------------------------------------------ */
+
+.reseller-v2-orders-ref {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  word-break: break-all;
+}
+
+.reseller-v2-orders-muted {
+  color: var(--text-muted);
+}
+
+/* --- the item and total cells ------------------------------------------- *
+ * Two lines each: the name, then the qualifier that stops a reseller having to
+ * open the row to tell two 1-month variants of the same product apart. */
+
+.reseller-v2-orders-item,
+.reseller-v2-orders-total {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.reseller-v2-orders-item strong,
+.reseller-v2-orders-total strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.reseller-v2-orders-item small,
+.reseller-v2-orders-total small {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.reseller-v2-orders-total {
+  align-items: flex-end;
+  text-align: right;
+}
+
+/* "Sedang disiapkan" is a waiting state, not an error and not a link. Warning
+   tint, because the next thing that happens to it is good news. */
+.reseller-v2-orders-waiting {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--status-warning);
+  white-space: nowrap;
+}
+
+.reseller-v2-orders-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+/* --- the pending-payments drawer ---------------------------------------- */
+
+.reseller-v2-orders-pending {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.reseller-v2-orders-pending-card {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.reseller-v2-orders-pending-card > header,
+.reseller-v2-orders-delivery > header,
+.reseller-v2-orders-template > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.reseller-v2-orders-pending-card > header > div,
+.reseller-v2-orders-delivery > header > div,
+.reseller-v2-orders-template > header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.reseller-v2-orders-pending-card strong,
+.reseller-v2-orders-delivery strong,
+.reseller-v2-orders-template strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.reseller-v2-orders-pending-card small,
+.reseller-v2-orders-delivery small,
+.reseller-v2-orders-template small {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.reseller-v2-orders-pending-card .reseller-v2-orders-actions {
+  justify-content: flex-start;
+  margin-top: 12px;
+}
+
+/* --- the QRIS dialog ----------------------------------------------------- */
+
+.reseller-v2-orders-qris {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/*
+ * The QR sits on a deliberately white plate with a quiet border.
+ *
+ * A QR code is read by contrast between dark and light modules, and a dark
+ * console's near-black ground turns the code's own light modules into
+ * something a phone camera has to work for. The plate does not follow the
+ * theme for that reason alone.
+ */
+.reseller-v2-orders-qr {
+  display: block;
+  align-self: center;
+  width: 240px;
+  height: 240px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+}
+
+/* --- the delivery drawer ------------------------------------------------- */
+
+.reseller-v2-orders-delivery {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.reseller-v2-orders-template {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.reseller-v2-orders-template pre {
+  max-height: 320px;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-canvas);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* --- the read-only summary rows ------------------------------------------ *
+ * Used for the payment facts and for the six credential fields. `is-grid`
+ * puts two to a row on anything wide enough, because a single column of
+ * label/value pairs in a drawer is a lot of scrolling for six facts. */
+
+.reseller-v2-orders-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.reseller-v2-orders-summary > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.reseller-v2-orders-summary > div:first-child {
+  border-top: 0;
+}
+
+.reseller-v2-orders-summary dt {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.reseller-v2-orders-summary dd {
+  margin: 0;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-primary);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.reseller-v2-orders-summary.is-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 560px) {
+  .reseller-v2-orders-summary.is-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  /* The grid draws its own cell borders, so the flat list's edge rules have to
+     go -- otherwise the first cell carries a top border that the second does
+     not and the row of facts sits one pixel low on the right. */
+  .reseller-v2-orders-summary.is-grid > div {
+    border-top: 0;
+  }
+  .reseller-v2-orders-summary.is-grid > div:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--border);
+  }
+  .reseller-v2-orders-summary.is-grid > div:nth-child(even) {
+    border-left: 1px solid var(--border);
+  }
+  .reseller-v2-orders-summary.is-grid > div {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  .reseller-v2-orders-summary.is-grid dd {
+    text-align: left;
+  }
+}

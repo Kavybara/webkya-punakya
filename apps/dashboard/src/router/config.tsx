@@ -51,25 +51,23 @@ const OwnerConsoleIntegrationConfigurePage = lazy(
 const OwnerConsoleSettingsPage = lazy(
   () => import("../pages/owner-v2/settings/page"),
 );
-const ResellerCatalogPage = lazy(
-  () => import("../pages/reseller/catalog/page"),
-);
-const ResellerHistoryPage = lazy(
-  () => import("../pages/reseller/history/page"),
-);
-const ResellerAccountsPage = lazy(
-  () => import("../pages/reseller/accounts/page"),
-);
-const ResellerWarrantyPage = lazy(
-  () => import("../pages/reseller/warranty/page"),
-);
-const ResellerSettings = lazy(() => import("../pages/reseller/settings/page"));
 const ResellerV2OverviewPage = lazy(() => import("../pages/reseller-v2/page"));
+const ResellerV2CatalogPage = lazy(
+  () => import("../pages/reseller-v2/catalog/page"),
+);
+const ResellerV2OrdersPage = lazy(() => import("../pages/reseller-v2/orders/page"));
 const ResellerV2AccountsPage = lazy(
   () => import("../pages/reseller-v2/accounts/page"),
 );
+const ResellerV2AccessPage = lazy(() => import("../pages/reseller-v2/access/page"));
 const ResellerV2GuidesPage = lazy(
   () => import("../pages/reseller-v2/guides/page"),
+);
+const ResellerV2WarrantyPage = lazy(
+  () => import("../pages/reseller-v2/warranty/page"),
+);
+const ResellerV2SettingsPage = lazy(
+  () => import("../pages/reseller-v2/settings/page"),
 );
 const NotFound = lazy(() => import("../pages/NotFound"));
 
@@ -222,12 +220,12 @@ export const routes: RouteObject[] = [
     element: <Navigate to="/reseller-v2/ringkasan" replace />,
   },
   { path: "/reseller-v2/ringkasan", element: page(ResellerV2OverviewPage) },
-  { path: "/reseller-v2/catalog", element: page(ResellerCatalogPage) },
-  { path: "/reseller-v2/orders", element: page(ResellerHistoryPage) },
+  { path: "/reseller-v2/catalog", element: page(ResellerV2CatalogPage) },
+  { path: "/reseller-v2/orders", element: page(ResellerV2OrdersPage) },
   { path: "/reseller-v2/accounts", element: page(ResellerV2AccountsPage) },
-  { path: "/reseller-v2/access", element: page(ResellerAccountsPage) },
+  { path: "/reseller-v2/access", element: page(ResellerV2AccessPage) },
   { path: "/reseller-v2/guides", element: page(ResellerV2GuidesPage) },
-  { path: "/reseller-v2/warranty", element: page(ResellerWarrantyPage) },
-  { path: "/reseller-v2/settings", element: page(ResellerSettings) },
+  { path: "/reseller-v2/warranty", element: page(ResellerV2WarrantyPage) },
+  { path: "/reseller-v2/settings", element: page(ResellerV2SettingsPage) },
   { path: "*", element: page(NotFound) },
 ];

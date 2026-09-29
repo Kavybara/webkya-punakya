@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import test from "node:test";
 
 const root = new URL("../../", import.meta.url);
@@ -74,7 +74,7 @@ test("account credentials are masked in a reseller-owned detail drawer", async (
 });
 
 test("access provider transition resets lookup state and never auto-falls back", async () => {
-  const access = await source("src/pages/reseller/accounts/page.tsx");
+  const access = await source("src/pages/reseller-v2/access/page.tsx");
 
   assert.match(access, /function changeAccessSource\(source: AccessSource\)/);
   assert.match(access, /setActiveSource\(source\)/);
@@ -82,8 +82,13 @@ test("access provider transition resets lookup state and never auto-falls back",
   assert.match(access, /setLookup\(""\)/);
   assert.match(access, /setLookupResult\(null\)/);
   assert.match(access, /setLookupError\(""\)/);
-  assert.match(access, /onClick=\{\(\) => changeAccessSource\("netflix"\)\}/);
-  assert.match(access, /onClick=\{\(\) => changeAccessSource\("disney"\)\}/);
+  // The two provider tabs used to be two hand-written buttons, one per
+  // provider, and this test asserted both call sites by their literal string.
+  // They are now rendered from the provider list, so the thing worth pinning is
+  // that the tab strip calls the reset for whichever provider it is showing --
+  // which also means a third provider gets the reset for free.
+  assert.match(access, /onClick=\{\(\) => changeAccessSource\(source\)\}/);
+  assert.match(access, /\(\["netflix", "disney"\] as const\)\.map/);
   assert.match(access, /activeSource === "disney" \? disneyGroups : netflixGroups/);
   assert.doesNotMatch(access, /!hasDisney && hasNetflix/);
   assert.doesNotMatch(access, /!hasNetflix && hasDisney/);
@@ -91,7 +96,7 @@ test("access provider transition resets lookup state and never auto-falls back",
 
 test("verification remains six digits and household exposes links only", async () => {
   const [access, server] = await Promise.all([
-    source("src/pages/reseller/accounts/page.tsx"),
+    source("src/pages/reseller-v2/access/page.tsx"),
     source("server/index.js"),
   ]);
 
@@ -106,23 +111,30 @@ test("verification remains six digits and household exposes links only", async (
 
 test("account access rows preserve readable dark hover and keyboard focus", async () => {
   const [access, styles] = await Promise.all([
-    source("src/pages/reseller/accounts/page.tsx"),
-    source("src/components/reseller-v2/reseller-v2.css"),
+    source("src/pages/reseller-v2/access/page.tsx"),
+    source("src/pages/reseller-v2/access/access.css"),
   ]);
 
-  assert.match(access, /reseller-v2-access-account-row/);
-  assert.doesNotMatch(access, /items-center gap-3 px-5 py-4 text-left hover:bg-slate-50/);
-  assert.match(styles, /\.reseller-v2-access-account-row:hover/);
-  assert.match(styles, /\.reseller-v2-access-account-row:focus-visible/);
+  // This used to be a hand-rolled `.reseller-v2-access-account-row` button with
+  // its own hover and focus rules. It is now a plain <button> inside the
+  // account list, and the page stylesheet gives the list's buttons both states
+  // from a token. The guarantee is the same; only the shape moved.
+  assert.match(access, /reseller-v2-access-list/);
+  assert.doesNotMatch(access, /hover:bg-slate-50/, "a light-theme hover must not reach the dark console");
+  assert.match(
+    styles,
+    /\.reseller-v2-access-list\s*>\s*div\s*>\s*button:hover,\s*\n?\s*\.reseller-v2-access-list\s*>\s*div\s*>\s*button:focus-visible/,
+    "the account rows must respond to both hover and keyboard focus",
+  );
   assert.match(styles, /background:\s*var\(--surface-hover\)/);
 });
 
 test("reseller resource pages separate loading error and empty states", async () => {
   const [orders, accounts, warranty, access] = await Promise.all([
-    source("src/pages/reseller/history/page.tsx"),
+    source("src/pages/reseller-v2/orders/page.tsx"),
     source("src/pages/reseller-v2/accounts/page.tsx"),
-    source("src/pages/reseller/warranty/page.tsx"),
-    source("src/pages/reseller/accounts/page.tsx"),
+    source("src/pages/reseller-v2/warranty/page.tsx"),
+    source("src/pages/reseller-v2/access/page.tsx"),
   ]);
 
   // Each page must branch three ways -- loading, error, and an empty result
@@ -147,8 +159,8 @@ test("all reseller account views share one status normalizer", async () => {
   const [overview, accounts, warranty, access, utility] = await Promise.all([
     source("src/pages/reseller-v2/page.tsx"),
     source("src/pages/reseller-v2/accounts/page.tsx"),
-    source("src/pages/reseller/warranty/page.tsx"),
-    source("src/pages/reseller/accounts/page.tsx"),
+    source("src/pages/reseller-v2/warranty/page.tsx"),
+    source("src/pages/reseller-v2/access/page.tsx"),
     source("src/lib/resellerAccounts.ts"),
   ]);
 
@@ -175,7 +187,7 @@ test("checkout revalidates the HttpOnly session without weakening cookie transpo
 });
 
 test("warranty display and WhatsApp payload never include credentials", async () => {
-  const warranty = await source("src/pages/reseller/warranty/page.tsx");
+  const warranty = await source("src/pages/reseller-v2/warranty/page.tsx");
 
   assert.doesNotMatch(warranty, /account\.password/);
   assert.doesNotMatch(warranty, /account\.pin/);
@@ -200,25 +212,39 @@ test("public catalog and checkout return to the new reseller panel", async () =>
   assert.match(products, /\/reseller-v2\/catalog/);
 });
 
-test("legacy reseller pages render inside the new ResellerShell", async () => {
-  const [layout, styles, catalog] = await Promise.all([
-    source("src/components/feature/DashboardLayout.tsx"),
-    source("src/components/reseller-v2/reseller-v2.css"),
-    source("src/pages/reseller/catalog/page.tsx"),
-  ]);
+test("the legacy reseller tree stays deleted", async () => {
+  // This replaces a test that asserted the legacy adapter existed. The five
+  // legacy pages, `resellerUi.tsx` and `DashboardLayout.tsx` are gone, and with
+  // them the adapter that force-rethemed their light-theme Tailwind classes
+  // onto the dark console -- which is why the console no longer needed a
+  // `class~="bg-[#fbf7f0]"` selector override to make one cream panel readable.
+  //
+  // The assertion is a file-existence check rather than a source match,
+  // because a source match cannot tell a deleted file from one that was
+  // renamed. This is the test that stops the tree creeping back.
+  for (const gone of [
+    "src/pages/reseller",
+    "src/components/feature/DashboardLayout.tsx",
+  ]) {
+    await assert.rejects(
+      stat(new URL(gone, root)),
+      { code: "ENOENT" },
+      `${gone} must not exist`,
+    );
+  }
 
-  assert.match(layout, /role === "reseller"/);
-  assert.match(layout, /<ResellerShell/);
-  assert.match(layout, /reseller-v2-legacy-content/);
-  assert.match(styles, /\.reseller-v2-legacy-content/);
-  // The adapter force-rethemes the legacy pages' Tailwind classes onto the
-  // dark surface. It is scoped to that content wrapper, so it must not leak
-  // onto native v2 components. This whole block is deleted together with the
-  // adapter once the legacy pages are ported onto the shared kit.
-  assert.match(styles, /\.reseller-v2-legacy-content[\s\S]*?\.text-slate-950/);
-  assert.match(styles, /class~="bg-\[#fbf7f0\]"/);
-  assert.match(catalog, /reseller-catalog-duration-grid/);
-  assert.match(catalog, /reseller-catalog-duration-option/);
+  // And nothing may import it. A dead import is a build error, but a live one
+  // pointing at a resurrected copy is the failure this is here to catch.
+  const router = await source("src/router/config.tsx");
+  assert.doesNotMatch(router, /pages\/reseller\//, "the router must not reach for the legacy tree");
+  assert.doesNotMatch(router, /components\/feature\/DashboardLayout/);
+
+  const styles = await source("src/components/reseller-v2/reseller-v2.css");
+  assert.doesNotMatch(
+    styles,
+    /\.reseller-v2-legacy-content/,
+    "the adapter's retheme block goes with the adapter",
+  );
 });
 
 test("Reseller V2 shell keeps reseller auth and scoped destinations", async () => {

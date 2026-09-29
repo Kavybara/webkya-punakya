@@ -118,7 +118,7 @@ export const resellerAuditMap = [
     group: "Transaksi",
     apis: ["/public/catalog", "/resellers"],
     sensitivity: "Harga reseller dan saldo sendiri.",
-    risk: "Adapter sementara tetap memakai UI katalog lama.",
+    risk: "Halaman sudah penuh di kit; harga reseller tetap harus dibaca dari endpoint reseller, bukan katalog publik.",
   },
   {
     existing: "/reseller/history",
@@ -126,7 +126,7 @@ export const resellerAuditMap = [
     group: "Transaksi",
     apis: ["/orders", "/payments/:ref"],
     sensitivity: "Order ID, pembayaran, dan customer milik reseller.",
-    risk: "Adapter sementara; tab status belum dipindahkan.",
+    risk: "Kolom status kini membaca satu helper di lib/orders.ts; owner dan halaman ini tidak boleh berbeda jawaban untuk order yang sama.",
   },
   {
     existing: "/reseller/manage-account",
