@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
+import { Badge } from "../../../components/ui";
 import { DataTable, type DataColumn, type DataFilter } from "../../../components/ui/DataTable";
 import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import { api, subscribeRealtime, type ApiOrder } from "../../../lib/api";
@@ -76,9 +77,6 @@ function badgeTone(label: string): Tone {
   return "muted";
 }
 
-function StatusBadge({ label }: { label: string }) {
-  return <span className={`console-status-badge is-${badgeTone(label)}`}><span />{label}</span>;
-}
 
 function actionText(kind: ActionKind) {
   if (kind === "mark-paid") return { title: "Tandai pembayaran diterima", detail: "Order akan diproses sebagai pembayaran berhasil. Gunakan hanya setelah pembayaran benar-benar terverifikasi.", button: "Tandai dibayar" };
@@ -186,8 +184,8 @@ export default function OwnerConsoleOrdersPage() {
     { id: "customer", header: "Customer", value: (order) => order.customer || order.resellerName || order.reseller || "-", sortable: true, cell: (order) => <span className="console-product-cell"><strong>{order.customer || "-"}</strong><small>{order.resellerName || order.reseller || "Direct"}</small></span> },
     { id: "product", header: "Produk", value: (order) => `${order.product} ${order.variant}`, sortable: true, cell: (order) => <span className="console-product-cell"><strong>{order.product}</strong><small>{order.variant} / {order.duration}</small></span> },
     { id: "total", header: "Total", value: (order) => Number(order.total || 0), sortable: true, cell: (order) => formatRupiah(Number(order.total || 0)) },
-    { id: "payment", header: "Pembayaran", value: paymentLabel, sortable: true, cell: (order) => <StatusBadge label={paymentLabel(order)} /> },
-    { id: "fulfillment", header: "Fulfillment", value: fulfillmentLabel, sortable: true, cell: (order) => <StatusBadge label={fulfillmentLabel(order)} /> },
+    { id: "payment", header: "Pembayaran", value: paymentLabel, sortable: true, cell: (order) => <Badge tone={badgeTone(paymentLabel(order))}>{paymentLabel(order)}</Badge> },
+    { id: "fulfillment", header: "Fulfillment", value: fulfillmentLabel, sortable: true, cell: (order) => <Badge tone={badgeTone(fulfillmentLabel(order))}>{fulfillmentLabel(order)}</Badge> },
     { id: "time", header: "Waktu", value: (order) => parseDate(order.createdAt)?.getTime() || 0, sortable: true, hideOnMobile: true, cell: (order) => formatDateTimeFull(order.createdAt) },
     { id: "action", header: "Aksi", value: () => "Detail", cell: (order) => <button type="button" className="console-row-action" onClick={() => openOrderDetail(order)} aria-label={`Buka detail ${order.id}`}><ArrowUpRight size={15} /></button> },
   ], [openOrderDetail]);
@@ -280,7 +278,7 @@ export default function OwnerConsoleOrdersPage() {
               <button type="button" className="console-icon-button" onClick={closeOrderDetail} aria-label="Tutup detail"><X size={18} /></button>
             </div>
             <div className="console-drawer-body">
-              <div className="console-drawer-statuses"><StatusBadge label={paymentLabel(selectedOrder)} /><StatusBadge label={fulfillmentLabel(selectedOrder)} />{isSmokeTest(selectedOrder) ? <StatusBadge label="Smoke test" /> : null}</div>
+              <div className="console-drawer-statuses"><Badge tone={badgeTone(paymentLabel(selectedOrder))}>{paymentLabel(selectedOrder)}</Badge><Badge tone={badgeTone(fulfillmentLabel(selectedOrder))}>{fulfillmentLabel(selectedOrder)}</Badge>{isSmokeTest(selectedOrder) ? <Badge tone="info">Smoke test</Badge> : null}</div>
               {detailLoading ? <div className="console-order-detail-loading"><RefreshCw size={17} className="console-spin" /> Memuat detail order...</div> : null}
               {detailError ? <div className="console-inline-error">{detailError}</div> : null}
               <dl>

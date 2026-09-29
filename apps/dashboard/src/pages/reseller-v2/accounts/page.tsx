@@ -9,13 +9,6 @@ import {
   XCircle,
 } from "lucide-react";
 import { api, type AccountDeliveryDetail, type ApiAccount } from "../../../lib/api";
-import {
-  ResellerDetailDrawer,
-  ResellerEmptyState,
-  ResellerErrorState,
-  ResellerLoadingSkeleton,
-  ResellerStatusBadge,
-} from "../../../components/reseller-v2/ResellerResource";
 import { ResellerShell } from "../../../components/reseller-v2/ResellerShell";
 import {
   normalizeResellerAccountStatus,
@@ -23,6 +16,7 @@ import {
   summarizeResellerAccounts,
 } from "../../../lib/resellerAccounts";
 import { useSearchParams } from "react-router-dom";
+import { Badge, Drawer, EmptyState, ErrorState, LoadingSkeleton } from "../../../components/ui";
 
 export const MASK_AFTER_MS = 60_000;
 type AccountView = "usable" | "expired" | "all";
@@ -246,7 +240,7 @@ export default function ResellerV2AccountsPage() {
       loading={loading}
       onRefresh={() => load({ refreshSheets: true })}
     >
-      {error ? <ResellerErrorState message={error} onRetry={load} /> : null}
+      {error ? <ErrorState message={error} onRetry={load} /> : null}
       <section
         className="reseller-v2-account-summary"
         aria-label="Ringkasan akun"
@@ -322,7 +316,7 @@ export default function ResellerV2AccountsPage() {
         </div>
         {loading ? (
           <div className="reseller-v2-accounts-loading">
-            <ResellerLoadingSkeleton lines={5} />
+            <LoadingSkeleton lines={5} />
           </div>
         ) : filtered.length ? (
           <div className="reseller-v2-account-list">
@@ -352,17 +346,17 @@ export default function ResellerV2AccountsPage() {
                     {account.expiresAt ? dateTime(account.expiresAt) : "-"}
                   </span>
                   <div className="reseller-v2-account-badges">
-                    <ResellerStatusBadge tone={status.tone}>
+                    <Badge tone={status.tone}>
                       {status.label}
-                    </ResellerStatusBadge>
-                    {condition ? <ResellerStatusBadge tone={condition.tone}>{condition.label}</ResellerStatusBadge> : null}
+                    </Badge>
+                    {condition ? <Badge tone={condition.tone}>{condition.label}</Badge> : null}
                   </div>
                 </button>
               );
             })}
           </div>
         ) : (
-          <ResellerEmptyState
+          <EmptyState
             title="Akun tidak ditemukan"
             description={
               query
@@ -372,7 +366,7 @@ export default function ResellerV2AccountsPage() {
           />
         )}
       </section> : null}
-      <ResellerDetailDrawer
+      <Drawer
         open={Boolean(selected)}
         title="Detail Akun"
         description="Credential hanya ditampilkan sementara dan kembali dimasking setelah 60 detik."
@@ -384,8 +378,8 @@ export default function ResellerV2AccountsPage() {
               <button type="button" role="tab" aria-selected={detailTab === "account"} className={detailTab === "account" ? "is-active" : ""} onClick={() => setDetailTab("account")}>Detail Akun</button>
               <button type="button" role="tab" aria-selected={detailTab === "template"} className={detailTab === "template" ? "is-active" : ""} onClick={() => setDetailTab("template")}>Template Siap Kirim</button>
             </div>
-            {deliveryLoading ? <ResellerLoadingSkeleton lines={4} /> : null}
-            {deliveryError ? <ResellerErrorState message={deliveryError} onRetry={() => openDetail(selected, detailTab)} /> : null}
+            {deliveryLoading ? <LoadingSkeleton lines={4} /> : null}
+            {deliveryError ? <ErrorState message={deliveryError} onRetry={() => openDetail(selected, detailTab)} /> : null}
             {!deliveryLoading && !deliveryError && detailTab === "account" ? <>
             <dl>
               <div>
@@ -414,7 +408,7 @@ export default function ResellerV2AccountsPage() {
               </div>
               {selectedCondition ? <div>
                 <dt>Kondisi akun</dt>
-                <dd><ResellerStatusBadge tone={selectedCondition.tone}>{selectedCondition.label}</ResellerStatusBadge></dd>
+                <dd><Badge tone={selectedCondition.tone}>{selectedCondition.label}</Badge></dd>
               </div> : null}
             </dl>
             <div className="reseller-v2-credential-block">
@@ -463,7 +457,7 @@ export default function ResellerV2AccountsPage() {
                   </p>
                 </>
               ) : (
-                <ResellerEmptyState title="Akses credential sudah berakhir" description="Akun ini sudah expired atau tidak aktif, jadi password/PIN tidak lagi ditampilkan." />
+                <EmptyState title="Akses credential sudah berakhir" description="Akun ini sudah expired atau tidak aktif, jadi password/PIN tidak lagi ditampilkan." />
               )}
             </div>
             </> : null}
@@ -478,15 +472,15 @@ export default function ResellerV2AccountsPage() {
                     <pre>{deliveryDetail.deliveryTemplateSnapshot.renderedText}</pre>
                   </>
                 ) : deliveryDetail?.deliveryTemplateSnapshot?.status === "incomplete" ? (
-                  <ResellerErrorState message="Detail akun belum lengkap. Owner perlu melengkapi field pengiriman sebelum template dapat digunakan." />
+                  <ErrorState message="Detail akun belum lengkap. Owner perlu melengkapi field pengiriman sebelum template dapat digunakan." />
                 ) : (
-                  <ResellerEmptyState title="Template belum tersedia" description="Owner belum mengonfigurasi template pengiriman untuk varian ini." />
+                  <EmptyState title="Template belum tersedia" description="Owner belum mengonfigurasi template pengiriman untuk varian ini." />
                 )}
               </div>
             ) : null}
           </div>
         ) : null}
-      </ResellerDetailDrawer>
+      </Drawer>
     </ResellerShell>
   );
 }

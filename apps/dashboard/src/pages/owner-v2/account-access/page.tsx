@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Clipboard, KeyRound, Link2, Mail, RefreshCw, Search, ShieldCheck, Smartphone } from "lucide-react";
-import { ConsoleBadge, ConsoleMetrics, ConsoleNotice } from "../../../components/console/ConsoleResource";
 import { ConsoleShell } from "../../../components/console/ConsoleShell";
+import { Badge, MetricRow, Notice } from "../../../components/ui";
 import {
   api,
   type AccountAccessLookupResult,
@@ -169,7 +169,7 @@ export default function OwnerConsoleAccountAccessPage() {
       systemState={accountsError ? "warning" : "healthy"}
       onRefresh={() => loadAccounts(provider)}
     >
-      <ConsoleMetrics items={[
+      <MetricRow items={[
         { label: "Akun tersedia", value: accounts.length, hint: provider === "disney" ? "Identitas login Disney" : "Email Netflix" },
         { label: "Akun aktif", value: activeCount, tone: "success" },
         { label: "Provider", value: provider === "disney" ? "Disney" : "Netflix", tone: "info" },
@@ -205,12 +205,12 @@ export default function OwnerConsoleAccountAccessPage() {
               </div>
             </form>
 
-            {lookupError ? <ConsoleNotice tone="danger">{lookupError}</ConsoleNotice> : null}
+            {lookupError ? <Notice tone="danger">{lookupError}</Notice> : null}
             {result ? (
               <div className="console-access-result" aria-live="polite">
                 <div>
                   <span>{selectedTool.label}</span>
-                  <ConsoleBadge tone={resultValue ? "success" : "warning"}>{resultValue ? "Ditemukan" : "Belum tersedia"}</ConsoleBadge>
+                  <Badge tone={resultValue ? "success" : "warning"}>{resultValue ? "Ditemukan" : "Belum tersedia"}</Badge>
                 </div>
                 <strong className={resultValue ? "" : "is-empty"}>{resultValue || lookupErrorText(result)}</strong>
                 <p>{[result.account.product, result.account.variant, result.account.profile].filter(Boolean).join(" - ")}</p>
@@ -235,7 +235,7 @@ export default function OwnerConsoleAccountAccessPage() {
               return <button key={`${account.id}-${target}`} type="button" className="console-access-account" onClick={() => { setQuery(target); setLookupError(""); setResult(null); }}>
                 <span className="console-access-account-icon">{provider === "disney" ? <Smartphone size={16} /> : <Mail size={16} />}</span>
                 <span><strong>{target}</strong><small>{[account.product, account.variant, account.profile].filter(Boolean).join(" - ")}</small></span>
-                <ConsoleBadge tone={statusTone(account)}>{statusLabel(account)}</ConsoleBadge>
+                <Badge tone={statusTone(account)}>{statusLabel(account)}</Badge>
               </button>;
             }) : null}
           </div>

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MessageSquareWarning, Plus, RefreshCw, ShieldCheck } from "lucide-react";
 import { DataTable, type DataColumn, type DataFilter } from "../../../components/ui/DataTable";
-import { ConsoleActionToast, ConsoleBadge, ConsoleDialog, ConsoleDialogActions, ConsoleField, ConsoleMetrics, ConsoleNotice } from "../../../components/console/ConsoleResource";
 import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import {
   api,
@@ -11,6 +10,7 @@ import {
   type WarrantyReplacementCandidate,
 } from "../../../lib/api";
 import { formatDateTimeFull } from "../../../lib/format";
+import { Badge, Dialog, DialogActions, Field, MetricRow, Notice, Toast } from "../../../components/ui";
 
 const editableStatuses: WarrantyClaimStatus[] = ["reviewing", "resolved", "rejected"];
 const terminalStatuses = new Set<WarrantyClaimStatus>(["resolved", "rejected"]);
@@ -416,8 +416,8 @@ export default function OwnerConsoleWarrantyPage() {
     { id: "reseller", header: "Reseller", value: (row) => row.resellerName || row.resellerId || "-", sortable: true, cell: (row) => <span className="console-product-cell"><strong>{row.resellerName || row.resellerId || "-"}</strong><small>{row.accountIdentity || "Identitas dimasking"}</small></span> },
     { id: "product", header: "Produk", value: (row) => `${row.product} ${row.variant}`, sortable: true, cell: (row) => <span className="console-product-cell"><strong>{row.product || "-"}</strong><small>{row.variant || "-"}</small></span> },
     { id: "order", header: "Order", value: (row) => row.orderId || "-", hideOnMobile: true },
-    { id: "status", header: "Status", value: (row) => row.status, sortable: true, cell: (row) => <div className="flex flex-wrap gap-2"><ConsoleBadge tone={statusTone(row.status)}>{statusLabel(row.status)}</ConsoleBadge>{row.reviewOverdue && !["replaced", "resolved", "rejected"].includes(row.status) ? <ConsoleBadge tone="danger">Lewat 3 hari</ConsoleBadge> : null}</div> },
-    { id: "notification", header: "Sumber", value: (row) => row.submissionSource || row.ownerNotificationStatus || "pending", hideOnMobile: true, cell: (row) => row.submissionSource === "owner_manual_whatsapp" ? <ConsoleBadge tone="info">WhatsApp manual</ConsoleBadge> : <ConsoleBadge tone={row.ownerNotificationStatus === "sent" ? "success" : row.ownerNotificationStatus === "failed" ? "danger" : "warning"}>{row.ownerNotificationStatus === "sent" ? "WA terkirim" : row.ownerNotificationStatus === "failed" ? "WA gagal" : "Dashboard"}</ConsoleBadge> },
+    { id: "status", header: "Status", value: (row) => row.status, sortable: true, cell: (row) => <div className="flex flex-wrap gap-2"><Badge tone={statusTone(row.status)}>{statusLabel(row.status)}</Badge>{row.reviewOverdue && !["replaced", "resolved", "rejected"].includes(row.status) ? <Badge tone="danger">Lewat 3 hari</Badge> : null}</div> },
+    { id: "notification", header: "Sumber", value: (row) => row.submissionSource || row.ownerNotificationStatus || "pending", hideOnMobile: true, cell: (row) => row.submissionSource === "owner_manual_whatsapp" ? <Badge tone="info">WhatsApp manual</Badge> : <Badge tone={row.ownerNotificationStatus === "sent" ? "success" : row.ownerNotificationStatus === "failed" ? "danger" : "warning"}>{row.ownerNotificationStatus === "sent" ? "WA terkirim" : row.ownerNotificationStatus === "failed" ? "WA gagal" : "Dashboard"}</Badge> },
     { id: "actions", header: "Aksi", value: () => "", cell: (row) => <div className="console-row-actions"><button type="button" onClick={() => openClaim(row)} aria-label={`Kelola ${row.id}`}><ShieldCheck size={15} /></button></div> },
   ], []);
   const filters = useMemo<Array<DataFilter<WarrantyClaim>>>(() => [{ id: "status", label: "Status", options: ["submitted", "reviewing", "replaced", "resolved", "rejected"].map((value) => ({ label: statusLabel(value), value })), value: (row) => row.status === "waiting_evidence" ? "reviewing" : row.status }], []);
@@ -434,24 +434,24 @@ export default function OwnerConsoleWarrantyPage() {
   )), [activeClaims]);
 
   return <ConsoleShell title="Garansi" description="Periksa klaim, pilih stok satu pool, dan simpan riwayat penggantian akun." refreshing={loading} attentionCount={activeClaims.length} systemState={error ? "unknown" : activeFailures.length ? "warning" : "healthy"} onRefresh={load}>
-    <ConsoleMetrics items={[
+    <MetricRow items={[
       { label: "Klaim baru", value: claims.filter((row) => row.status === "submitted").length, tone: "warning" },
       { label: "Sedang diperiksa", value: claims.filter((row) => ["reviewing", "waiting_evidence"].includes(row.status)).length, tone: "info" },
       { label: "Perlu tindakan", value: activeClaims.length, tone: activeClaims.length ? "warning" : "success" },
       { label: "Kendala aktif", value: activeFailures.length, tone: activeFailures.length ? "danger" : "success" },
     ]} />
-    {error ? <ConsoleNotice tone="danger">{error}</ConsoleNotice> : null}
-    <ConsoleActionToast message={message} onClose={clearMessage} />
+    {error ? <Notice tone="danger">{error}</Notice> : null}
+    <Toast message={message} onClose={clearMessage} />
     <section className="console-panel">
       <div className="console-panel-header"><div><span>Warranty Center</span><h2>{claimView === "active" ? "Antrean klaim aktif" : "Riwayat klaim"}</h2></div><div className="console-panel-toolbar-actions"><button type="button" aria-pressed={claimView === "active"} onClick={() => setClaimView("active")}>Antrean Aktif ({activeClaims.length})</button><button type="button" aria-pressed={claimView === "history"} onClick={() => setClaimView("history")}>Riwayat ({historyClaims.length})</button><button type="button" onClick={() => openManualClaim().catch(() => undefined)}><Plus size={15} /> Tambah klaim manual</button><button type="button" onClick={load}><RefreshCw size={15} /> Perbarui</button></div></div>
       <DataTable rows={visibleClaims} columns={columns} filters={filters} rowKey={(row) => row.id} loading={loading} error={error} emptyText={claimView === "active" ? "Tidak ada klaim yang perlu ditangani." : "Belum ada riwayat klaim selesai."} initialPageSize={10} />
     </section>
 
-    {manualOpen ? <ConsoleDialog title="Tambah klaim manual" eyebrow="Dari WhatsApp reseller" onClose={closeManualClaim} wide footer={<ConsoleDialogActions onCancel={closeManualClaim} onConfirm={() => submitManualClaim().catch(() => undefined)} confirmLabel="Buat klaim" busy={busy || manualLoading || manualEvidenceBusy} />}>
+    {manualOpen ? <Dialog open title="Tambah klaim manual" eyebrow="Dari WhatsApp reseller" onClose={closeManualClaim} wide footer={<DialogActions onCancel={closeManualClaim} onConfirm={() => submitManualClaim().catch(() => undefined)} confirmLabel="Buat klaim" busy={busy || manualLoading || manualEvidenceBusy} />}>
       <p className="text-sm leading-6 text-zinc-400">Pilih reseller terlebih dahulu, lalu pilih akun miliknya yang dilaporkan melalui WhatsApp. Akun pengganti dipilih setelah klaim dibuat.</p>
-      {manualError ? <div className="mt-4"><ConsoleNotice tone="danger">{manualError}</ConsoleNotice></div> : null}
+      {manualError ? <div className="mt-4"><Notice tone="danger">{manualError}</Notice></div> : null}
       <div className="mt-5">
-        <ConsoleField label="Reseller" hint="Hanya reseller yang masih mempunyai akun dalam masa garansi yang ditampilkan.">
+        <Field label="Reseller" hint="Hanya reseller yang masih mempunyai akun dalam masa garansi yang ditampilkan.">
           <select value={manualResellerId} onChange={(event) => {
             setManualResellerId(event.target.value);
             setManualAccountId("");
@@ -459,15 +459,15 @@ export default function OwnerConsoleWarrantyPage() {
             <option value="">{manualLoading ? "Memuat reseller..." : manualResellers.length ? "Pilih reseller" : "Tidak ada reseller yang dapat dipilih"}</option>
             {manualResellers.map((reseller) => <option key={reseller.id} value={reseller.id}>{reseller.name}</option>)}
           </select>
-        </ConsoleField>
+        </Field>
       </div>
       <div className="mt-4">
-        <ConsoleField label="Akun yang dilaporkan" hint={manualResellerId ? "Daftar ini hanya berisi akun milik reseller yang dipilih." : "Pilih reseller terlebih dahulu."}>
+        <Field label="Akun yang dilaporkan" hint={manualResellerId ? "Daftar ini hanya berisi akun milik reseller yang dipilih." : "Pilih reseller terlebih dahulu."}>
           <select value={manualAccountId} onChange={(event) => setManualAccountId(event.target.value)} disabled={manualLoading || !manualResellerId || !manualAccounts.length}>
             <option value="">{manualLoading ? "Memuat akun..." : !manualResellerId ? "Pilih reseller terlebih dahulu" : manualAccounts.length ? "Pilih akun" : "Tidak ada akun yang dapat diklaim"}</option>
             {manualAccounts.map((option) => <option key={option.accountId} value={option.accountId}>{option.product} {option.variant} / {option.profile || "Tanpa profil"} / {option.orderId || "Tanpa Order ID"}</option>)}
           </select>
-        </ConsoleField>
+        </Field>
       </div>
       {selectedManualOption ? <div className="mt-4 grid gap-3 md:grid-cols-3">
         <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4"><span className="text-xs uppercase tracking-wider text-zinc-500">Reseller</span><p className="mt-2 font-semibold text-white">{selectedManualOption.resellerName || "-"}</p><p className="mt-1 text-sm text-zinc-400">{selectedManualOption.orderId || "Tanpa Order ID"}</p></div>
@@ -475,10 +475,10 @@ export default function OwnerConsoleWarrantyPage() {
         <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4"><span className="text-xs uppercase tracking-wider text-zinc-500">Garansi</span><p className="mt-2 font-semibold text-white">Sisa {selectedManualOption.remainingDays} hari</p><p className="mt-1 text-sm text-zinc-400">Sampai {formatDateTimeFull(selectedManualOption.warrantyEndsAt)}</p></div>
       </div> : null}
       <div className="mt-4 grid gap-4 md:grid-cols-2">
-        <ConsoleField label="Kendala dari WhatsApp" hint="Tuliskan keluhan reseller secara ringkas dan jelas.">
+        <Field label="Kendala dari WhatsApp" hint="Tuliskan keluhan reseller secara ringkas dan jelas.">
           <textarea rows={6} value={manualIssue} onChange={(event) => setManualIssue(event.target.value.slice(0, 1000))} placeholder="Contoh: akun tidak dapat login sejak pagi..." />
-        </ConsoleField>
-        <ConsoleField label="Screenshot WhatsApp (opsional)" hint={manualEvidenceBusy ? "Memproses gambar..." : manualEvidence ? `${manualEvidence.name} (${Math.ceil(manualEvidence.size / 1024)} KB) siap disimpan.` : "PNG, JPEG, atau WebP. Maksimal hasil kompresi 650 KB."}>
+        </Field>
+        <Field label="Screenshot WhatsApp (opsional)" hint={manualEvidenceBusy ? "Memproses gambar..." : manualEvidence ? `${manualEvidence.name} (${Math.ceil(manualEvidence.size / 1024)} KB) siap disimpan.` : "PNG, JPEG, atau WebP. Maksimal hasil kompresi 650 KB."}>
           <input ref={manualEvidenceInputRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={async (event) => {
             const input = event.currentTarget;
             const file = input.files?.[0];
@@ -495,18 +495,18 @@ export default function OwnerConsoleWarrantyPage() {
               setManualEvidenceBusy(false);
             }
           }} />
-        </ConsoleField>
+        </Field>
       </div>
-    </ConsoleDialog> : null}
+    </Dialog> : null}
 
-    {selected && !confirmReplace && !manualReplaceOpen ? <ConsoleDialog title={`Klaim ${selected.id}`} eyebrow="Garansi" onClose={() => setSelected(null)} wide>
+    {selected && !confirmReplace && !manualReplaceOpen ? <Dialog open title={`Klaim ${selected.id}`} eyebrow="Garansi" onClose={() => setSelected(null)} wide>
       <div className="grid gap-4 md:grid-cols-2">
         <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4"><span className="text-xs uppercase tracking-wider text-zinc-500">Produk</span><p className="mt-2 font-semibold text-white">{selected.product} {selected.variant}</p><p className="mt-1 text-sm text-zinc-400">Order {selected.orderId || "-"}</p></div>
         <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4"><span className="text-xs uppercase tracking-wider text-zinc-500">Akun</span><p className="mt-2 font-semibold text-white">{selected.accountIdentity || "Dimasking"}</p><p className="mt-1 text-sm text-zinc-400">Profil {selected.profile || "-"}</p></div>
       </div>
       <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] p-4"><div className="flex items-center gap-2 text-sm font-semibold text-white"><MessageSquareWarning size={16} /> Kendala reseller</div><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-300">{selected.issue}</p></div>
-      {selected.status !== "replaced" && !["resolved", "rejected"].includes(selected.status) ? <div className="mt-4"><ConsoleNotice tone={selected.reviewOverdue ? "danger" : "warning"}>{selected.reviewOverdue ? `Pemeriksaan sudah melewati batas 3 hari (${formatReviewDuration(selected.reviewElapsedMinutes)}). Selesaikan klaim segera.` : `Masa aktif sedang di-hold. Durasi pemeriksaan berjalan ${formatReviewDuration(selected.reviewElapsedMinutes)} dan maksimal 3 hari akan ditambahkan saat akun diganti.`}</ConsoleNotice></div> : null}
-      {selected.stockReviewTriggered ? <div className="mt-4"><ConsoleNotice tone={selected.stockReviewSyncStatus === "failed" ? "danger" : "warning"}>Akun login ini memiliki klaim pada {selected.stockReviewProfileCount || 0} profil berbeda ({selected.stockReviewProfiles?.join(", ") || "profil tidak tersedia"}). Seluruh profil otomatis ditandai DIPERIKSA dan tidak dapat dipilih untuk order baru. Sinkronisasi Sheets: {selected.stockReviewSyncStatus === "synced" ? "selesai" : selected.stockReviewSyncStatus === "failed" ? "gagal" : "diproses"}.{selected.stockReviewSyncStatus === "failed" ? <button type="button" className="ml-3 h-10 rounded-lg border border-white/15 px-3 font-semibold text-white" onClick={() => retryStockReviewSync().catch(() => undefined)} disabled={busy}>{busy ? "Mencoba..." : "Coba Sync Ulang"}</button> : null}</ConsoleNotice></div> : null}
+      {selected.status !== "replaced" && !["resolved", "rejected"].includes(selected.status) ? <div className="mt-4"><Notice tone={selected.reviewOverdue ? "danger" : "warning"}>{selected.reviewOverdue ? `Pemeriksaan sudah melewati batas 3 hari (${formatReviewDuration(selected.reviewElapsedMinutes)}). Selesaikan klaim segera.` : `Masa aktif sedang di-hold. Durasi pemeriksaan berjalan ${formatReviewDuration(selected.reviewElapsedMinutes)} dan maksimal 3 hari akan ditambahkan saat akun diganti.`}</Notice></div> : null}
+      {selected.stockReviewTriggered ? <div className="mt-4"><Notice tone={selected.stockReviewSyncStatus === "failed" ? "danger" : "warning"}>Akun login ini memiliki klaim pada {selected.stockReviewProfileCount || 0} profil berbeda ({selected.stockReviewProfiles?.join(", ") || "profil tidak tersedia"}). Seluruh profil otomatis ditandai DIPERIKSA dan tidak dapat dipilih untuk order baru. Sinkronisasi Sheets: {selected.stockReviewSyncStatus === "synced" ? "selesai" : selected.stockReviewSyncStatus === "failed" ? "gagal" : "diproses"}.{selected.stockReviewSyncStatus === "failed" ? <button type="button" className="ml-3 h-10 rounded-lg border border-white/15 px-3 font-semibold text-white" onClick={() => retryStockReviewSync().catch(() => undefined)} disabled={busy}>{busy ? "Mencoba..." : "Coba Sync Ulang"}</button> : null}</Notice></div> : null}
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
           <span className="text-xs uppercase tracking-wider text-zinc-500">Masa garansi</span>
@@ -520,10 +520,10 @@ export default function OwnerConsoleWarrantyPage() {
       </div>
       {selected.ownerNote ? <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] p-4"><span className="text-xs uppercase tracking-wider text-zinc-500">Catatan Owner untuk reseller</span><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-200">{selected.ownerNote}</p></div> : null}
       {selected.status !== "replaced" ? <div className="mt-5 grid gap-4 md:grid-cols-2">
-        <ConsoleField label="Status klaim"><select value={status} onChange={(event) => setStatus(event.target.value as WarrantyClaimStatus)}>{editableStatuses.map((value) => <option key={value} value={value}>{statusLabel(value)}</option>)}</select></ConsoleField>
-        <ConsoleField label={`Catatan Owner${terminalStatuses.has(status) ? " (wajib)" : ""}`}><textarea value={ownerNote} onChange={(event) => setOwnerNote(event.target.value.slice(0, 500))} placeholder="Hasil pemeriksaan, alasan penolakan, atau alasan penggantian" rows={4} /></ConsoleField>
+        <Field label="Status klaim"><select value={status} onChange={(event) => setStatus(event.target.value as WarrantyClaimStatus)}>{editableStatuses.map((value) => <option key={value} value={value}>{statusLabel(value)}</option>)}</select></Field>
+        <Field label={`Catatan Owner${terminalStatuses.has(status) ? " (wajib)" : ""}`}><textarea value={ownerNote} onChange={(event) => setOwnerNote(event.target.value.slice(0, 500))} placeholder="Hasil pemeriksaan, alasan penolakan, atau alasan penggantian" rows={4} /></Field>
         <div className="md:col-span-2 flex flex-wrap justify-end gap-3"><button type="button" className="h-11 rounded-lg border border-white/10 px-4 text-sm font-semibold text-zinc-200" onClick={saveClaim} disabled={busy}>Simpan status</button></div>
-      </div> : <div className="mt-4 space-y-3"><ConsoleNotice>Akun sudah diganti dengan Stock ID {selected.replacement?.newStockId || "-"}. Masa aktif ditambah {formatReviewDuration(selected.holdAppliedMinutes)} sesuai waktu pemeriksaan.</ConsoleNotice>{selected.replacementSyncStatus === "failed" || selected.replacementSyncStatus === "pending" ? <ConsoleNotice tone="danger">Sinkronisasi Google Sheets {selected.replacementSyncStatus === "failed" ? "gagal" : "belum selesai"}. Penggantian sudah dikunci di database dan tidak boleh memilih stok baru.<button type="button" className="ml-3 h-10 rounded-lg border border-white/15 px-3 font-semibold text-white" onClick={() => retryReplacementSync().catch(() => undefined)} disabled={busy}>{busy ? "Mencoba..." : "Coba Sync Ulang"}</button></ConsoleNotice> : <ConsoleNotice>Sinkronisasi penggantian: selesai.</ConsoleNotice>}{selected.replacementNotificationStatus === "sent" ? <ConsoleNotice>WhatsApp penerima: terkirim ke nomor akun yang digaransi.</ConsoleNotice> : <ConsoleNotice tone="danger">WhatsApp penerima belum terkirim{selected.replacementNotificationError ? ` (${selected.replacementNotificationError})` : ""}.<button type="button" className="ml-3 h-10 rounded-lg border border-white/15 px-3 font-semibold text-white" onClick={() => retryReplacementNotification().catch(() => undefined)} disabled={busy}>{busy ? "Mengirim..." : "Kirim ulang WhatsApp"}</button></ConsoleNotice>}</div>}
+      </div> : <div className="mt-4 space-y-3"><Notice>Akun sudah diganti dengan Stock ID {selected.replacement?.newStockId || "-"}. Masa aktif ditambah {formatReviewDuration(selected.holdAppliedMinutes)} sesuai waktu pemeriksaan.</Notice>{selected.replacementSyncStatus === "failed" || selected.replacementSyncStatus === "pending" ? <Notice tone="danger">Sinkronisasi Google Sheets {selected.replacementSyncStatus === "failed" ? "gagal" : "belum selesai"}. Penggantian sudah dikunci di database dan tidak boleh memilih stok baru.<button type="button" className="ml-3 h-10 rounded-lg border border-white/15 px-3 font-semibold text-white" onClick={() => retryReplacementSync().catch(() => undefined)} disabled={busy}>{busy ? "Mencoba..." : "Coba Sync Ulang"}</button></Notice> : <Notice>Sinkronisasi penggantian: selesai.</Notice>}{selected.replacementNotificationStatus === "sent" ? <Notice>WhatsApp penerima: terkirim ke nomor akun yang digaransi.</Notice> : <Notice tone="danger">WhatsApp penerima belum terkirim{selected.replacementNotificationError ? ` (${selected.replacementNotificationError})` : ""}.<button type="button" className="ml-3 h-10 rounded-lg border border-white/15 px-3 font-semibold text-white" onClick={() => retryReplacementNotification().catch(() => undefined)} disabled={busy}>{busy ? "Mengirim..." : "Kirim ulang WhatsApp"}</button></Notice>}</div>}
       {!(["replaced", "resolved", "rejected"].includes(selected.status)) ? <div className="mt-5 border-t border-white/10 pt-5">
         <h3 className="text-sm font-semibold text-white">Penggantian akun</h3>
         <p className="mt-1 text-sm text-zinc-400">Hanya stok tersedia dari pool yang sama yang dapat dipilih. Credential tidak ditampilkan di daftar ini.</p>
@@ -542,25 +542,25 @@ export default function OwnerConsoleWarrantyPage() {
         </div>
         {!ownerNote.trim() ? <p className="mt-2 text-xs text-amber-300">Isi Catatan Owner terlebih dahulu. Catatan ini akan terlihat oleh reseller.</p> : null}
       </div> : null}
-    </ConsoleDialog> : null}
+    </Dialog> : null}
 
-    {selected && manualReplaceOpen ? <ConsoleDialog title="Ganti manual / By Order" eyebrow={selected.id} onClose={() => setManualReplaceOpen(false)} wide footer={<ConsoleDialogActions onCancel={() => setManualReplaceOpen(false)} onConfirm={() => executeManualReplacement().catch(() => undefined)} confirmLabel="Simpan pengganti" busy={busy} />}>
-      <ConsoleNotice>Dipakai saat akun pengganti diambil satuan dari maker dan belum ada di stok website. Akun baru tetap masuk ke Akun Saya reseller, sedangkan password dan PIN tidak dikirim lewat WhatsApp.</ConsoleNotice>
+    {selected && manualReplaceOpen ? <Dialog open title="Ganti manual / By Order" eyebrow={selected.id} onClose={() => setManualReplaceOpen(false)} wide footer={<DialogActions onCancel={() => setManualReplaceOpen(false)} onConfirm={() => executeManualReplacement().catch(() => undefined)} confirmLabel="Simpan pengganti" busy={busy} />}>
+      <Notice>Dipakai saat akun pengganti diambil satuan dari maker dan belum ada di stok website. Akun baru tetap masuk ke Akun Saya reseller, sedangkan password dan PIN tidak dikirim lewat WhatsApp.</Notice>
       <div className="mt-5 grid gap-4 md:grid-cols-2">
-        <ConsoleField label="Login atau email akun baru"><input value={manualReplaceForm.login} onChange={(event) => setManualReplaceForm((current) => ({ ...current, login: event.target.value }))} placeholder="email/login dari maker" /></ConsoleField>
-        <ConsoleField label="Password akun baru"><input value={manualReplaceForm.password} onChange={(event) => setManualReplaceForm((current) => ({ ...current, password: event.target.value }))} placeholder="password dari maker" /></ConsoleField>
-        <ConsoleField label="Profil"><input value={manualReplaceForm.profile} onChange={(event) => setManualReplaceForm((current) => ({ ...current, profile: event.target.value }))} placeholder={selected.profile || "Nama profil"} /></ConsoleField>
-        <ConsoleField label="PIN"><input value={manualReplaceForm.pin} onChange={(event) => setManualReplaceForm((current) => ({ ...current, pin: event.target.value }))} placeholder="opsional" /></ConsoleField>
-        <ConsoleField label="Email OTP / recovery"><input value={manualReplaceForm.otpEmail} onChange={(event) => setManualReplaceForm((current) => ({ ...current, otpEmail: event.target.value }))} placeholder="opsional" /></ConsoleField>
-        <ConsoleField label="Tanggal berakhir"><input value={manualReplaceForm.expiresAt} onChange={(event) => setManualReplaceForm((current) => ({ ...current, expiresAt: event.target.value }))} placeholder={selected.replacement?.adjustedExpiresAt || selected.warrantyEndsAt || "YYYY-MM-DD HH:mm"} /></ConsoleField>
+        <Field label="Login atau email akun baru"><input value={manualReplaceForm.login} onChange={(event) => setManualReplaceForm((current) => ({ ...current, login: event.target.value }))} placeholder="email/login dari maker" /></Field>
+        <Field label="Password akun baru"><input value={manualReplaceForm.password} onChange={(event) => setManualReplaceForm((current) => ({ ...current, password: event.target.value }))} placeholder="password dari maker" /></Field>
+        <Field label="Profil"><input value={manualReplaceForm.profile} onChange={(event) => setManualReplaceForm((current) => ({ ...current, profile: event.target.value }))} placeholder={selected.profile || "Nama profil"} /></Field>
+        <Field label="PIN"><input value={manualReplaceForm.pin} onChange={(event) => setManualReplaceForm((current) => ({ ...current, pin: event.target.value }))} placeholder="opsional" /></Field>
+        <Field label="Email OTP / recovery"><input value={manualReplaceForm.otpEmail} onChange={(event) => setManualReplaceForm((current) => ({ ...current, otpEmail: event.target.value }))} placeholder="opsional" /></Field>
+        <Field label="Tanggal berakhir"><input value={manualReplaceForm.expiresAt} onChange={(event) => setManualReplaceForm((current) => ({ ...current, expiresAt: event.target.value }))} placeholder={selected.replacement?.adjustedExpiresAt || selected.warrantyEndsAt || "YYYY-MM-DD HH:mm"} /></Field>
         <div className="md:col-span-2">
-          <ConsoleField label="Catatan Owner"><textarea rows={4} value={manualReplaceForm.note} onChange={(event) => setManualReplaceForm((current) => ({ ...current, note: event.target.value.slice(0, 500) }))} placeholder="Alasan penggantian, akan terlihat oleh reseller" /></ConsoleField>
+          <Field label="Catatan Owner"><textarea rows={4} value={manualReplaceForm.note} onChange={(event) => setManualReplaceForm((current) => ({ ...current, note: event.target.value.slice(0, 500) }))} placeholder="Alasan penggantian, akan terlihat oleh reseller" /></Field>
         </div>
       </div>
-    </ConsoleDialog> : null}
+    </Dialog> : null}
 
-    {selected && confirmReplace ? <ConsoleDialog title="Konfirmasi penggantian" eyebrow={selected.id} onClose={() => setConfirmReplace(false)} footer={<ConsoleDialogActions onCancel={() => setConfirmReplace(false)} onConfirm={executeReplacement} confirmLabel="Ya, ganti akun" busy={busy} danger />}>
-      <ConsoleNotice tone="danger">Akun lama akan ditandai REPLACED dan tidak dikembalikan ke stok. Akun baru memakai order, reseller, serta tanggal berakhir yang sama. Tindakan ini tercatat dan tidak dapat memilih stok kedua setelah selesai.</ConsoleNotice>
-    </ConsoleDialog> : null}
+    {selected && confirmReplace ? <Dialog open title="Konfirmasi penggantian" eyebrow={selected.id} onClose={() => setConfirmReplace(false)} footer={<DialogActions onCancel={() => setConfirmReplace(false)} onConfirm={executeReplacement} confirmLabel="Ya, ganti akun" busy={busy} danger />}>
+      <Notice tone="danger">Akun lama akan ditandai REPLACED dan tidak dikembalikan ke stok. Akun baru memakai order, reseller, serta tanggal berakhir yang sama. Tindakan ini tercatat dan tidak dapat memilih stok kedua setelah selesai.</Notice>
+    </Dialog> : null}
   </ConsoleShell>;
 }

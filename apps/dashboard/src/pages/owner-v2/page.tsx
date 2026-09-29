@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Link } from "react-router-dom";
+import { Badge } from "../../components/ui";
 import { DataTable, type DataColumn, type DataFilter } from "../../components/ui/DataTable";
 import { ConsoleShell } from "../../components/console/ConsoleShell";
 import { api, type ApiOrder, type ApiReseller, type ApiStockItem, type OperationsCenterResult, type SystemStatus } from "../../lib/api";
@@ -66,9 +67,6 @@ function fulfillmentLabel(order: ApiOrder) {
   return "Menunggu";
 }
 
-function StatusBadge({ label, tone }: { label: string; tone: "success" | "warning" | "danger" | "muted" }) {
-  return <span className={`console-status-badge is-${tone}`}><span />{label}</span>;
-}
 
 function KpiCard({
   label,
@@ -99,7 +97,7 @@ function SystemRow({ icon: Icon, label, detail, ok, warning = false }: { icon: t
     <div className="console-system-row">
       <span className="console-system-icon"><Icon size={17} /></span>
       <span><strong>{label}</strong><small>{detail}</small></span>
-      <StatusBadge label={ok ? "Aktif" : warning ? "Periksa" : "Offline"} tone={ok ? "success" : warning ? "warning" : "danger"} />
+      <Badge tone={ok ? "success" : warning ? "warning" : "danger"}>{ok ? "Aktif" : warning ? "Periksa" : "Offline"}</Badge>
     </div>
   );
 }
@@ -208,10 +206,10 @@ export default function OwnerConsoleOverviewPage() {
     { id: "id", header: "Order ID", value: (order) => order.id, sortable: true, cell: (order) => <button type="button" className="console-order-link" onClick={() => setSelectedOrder(order)}>{order.id}</button> },
     { id: "customer", header: "Customer", value: (order) => order.customer || order.resellerName || order.reseller || "-", sortable: true },
     { id: "product", header: "Produk", value: (order) => `${order.product} ${order.variant}`, sortable: true, cell: (order) => <span className="console-product-cell"><strong>{order.product}</strong><small>{order.variant}</small></span> },
-    { id: "payment", header: "Pembayaran", value: paymentLabel, sortable: true, cell: (order) => <StatusBadge label={paymentLabel(order)} tone={isPaid(order) ? "success" : order.qrisStatus === "expired" ? "danger" : "warning"} /> },
+    { id: "payment", header: "Pembayaran", value: paymentLabel, sortable: true, cell: (order) => <Badge tone={isPaid(order) ? "success" : order.qrisStatus === "expired" ? "danger" : "warning"}>{paymentLabel(order)}</Badge> },
     { id: "fulfillment", header: "Fulfillment", value: fulfillmentLabel, sortable: true, cell: (order) => {
       const label = fulfillmentLabel(order);
-      return <StatusBadge label={label} tone={label === "Selesai" ? "success" : label === "Gagal" || label === "Dibatalkan" ? "danger" : label === "Diproses" ? "warning" : "muted"} />;
+      return <Badge tone={label === "Selesai" ? "success" : label === "Gagal" || label === "Dibatalkan" ? "danger" : label === "Diproses" ? "warning" : "muted"}>{label}</Badge>;
     } },
     { id: "time", header: "Waktu", value: (order) => parseDate(order.createdAt)?.getTime() || 0, sortable: true, hideOnMobile: true, cell: (order) => formatDateTime(order.createdAt) },
     { id: "action", header: "Aksi", value: () => "Detail", cell: (order) => <button type="button" className="console-row-action" onClick={() => setSelectedOrder(order)} aria-label={`Lihat detail ${order.id}`}><ArrowUpRight size={15} /></button> },
@@ -335,8 +333,8 @@ export default function OwnerConsoleOverviewPage() {
             </div>
             <div className="console-drawer-body">
               <div className="console-drawer-statuses">
-                <StatusBadge label={paymentLabel(selectedOrder)} tone={isPaid(selectedOrder) ? "success" : selectedOrder.qrisStatus === "expired" ? "danger" : "warning"} />
-                <StatusBadge label={fulfillmentLabel(selectedOrder)} tone={fulfillmentLabel(selectedOrder) === "Selesai" ? "success" : fulfillmentLabel(selectedOrder) === "Gagal" ? "danger" : "warning"} />
+                <Badge tone={isPaid(selectedOrder) ? "success" : selectedOrder.qrisStatus === "expired" ? "danger" : "warning"}>{paymentLabel(selectedOrder)}</Badge>
+                <Badge tone={fulfillmentLabel(selectedOrder) === "Selesai" ? "success" : fulfillmentLabel(selectedOrder) === "Gagal" ? "danger" : "warning"}>{fulfillmentLabel(selectedOrder)}</Badge>
               </div>
               <dl>
                 <div><dt>Customer</dt><dd>{selectedOrder.customer || "-"}</dd></div>

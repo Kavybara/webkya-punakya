@@ -19,22 +19,13 @@ import {
   type ApiOrder,
   type ApiReseller,
 } from "../../lib/api";
-import {
-  ResellerActionCard,
-  ResellerBalanceCard,
-  ResellerEmptyState,
-  ResellerErrorState,
-  ResellerLoadingSkeleton,
-  ResellerStatusBadge,
-  ResellerSummaryMetric,
-  maskIdentity,
-} from "../../components/reseller-v2/ResellerResource";
 import { ResellerShell } from "../../components/reseller-v2/ResellerShell";
 import {
   normalizeResellerAccountStatus,
   summarizeResellerAccounts,
 } from "../../lib/resellerAccounts";
 import { formatRupiah } from "../../lib/format";
+import { ActionCard, Badge, EmptyState, ErrorState, LoadingSkeleton, Metric, maskIdentity } from "../../components/ui";
 
 type OverviewData = {
   reseller: ApiReseller | null;
@@ -181,7 +172,7 @@ export default function ResellerV2OverviewPage() {
               </Link>
             </section>
           ) : null}
-          {error ? <ResellerErrorState message={error} onRetry={load} /> : null}
+          {error ? <ErrorState message={error} onRetry={load} /> : null}
           <section
             className="reseller-v2-summary-grid"
             aria-label="Ringkasan reseller"
@@ -189,12 +180,12 @@ export default function ResellerV2OverviewPage() {
             {loading ? (
               Array.from({ length: 4 }, (_, index) => (
                 <article className="reseller-v2-metric" key={index}>
-                  <ResellerLoadingSkeleton lines={2} />
+                  <LoadingSkeleton lines={2} />
                 </article>
               ))
             ) : (
               <>
-                <ResellerSummaryMetric
+                <Metric
                   label="Saldo tersedia"
                   value={balance}
                   hint="Siap digunakan"
@@ -206,7 +197,7 @@ export default function ResellerV2OverviewPage() {
                       ?.scrollIntoView({ behavior: "smooth" })
                   }
                 />
-                <ResellerSummaryMetric
+                <Metric
                   label="Pesanan aktif"
                   value={activeOrders.length}
                   hint="Perlu dipantau"
@@ -214,7 +205,7 @@ export default function ResellerV2OverviewPage() {
                   tone={activeOrders.length ? "warning" : "success"}
                   onClick={() => navigate("/reseller-v2/orders")}
                 />
-                <ResellerSummaryMetric
+                <Metric
                   label="Akun aktif"
                   value={accountSummary.active}
                   hint="Status aktif"
@@ -222,7 +213,7 @@ export default function ResellerV2OverviewPage() {
                   tone="success"
                   onClick={() => navigate("/reseller-v2/accounts")}
                 />
-                <ResellerSummaryMetric
+                <Metric
                   label="Hampir berakhir"
                   value={accountSummary.expiring}
                   hint="Cek masa aktif"
@@ -234,7 +225,7 @@ export default function ResellerV2OverviewPage() {
             )}
           </section>
           <section className="reseller-v2-overview-grid">
-            <ResellerBalanceCard
+            <BalanceCard
               balance={balance}
               loading={loading}
               onTopUp={openTopUp}
@@ -246,31 +237,31 @@ export default function ResellerV2OverviewPage() {
                 <h2>Kebutuhan utama</h2>
               </header>
               <div className="reseller-v2-action-grid">
-                <ResellerActionCard
+                <ActionCard
                   title="Beli Produk"
                   description="Buka katalog"
                   icon={<Grid2X2 size={18} />}
                   onClick={() => navigate("/reseller-v2/catalog")}
                 />
-                <ResellerActionCard
+                <ActionCard
                   title="Lacak Pesanan"
                   description="Lihat status"
                   icon={<ReceiptText size={18} />}
                   onClick={() => navigate("/reseller-v2/orders")}
                 />
-                <ResellerActionCard
+                <ActionCard
                   title="Cari Kode"
                   description="Akses akun"
                   icon={<KeyRound size={18} />}
                   onClick={() => navigate("/reseller-v2/access")}
                 />
-                <ResellerActionCard
+                <ActionCard
                   title="Klaim Garansi"
                   description="Laporkan kendala"
                   icon={<BadgeHelp size={18} />}
                   onClick={() => navigate("/reseller-v2/warranty")}
                 />
-                <ResellerActionCard
+                <ActionCard
                   title="Lihat Panduan"
                   description="Video tutorial"
                   icon={<BookOpenCheck size={18} />}
@@ -287,7 +278,7 @@ export default function ResellerV2OverviewPage() {
                 <Link to="/reseller-v2/orders">Lihat semua</Link>
               </header>
               {loading ? (
-                <ResellerLoadingSkeleton lines={3} />
+                <LoadingSkeleton lines={3} />
               ) : activeOrders.length ? (
                 <div className="reseller-v2-compact-list">
                   {activeOrders.map((order) => {
@@ -300,15 +291,15 @@ export default function ResellerV2OverviewPage() {
                             {order.id} / {order.variant}
                           </small>
                         </div>
-                        <ResellerStatusBadge tone={status.tone}>
+                        <Badge tone={status.tone}>
                           {status.label}
-                        </ResellerStatusBadge>
+                        </Badge>
                       </Link>
                     );
                   })}
                 </div>
               ) : (
-                <ResellerEmptyState
+                <EmptyState
                   title="Tidak ada pesanan aktif"
                   description="Pesanan baru akan tampil di bagian ini."
                   action={<Link to="/reseller-v2/catalog">Buka katalog</Link>}
@@ -324,7 +315,7 @@ export default function ResellerV2OverviewPage() {
                 <Link to="/reseller-v2/accounts">Kelola akun</Link>
               </header>
               {loading ? (
-                <ResellerLoadingSkeleton lines={3} />
+                <LoadingSkeleton lines={3} />
               ) : expiringAccounts.length ? (
                 <div className="reseller-v2-compact-list">
                   {expiringAccounts.map((account) => (
@@ -336,14 +327,14 @@ export default function ResellerV2OverviewPage() {
                           {account.profile || "Tanpa profil"}
                         </small>
                       </div>
-                      <ResellerStatusBadge tone="warning">
+                      <Badge tone="warning">
                         {compactDate(account.expiresAt)}
-                      </ResellerStatusBadge>
+                      </Badge>
                     </Link>
                   ))}
                 </div>
               ) : (
-                <ResellerEmptyState
+                <EmptyState
                   title="Belum ada akun menipis"
                   description="Akun yang mendekati akhir masa aktif akan tampil di sini."
                 />
@@ -359,7 +350,7 @@ export default function ResellerV2OverviewPage() {
               <Link to="/reseller-v2/orders">Lihat semua pesanan</Link>
             </header>
             {loading ? (
-              <ResellerLoadingSkeleton lines={5} />
+              <LoadingSkeleton lines={5} />
             ) : recentOrders.length ? (
               <div className="reseller-v2-order-list">
                 <div className="reseller-v2-order-head">
@@ -383,9 +374,9 @@ export default function ResellerV2OverviewPage() {
                       </div>
                       <span>{order.product}</span>
                       <strong>{formatRupiah(order.total)}</strong>
-                      <ResellerStatusBadge tone={status.tone}>
+                      <Badge tone={status.tone}>
                         {status.label}
-                      </ResellerStatusBadge>
+                      </Badge>
                       <span>
                         <Clock3 size={14} />
                         {compactDate(order.createdAt)}
@@ -395,7 +386,7 @@ export default function ResellerV2OverviewPage() {
                 })}
               </div>
             ) : (
-              <ResellerEmptyState
+              <EmptyState
                 title="Belum ada pesanan"
                 description="Mulai transaksi pertama melalui katalog produk."
                 action={<Link to="/reseller-v2/catalog">Lihat katalog</Link>}
@@ -405,5 +396,44 @@ export default function ResellerV2OverviewPage() {
         </>
       )}
     </ResellerShell>
+  );
+}
+
+/**
+ * The reseller's balance, and the two things they do with it.
+ *
+ * This was a generic primitive sitting in the shared resource module, but it
+ * is not one: it is this page's only card, it knows about top-ups and
+ * transaction history, and nothing else in the app renders it. Keeping it in
+ * the kit would have meant the kit grew a component for a single consumer.
+ */
+function BalanceCard({
+  balance,
+  held,
+  loading,
+  onTopUp,
+  onHistory,
+}: {
+  balance: string;
+  held?: string;
+  loading?: boolean;
+  onTopUp: () => void;
+  onHistory: () => void;
+}) {
+  return (
+    // `id="saldo"` is a live anchor, not decoration: the shell links to
+    // `/reseller-v2/ringkasan#saldo` and this page scrolls to it from the
+    // "Saldo tersedia" metric above.
+    <article id="saldo" className="ui-card is-balance">
+      <div>
+        <span>Saldo reseller</span>
+        <h2>{loading ? <LoadingSkeleton /> : balance}</h2>
+        <p>{held ? `Saldo tertahan ${held}` : "Siap digunakan untuk transaksi."}</p>
+      </div>
+      <div className="is-actions">
+        <button type="button" className="ui-button is-primary" onClick={onTopUp}>Top Up</button>
+        <button type="button" className="ui-button is-secondary" onClick={onHistory}>Riwayat saldo</button>
+      </div>
+    </article>
   );
 }

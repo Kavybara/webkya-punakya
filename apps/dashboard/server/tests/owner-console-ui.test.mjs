@@ -89,7 +89,7 @@ test("Owner Console warranty queue uses the dedicated claim and replacement APIs
   assert.match(warranty, /Tanpa Order ID/);
   assert.match(warranty, /actionLockRef\.current/);
   assert.match(warranty, /Aksi tersimpan/);
-  assert.match(warranty, /ConsoleActionToast/);
+  assert.match(warranty, /\bToast\b/);
   assert.match(warranty, /Antrean Aktif/);
   assert.match(warranty, /Riwayat/);
   assert.match(warranty, /rows=\{visibleClaims\}/);
@@ -174,7 +174,7 @@ test("Owner Console operations exposes confirmed recovery actions", async () => 
   for (const call of ["releaseStockReservation", "reassignAccount", "retryDelivery", "markOrderPaid", "reconcilePayment"]) {
     assert.match(operations, new RegExp(`api\\.${call}\\(`));
   }
-  assert.match(operations, /ConsoleDialogActions/);
+  assert.match(operations, /\bDialogActions\b/);
   assert.doesNotMatch(operations, /window\.confirm/);
 });
 
@@ -202,7 +202,7 @@ test("Owner Console notification center aggregates live operational queues", asy
   const [shell, notifications, ...rest] = await Promise.all([
     source("components/console/ConsoleShell.tsx"),
     source("components/console/ownerNotifications.ts"),
-    source("components/console/ConsoleResource.tsx"),
+    source("components/ui/Toast.tsx"),
   ]);
   const consoleTree = [shell, ...rest].join("\n");
   assert.match(consoleTree, /api\.operationsCenter\(\)/);

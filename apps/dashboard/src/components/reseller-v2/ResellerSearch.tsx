@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Grid2X2, LoaderCircle, PackageCheck, ReceiptText, Search, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api, type ApiAccount, type ApiOrder, type CatalogProduct } from "../../lib/api";
-import { maskIdentity } from "./ResellerResource";
+import { maskIdentity } from "../../components/ui";
 
 type SearchData = { products: CatalogProduct[]; orders: ApiOrder[]; accounts: ApiAccount[] };
 type SearchHit = { id: string; label: string; detail: string; group: "Produk" | "Pesanan" | "Akun"; href: string };

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { Cloud, ExternalLink, Mail, MessageCircle, RefreshCw, Sheet, WalletCards } from "lucide-react";
 import { Link } from "react-router-dom";
-import { ConsoleBadge, ConsoleMetrics, ConsoleNotice } from "../../../components/console/ConsoleResource";
 import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import { api, type SystemStatus } from "../../../lib/api";
+import { Badge, MetricRow, Notice } from "../../../components/ui";
 
 export default function OwnerConsoleIntegrationsPage() {
   const [system, setSystem] = useState<SystemStatus | null>(null);
@@ -24,10 +24,10 @@ export default function OwnerConsoleIntegrationsPage() {
   ];
   const connected = integrationRows.filter((item) => item.state === "connected").length;
   return <ConsoleShell title="Status Integrasi" description="Pantau koneksi layanan eksternal tanpa mengekspos secret." lastUpdated={updated} refreshing={loading} systemState={error ? "unknown" : connected === integrationRows.length ? "healthy" : "warning"} attentionCount={integrationRows.length - connected} onRefresh={load}>
-    <ConsoleMetrics items={[{ label: "Terhubung", value: connected, tone: "success" }, { label: "Perlu diperiksa", value: integrationRows.length - connected, tone: connected === integrationRows.length ? "success" : "warning" }, { label: "WhatsApp", value: system?.whatsapp.connected ? "Aktif" : "Periksa" }, { label: "Sheets", value: system?.integrations?.googleSheets.healthy ? "Sehat" : system?.integrations?.googleSheets.configured ? "Gangguan" : "Belum" }]} />
-    {error ? <ConsoleNotice tone="danger">{error}</ConsoleNotice> : null}{message ? <ConsoleNotice>{message}</ConsoleNotice> : null}
+    <MetricRow items={[{ label: "Terhubung", value: connected, tone: "success" }, { label: "Perlu diperiksa", value: integrationRows.length - connected, tone: connected === integrationRows.length ? "success" : "warning" }, { label: "WhatsApp", value: system?.whatsapp.connected ? "Aktif" : "Periksa" }, { label: "Sheets", value: system?.integrations?.googleSheets.healthy ? "Sehat" : system?.integrations?.googleSheets.configured ? "Gangguan" : "Belum" }]} />
+    {error ? <Notice tone="danger">{error}</Notice> : null}{message ? <Notice>{message}</Notice> : null}
     <section className="console-panel"><div className="console-panel-header"><div><span>Sistem</span><h2>Koneksi layanan</h2></div><div className="console-panel-toolbar-actions"><button type="button" disabled={Boolean(busy)} onClick={() => run("sheets", () => api.syncGoogleSheets(), "Google Sheets berhasil disinkronkan.")}><RefreshCw size={15} className={busy === "sheets" ? "console-spin" : ""} /> Sync Sheets</button><Link to="/owner-v2/integrations/configure">Konfigurasi <ExternalLink size={14} /></Link><Link to="/owner-v2/settings">Pengaturan owner</Link></div></div>
-      <div className="console-integration-list">{integrationRows.map(({ key, label, icon: Icon, state, detail }) => <article key={key}><span className="console-system-icon"><Icon size={17} /></span><div><strong>{label}</strong><small>{detail}</small></div><ConsoleBadge tone={state === "connected" ? "success" : state === "needs_oauth" || state === "degraded" ? "warning" : "danger"}>{state === "connected" ? "Terhubung" : state === "degraded" ? "Gangguan sync" : state === "needs_oauth" ? "Butuh OAuth" : "Terputus"}</ConsoleBadge></article>)}</div>
+      <div className="console-integration-list">{integrationRows.map(({ key, label, icon: Icon, state, detail }) => <article key={key}><span className="console-system-icon"><Icon size={17} /></span><div><strong>{label}</strong><small>{detail}</small></div><Badge tone={state === "connected" ? "success" : state === "needs_oauth" || state === "degraded" ? "warning" : "danger"}>{state === "connected" ? "Terhubung" : state === "degraded" ? "Gangguan sync" : state === "needs_oauth" ? "Butuh OAuth" : "Terputus"}</Badge></article>)}</div>
       <div className="console-privacy-note"><Sheet size={16} /><span>API key, token, private key, password Gmail, dan credential pembayaran tidak pernah ditampilkan pada halaman status ini.</span></div>
     </section>
   </ConsoleShell>;
