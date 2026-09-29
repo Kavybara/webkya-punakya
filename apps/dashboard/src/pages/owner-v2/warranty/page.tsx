@@ -528,7 +528,7 @@ export default function OwnerConsoleWarrantyPage() {
         <h3 className="text-sm font-semibold text-white">Penggantian akun</h3>
         <p className="mt-1 text-sm text-zinc-400">Hanya stok tersedia dari pool yang sama yang dapat dipilih. Credential tidak ditampilkan di daftar ini.</p>
         <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
-          <select className="h-11 rounded-lg border border-white/10 bg-[#111216] px-3 text-sm text-white" value={candidateId} onChange={(event) => setCandidateId(event.target.value)} disabled={candidateLoading || !candidates.length}>
+          <select className="h-11 rounded-lg border border-white/10 bg-[var(--surface)] px-3 text-sm text-white" value={candidateId} onChange={(event) => setCandidateId(event.target.value)} disabled={candidateLoading || !candidates.length}>
             <option value="">{candidateLoading ? "Memuat kandidat..." : candidates.length ? "Pilih stok pengganti" : "Tidak ada stok satu pool"}</option>
             {candidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.identity} · {candidate.profile || "Tanpa profil"} · {candidate.sheetName || "DB"} row {candidate.sheetRow || "-"}</option>)}
           </select>

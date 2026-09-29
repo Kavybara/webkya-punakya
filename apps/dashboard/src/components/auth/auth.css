@@ -47,7 +47,7 @@
   font-family: Georgia, "Times New Roman", serif;
   font-size: clamp(150px, 18vw, 260px);
   line-height: 1;
-  color: #15161a;
+  color: var(--text-on-inverse);
   text-shadow: -1px -1px rgba(255, 255, 255, 0.23), 1px 1px rgba(0, 0, 0, 0.8);
 }
 
@@ -90,7 +90,7 @@
   transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
 }
 .auth-input { padding: 0 14px; font-size: 16px; }
-.auth-input::placeholder { color: #85858f; opacity: 1; }
+.auth-input::placeholder { color: var(--text-muted); opacity: 1; }
 .auth-input:hover { background: var(--surface-hover); }
 .auth-input:focus,
 .auth-otp-row input:focus { border-color: color-mix(in srgb, var(--accent-cyan) 75%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-cyan) 13%, transparent); }
@@ -105,7 +105,7 @@
 .auth-notice { margin: 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 9px; background: rgba(255, 255, 255, 0.025); color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
 .auth-notice.is-success { border-color: color-mix(in srgb, var(--status-success) 25%, transparent); color: #a7f3d0; }
 .auth-general-error { margin-bottom: 18px; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--status-danger) 32%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--status-danger) 7%, transparent); }
-.auth-button { min-height: 48px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid transparent; border-radius: 999px; padding: 0 24px; background: var(--text-primary); color: #09090b; font-size: 14px; font-weight: 650; cursor: pointer; transition: transform 150ms ease, background-color 150ms ease, border-color 150ms ease; }
+.auth-button { min-height: 48px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid transparent; border-radius: 999px; padding: 0 24px; background: var(--text-primary); color: var(--text-on-inverse); font-size: 14px; font-weight: 650; cursor: pointer; transition: transform 150ms ease, background-color 150ms ease, border-color 150ms ease; }
 .auth-button:hover { background: #fff; }
 .auth-button:active { transform: translateY(1px); }
 .auth-button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }

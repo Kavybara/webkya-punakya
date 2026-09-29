@@ -187,7 +187,7 @@ export default function ResellerCatalogPage() {
           <ResellerStatCard label="Total Slot Stok" value={totalStock} icon="ri-database-2-line" tone="emerald" hint="Akumulasi stok aktif di katalog" />
         </div>
 
-        <div className="sticky top-16 z-30 isolate -mx-4 border-b border-white/10 bg-[#070708] px-4 py-3 md:-mx-6 md:px-6">
+        <div className="sticky top-16 z-30 isolate -mx-4 border-b border-white/10 bg-[var(--bg-canvas)] px-4 py-3 md:-mx-6 md:px-6">
           <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm shadow-slate-950/5">
             <ResellerSearch value={query} onChange={setQuery} placeholder="Cari produk ready..." />
           </div>

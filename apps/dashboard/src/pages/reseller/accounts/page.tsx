@@ -560,7 +560,7 @@ export default function ResellerAccountsPage() {
           </div>
         </div>
 
-        <div className="sticky top-16 z-30 isolate -mx-4 border-b border-white/10 bg-[#070708] px-4 py-3 md:-mx-6 md:px-6">
+        <div className="sticky top-16 z-30 isolate -mx-4 border-b border-white/10 bg-[var(--bg-canvas)] px-4 py-3 md:-mx-6 md:px-6">
           <div className="space-y-3 rounded-xl border border-slate-100 bg-white p-4 shadow-sm shadow-slate-950/5">
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
               {currentTools.map((tool) => (
@@ -616,7 +616,7 @@ export default function ResellerAccountsPage() {
         </div>
 
         {accountsState === "loading" ? (
-          <div className="rounded-xl border border-white/10 bg-[#111216] px-4 py-8 text-center text-sm text-slate-300">
+          <div className="rounded-xl border border-white/10 bg-[var(--surface)] px-4 py-8 text-center text-sm text-slate-300">
             <i className="ri-loader-4-line mr-2 animate-spin" /> Memuat akun {activeSource === "disney" ? "Disney" : "Netflix"}...
           </div>
         ) : null}

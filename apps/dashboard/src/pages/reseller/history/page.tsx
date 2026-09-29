@@ -240,8 +240,8 @@ export default function ResellerHistoryPage() {
           />
         </div>
 
-        <div className="sticky top-16 z-30 isolate -mx-4 border-b border-white/10 bg-[#070708] px-4 py-3 md:-mx-6 md:px-6">
-          <div className="flex flex-col gap-3 rounded-xl border border-white/10 bg-[#111216] p-4 lg:flex-row">
+        <div className="sticky top-16 z-30 isolate -mx-4 border-b border-white/10 bg-[var(--bg-canvas)] px-4 py-3 md:-mx-6 md:px-6">
+          <div className="flex flex-col gap-3 rounded-xl border border-white/10 bg-[var(--surface)] p-4 lg:flex-row">
             <ResellerSearch value={query} onChange={setQuery} placeholder="Cari item pembelian..." className="flex-1" />
             <div className="flex gap-2">
               <FilterPill active={filter === "all"} onClick={() => setFilter("all")}>Semua</FilterPill>
@@ -250,10 +250,10 @@ export default function ResellerHistoryPage() {
           </div>
         </div>
 
-        <section className="overflow-hidden rounded-xl border border-white/10 bg-[#111216]">
+        <section className="overflow-hidden rounded-xl border border-white/10 bg-[var(--surface)]">
           <div className="max-h-[calc(100vh-330px)] min-h-[360px] overflow-auto">
             <table className="w-full min-w-[1040px] text-left text-xs">
-              <thead className="sticky top-0 z-20 bg-[#0c0c0f] text-[11px] uppercase tracking-wide text-slate-400">
+              <thead className="sticky top-0 z-20 bg-[var(--bg-raised)] text-[11px] uppercase tracking-wide text-slate-400">
                 <tr>
                   <th className="px-4 py-3 font-semibold">ID Transaksi</th>
                   <th className="px-4 py-3 font-semibold">Tanggal</th>
@@ -261,7 +261,7 @@ export default function ResellerHistoryPage() {
                   <th className="px-4 py-3 text-center font-semibold">Jumlah</th>
                   <th className="px-4 py-3 text-right font-semibold">Total</th>
                   <th className="px-4 py-3 text-right font-semibold">Status</th>
-                  <th className="sticky right-0 z-30 bg-[#0c0c0f] px-4 py-3 text-right font-semibold">Aksi</th>
+                  <th className="sticky right-0 z-30 bg-[var(--bg-raised)] px-4 py-3 text-right font-semibold">Aksi</th>
                 </tr>
               </thead>
               <tbody>
@@ -274,7 +274,7 @@ export default function ResellerHistoryPage() {
                       <div className="mt-0.5 text-[11px] text-slate-400">{order.variant}</div>
                     </td>
                     <td className="px-4 py-4 text-center">{order.qty || 1}x</td>
-                    <td className="bg-[#111216] px-4 py-4 text-right">
+                    <td className="bg-[var(--surface)] px-4 py-4 text-right">
                       <div className="font-semibold text-slate-100">{money(Number(order.total || 0))}</div>
                       <div className="mt-0.5 text-[11px] text-slate-400">{money(Number(order.total || 0) / Math.max(1, Number(order.qty || 1)))} / item</div>
                     </td>
@@ -455,8 +455,8 @@ export default function ResellerHistoryPage() {
 
         {deliveryOrder ? (
           <div className="fixed inset-0 z-50 flex justify-end bg-black/70" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && closeDelivery()}>
-            <aside className="h-full w-full max-w-2xl overflow-y-auto border-l border-white/10 bg-[#0c0c0f] text-slate-100" role="dialog" aria-modal="true" aria-labelledby="delivery-detail-title">
-              <header className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-white/10 bg-[#0c0c0f]/95 px-5 py-5 backdrop-blur">
+            <aside className="h-full w-full max-w-2xl overflow-y-auto border-l border-white/10 bg-[var(--bg-raised)] text-slate-100" role="dialog" aria-modal="true" aria-labelledby="delivery-detail-title">
+              <header className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-white/10 bg-[var(--bg-raised)]/95 px-5 py-5 backdrop-blur">
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-violet-300">Detail pengiriman</p>
                   <h2 id="delivery-detail-title" className="mt-1 text-lg font-semibold">{deliveryOrder.id}</h2>
@@ -466,12 +466,12 @@ export default function ResellerHistoryPage() {
               </header>
 
               <div className="space-y-5 p-5">
-                {deliveryLoading ? <div className="rounded-xl border border-white/10 bg-[#111216] p-8 text-center text-sm text-slate-400"><i className="ri-loader-4-line mr-2 animate-spin" /> Memuat detail pengiriman...</div> : null}
+                {deliveryLoading ? <div className="rounded-xl border border-white/10 bg-[var(--surface)] p-8 text-center text-sm text-slate-400"><i className="ri-loader-4-line mr-2 animate-spin" /> Memuat detail pengiriman...</div> : null}
                 {deliveryError ? <div className="rounded-xl border border-red-400/20 bg-red-400/5 p-4 text-sm text-red-200">{deliveryError}</div> : null}
 
                 {!deliveryLoading && !deliveryError ? (
                   <>
-                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#111216] p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-[var(--surface)] p-4">
                       <div>
                         <strong className="block text-sm">Credential akun</strong>
                         <span className="text-xs text-slate-400">Otomatis disembunyikan kembali setelah 60 detik.</span>
@@ -485,7 +485,7 @@ export default function ResellerHistoryPage() {
                       const account = detail.account;
                       const snapshot = detail.deliveryTemplateSnapshot;
                       return (
-                        <section key={account.id} className="overflow-hidden rounded-xl border border-white/10 bg-[#111216]">
+                        <section key={account.id} className="overflow-hidden rounded-xl border border-white/10 bg-[var(--surface)]">
                           <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
                             <div><strong className="text-sm">Akun {index + 1}</strong><p className="text-xs text-slate-500">{account.product} · {account.variant}</p></div>
                             <button type="button" onClick={() => navigate(`/reseller-v2/accounts?account=${encodeURIComponent(account.id)}&tab=template`)} className="h-10 rounded-lg border border-white/10 px-3 text-xs font-semibold hover:bg-white/5">Buka di Akun Saya</button>
@@ -498,7 +498,7 @@ export default function ResellerHistoryPage() {
                               ["PIN", masked(account.pin || "")],
                               ["Masa aktif", account.duration || "-"],
                               ["Berakhir", account.expiresAt || "-"],
-                            ].map(([label, value]) => <div key={label} className="bg-[#111216] p-4"><dt className="text-[11px] uppercase tracking-wide text-slate-500">{label}</dt><dd className="mt-1 break-words text-sm text-slate-100">{value}</dd></div>)}
+                            ].map(([label, value]) => <div key={label} className="bg-[var(--surface)] p-4"><dt className="text-[11px] uppercase tracking-wide text-slate-500">{label}</dt><dd className="mt-1 break-words text-sm text-slate-100">{value}</dd></div>)}
                           </dl>
 
                           {snapshot?.status === "ready" && snapshot.renderedText ? (

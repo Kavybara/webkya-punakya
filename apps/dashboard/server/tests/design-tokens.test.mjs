@@ -102,6 +102,49 @@ test("a tinted wash names its token instead of repeating the hue", () => {
   assert.deepEqual(offenders, [], `hard-coded palette hue in ${offenders.join(", ")}`);
 });
 
+test("a colour that already has a token is not spelled out again", () => {
+  // The stylesheets had ten near-blacks that no person could tell apart --
+  // #131419 against #111216 is a difference of two in a hundred and twenty
+  // -- and six greys standing in for one. Every one of them was a decision
+  // nobody was making on purpose.
+  //
+  // The list is read out of tokens.css rather than written here, so adding a
+  // token automatically extends the rule to its value.
+  const values = new Set(
+    [...tokensSource.matchAll(/(--[a-z0-9-]+)\s*:\s*(#[0-9a-f]{6})\s*;/gi)]
+      .map(([, , value]) => value.toLowerCase()),
+  );
+
+  const offenders = [];
+  for (const file of sourceFiles(SRC)) {
+    if (file === TOKENS) continue;
+    const text = fs.readFileSync(file, "utf8");
+
+    for (const match of text.matchAll(/#[0-9a-f]{6}\b/gi)) {
+      // A hex that is the entire content of a quoted value is an SVG
+      // presentation attribute: recharts passes `stroke` and `tick.fill`
+      // straight through to the element, and `var()` is only substituted in
+      // CSS declarations, so a token there renders as black. The revenue
+      // chart is the one place this still applies.
+      const before = text[match.index - 1];
+      const after = text[match.index + match[0].length];
+      if ((before === '"' && after === '"') || (before === "'" && after === "'")) continue;
+
+      // Nor a hex inside `[class~="bg-[#f2ece2]"]`. That is the reseller
+      // console's legacy adapter, matching a Tailwind class name written in
+      // some page's JSX; the hex is a class, not a colour being painted, and
+      // it disappears with the adapter.
+      const selector = text.slice(Math.max(0, match.index - 60), match.index);
+      if (/\[class[~|^$*]?=["'][^"']*$/.test(selector)) continue;
+
+      const value = match[0].toLowerCase();
+      if (values.has(value)) offenders.push(`${rel(file)}: ${value}`);
+    }
+  }
+
+  assert.deepEqual(offenders, [], `token value written out by hand: ${offenders.join(", ")}`);
+});
+
 test("the dark roots are declared once, as a single selector list", () => {
   // The four dark roots are the same colour. The moment a fifth stylesheet
   // grows its own copy we are back to four vocabularies.

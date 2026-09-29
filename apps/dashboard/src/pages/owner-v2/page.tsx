@@ -256,7 +256,7 @@ export default function OwnerConsoleOverviewPage() {
                   <CartesianGrid vertical={false} stroke="rgba(255,255,255,.06)" />
                   <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#71717a", fontSize: 12 }} />
                   <YAxis axisLine={false} tickLine={false} tick={{ fill: "#71717a", fontSize: 12 }} tickFormatter={(value) => formatRupiahCompact(Number(value))} width={58} />
-                  <Tooltip formatter={(value) => formatRupiah(Number(value))} contentStyle={{ background: "#111216", border: "1px solid rgba(255,255,255,.12)", borderRadius: 10, color: "#f4f4f5" }} labelStyle={{ color: "#a1a1aa" }} />
+                  <Tooltip formatter={(value) => formatRupiah(Number(value))} contentStyle={{ background: "var(--surface)", border: "1px solid var(--border-strong)", borderRadius: 10, color: "var(--text-primary)" }} labelStyle={{ color: "var(--text-secondary)" }} />
                   <Area type="monotone" dataKey="revenue" stroke="#8b5cf6" strokeWidth={2.2} fill="url(#consoleRevenueFill)" />
                 </AreaChart>
               </ResponsiveContainer>

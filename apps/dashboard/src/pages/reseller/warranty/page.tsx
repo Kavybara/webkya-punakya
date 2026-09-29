@@ -398,7 +398,7 @@ export default function ResellerWarrantyPage() {
         </div>
 
         {loading ? (
-          <div className="rounded-xl border border-white/10 bg-[#111216] px-4 py-8 text-center text-sm text-slate-300">
+          <div className="rounded-xl border border-white/10 bg-[var(--surface)] px-4 py-8 text-center text-sm text-slate-300">
             <i className="ri-loader-4-line mr-2 animate-spin" /> Memuat akun garansi...
           </div>
         ) : null}
@@ -623,7 +623,7 @@ export default function ResellerWarrantyPage() {
         </section> : null}
 
         {!loading && claims.length ? (
-          <section className="overflow-hidden rounded-xl border border-white/10 bg-[#111216] text-slate-100">
+          <section className="overflow-hidden rounded-xl border border-white/10 bg-[var(--surface)] text-slate-100">
             <div className="border-b border-white/10 px-5 py-4">
               <h2 className="font-semibold">Riwayat Klaim</h2>
               <p className="mt-1 text-xs text-slate-400">Status klaim tersimpan dan tetap dapat dilihat setelah halaman dimuat ulang.</p>
