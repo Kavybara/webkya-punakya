@@ -40,6 +40,10 @@ Folder yang tidak perlu dibawa saat update: `node_modules`, `release`, `_zip_ins
 
 ## Env Minimal
 
+> `.env.example` di root adalah sumber kebenaran. Blok di bawah ini ringkas saja
+> dan **sengaja tidak mengulang semua nilai** — kalau ada perbedaan, ikuti
+> `.env.example`.
+
 ```env
 SERVER_PORT=1912
 PORT=1912
@@ -49,18 +53,32 @@ AUTH_SECRET=change-this-auth-secret
 WHATSAPP_PORT=4016
 WHATSAPP_BOT_URL=http://127.0.0.1:4016
 
+# Direktori runtime. PENTING: dashboard dan bot memakai nama variabel BERBEDA,
+# dan default-nya juga berbeda. Jangan menyamakan keduanya.
+#
+#   Dashboard  -> RUNTIME_PATH (bukan RUNTIME_DIR), default <cwd>/runtime
+#   Bot        -> RUNTIME_DIR,                  default <projectRoot>/runtime
+#
+# Script maintenance (runtime-backup, cleanup-runtime) memakai RUNTIME_DIR dan
+# default ke apps/dashboard/runtime. Kalau ketiganya diisi berbeda, backup bisa
+# mengarsipkan direktori yang tidak berisi database yang sedang dipakai.
+RUNTIME_PATH=apps/dashboard/runtime
 RUNTIME_DIR=runtime
-RUNTIME_TMP_DIR=runtime/tmp
-RUNTIME_BACKUP_DIR=runtime/backups
-WHATSAPP_DATABASE_DIR=runtime/whatsapp-database
-BAILEYS_AUTH_DIR=runtime/baileys-auth
+DATABASE_PATH=apps/dashboard/runtime/kavya-db.json
+
+RUNTIME_TMP_DIR=apps/dashboard/runtime/tmp
+RUNTIME_BACKUP_DIR=apps/dashboard/runtime/backups
+WHATSAPP_DATABASE_DIR=apps/dashboard/runtime/whatsapp-database
+BAILEYS_AUTH_DIR=apps/dashboard/runtime/baileys-auth
+# Hanya dipakai Pterodactyl (kavya-start.mjs), abaikan di VPS biasa.
 LOCAL_DATABASE_DIR=runtime/pglite
+# Jumlah backup yang disimpan. Default kode 30; .env.example_root memakai 1.
+# Ingat: semakin kecil, semakin cepat backup lama hilang.
 RUNTIME_BACKUP_KEEP=30
 
 AUTO_INSTALL_ON_START=true
 AUTO_BUILD_ON_START=true
 AUTO_IMPORT_LEGACY_ON_START=true
-AUTO_CLEANUP_ON_START=true
 AUTO_BACKUP=true
 AUTO_BACKUP_SCHEDULE_ENABLED=true
 AUTO_BACKUP_INTERVAL_HOURS=24
@@ -78,6 +96,9 @@ CLOUDFLARED_PROTOCOL=http2
 CLOUDFLARED_LOG_LEVEL=error
 ```
 
+`AUTO_CLEANUP_ON_START` pernah muncul di dokumen ini. Tidak ada kode yang
+membacanya — cleanup dijalankan lewat `npm run runtime:cleanup`.
+
 Cloudflare Tunnel aktif jika `CLOUDFLARED_TOKEN` diisi di `.env` atau Dashboard > Settings.
 
 ## Data Yang Harus Aman Saat Update
@@ -91,6 +112,20 @@ Jangan hapus:
 - folder auth Baileys yang dipakai server
 
 Saat update ke VPS, copy file project baru dengan exclude data runtime dan `.env`.
+
+## Verifikasi Setelah Deploy
+
+`vite build` menimpa `dist/` secara in-place, jadi deploy yang gagal tidak
+meninggalkan jejak. Cek ini sebelum dianggap selesai:
+
+```bash
+curl -fsS http://127.0.0.1:1912/api/health            # API hidup
+npm run whatsapp:check                              # bot tersambung
+```
+
+Kalau salah satu gagal, `git log -1` untuk tahu commit apa yang baru naik,
+lalu deploy ulang commit sebelumnya (`git checkout <sha>` lalu
+`npm run app:build && npm run app:start`).
 
 ## Command Berguna
 

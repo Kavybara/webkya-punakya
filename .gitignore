@@ -29,6 +29,14 @@ artifacts/**/chrome-mobile-profile*/
 # kavya-db.json and contain customer credentials, order records and PINs.
 artifacts/**/kavya-db*.json
 artifacts/**/kavya-db*/
+# Backup snapshots of list/rental data. These are copies of files that already
+# live in `database/` and `apps/*/database/`; the snapshot in artifacts/ is not
+# the source of truth, so tracking it only widens the blast radius if a phone
+# number or rental record has to be purged from history.
+artifacts/**/*list*.json
+artifacts/**/rentals.json
+artifacts/**/sewa.json
+test-results/
 tmp/
 outputs/
 _zip_inspect/
