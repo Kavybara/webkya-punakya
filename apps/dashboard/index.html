@@ -86,17 +86,19 @@
         ]
       }
     </script>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <!--
-      Inter only, and only the five weights something actually uses. The site
-      carried Playfair Display for a serif accent that nothing on the current
-      design needed, so it was a second family, a second blocking request and
-      a font nobody was reading with.
+      Inter, self-hosted. This used to be a `<link>` to Google Fonts, which the
+      server's Content-Security-Policy does not allow -- so the whole site has
+      been rendering in a system fallback in production, silently. The
+      `@font-face` rules are at the top of `src/index.css`, and the files are
+      in `public/fonts/`. One variable file covers all nine weights.
     -->
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
-      rel="stylesheet"
+      rel="preload"
+      href="/fonts/inter-latin.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
     />
   </head>
   <body>

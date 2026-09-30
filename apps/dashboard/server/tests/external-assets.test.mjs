@@ -122,10 +122,9 @@ test("vendored CDN assets carry an integrity attribute", () => {
   // stylesheet to a page that renders money and order state. If the CDN is
   // compromised, an unverified stylesheet is a hole straight into the page.
   //
-  // Scoped to cdnjs on purpose. Google Fonts is excluded because its css2
-  // response varies by user agent, so any fixed hash we published would
-  // break the stylesheet for some visitors. Self-hosting the fonts is the
-  // real fix and belongs with the design-system work, not here.
+  // There is nothing on cdnjs any more, which is the point: the only asset
+  // linked from a CDN here was a font stylesheet, and it is now self-hosted.
+  // The check stays so that adding one back is a deliberate act.
   const links = [...INDEX.matchAll(/<link\b[^>]*href="(https?:\/\/[^"]+)"[^>]*>/g)];
   const unverified = links
     .map((match) => match[0])
@@ -134,4 +133,60 @@ test("vendored CDN assets carry an integrity attribute", () => {
     .map((tag) => tag.match(/href="([^"]+)"/)[1]);
 
   assert.deepEqual(unverified, [], `cdnjs asset without SRI: ${unverified.join(", ")}`);
+});
+
+test("the page loads no stylesheet or font from a host the CSP would block", () => {
+  // The failure this catches happened silently and for a long time.
+  // `index.html` linked Inter from `fonts.googleapis.com`; the policy in
+  // `server/services/security-headers-service.js` reads `style-src 'self'
+  // 'unsafe-inline'` and `font-src 'self' data:`, and names neither Google
+  // host. The browser blocked the stylesheet, so every page in production
+  // rendered in a system fallback while the whole design system was written
+  // around a typeface nobody was seeing. A blocked third-party stylesheet is a
+  // console line, not a build error -- nothing in the gate could see it.
+  //
+  // The rule is therefore not "the policy must list every host we use" -- a
+  // policy with a third party in it is the thing worth avoiding -- it is "the
+  // page may not depend on a host at all". Type is self-hosted, so the policy
+  // stays exactly as tight as it was and the critical path is same-origin.
+  assert.doesNotMatch(
+    INDEX,
+    /fonts\.(googleapis|gstatic)\.com/i,
+    "index.html must not request a font from Google -- it is self-hosted, and the CSP would block it anyway",
+  );
+
+  // Only links that *load* something. `rel="canonical"` and the `og:url` are
+  // absolute URLs by necessity -- they name the deployed origin rather than
+  // fetching it -- and are not caught by the policy.
+  const LOADING_REL = /rel="(?:stylesheet|preload|modulepreload|prefetch|preconnect|dns-prefetch|icon|apple-touch-icon|manifest)"/;
+  const externalLinks = [...INDEX.matchAll(/<link\b[^>]*>/g)]
+    .map((match) => match[0])
+    .filter((tag) => LOADING_REL.test(tag))
+    .map((tag) => tag.match(/href="(https?:\/\/[^"]+)"/)?.[1])
+    .filter(Boolean);
+
+  assert.deepEqual(
+    externalLinks,
+    [],
+    `the page must load nothing cross-origin; these would need the CSP widened: ${externalLinks.join(", ")}`,
+  );
+});
+
+test("every self-hosted font the stylesheet declares is actually in public/", () => {
+  // Self-hosting moves the failure from "the CDN was blocked" to "the file was
+  // never committed", which is quieter still: the `@font-face` parses, the
+  // browser requests a 404, and the fallback stack renders without a word.
+  // Read off the stylesheet's own declarations rather than a hand-kept list,
+  // so renaming a file in CSS cannot quietly desynchronise the test.
+  const declared = [...SOURCE.matchAll(/url\(["']?(\/[^"')]+\.woff2?)["']?\)/g)].map((m) => m[1]);
+  const unique = [...new Set(declared)];
+
+  assert.ok(unique.length > 0, "expected at least one self-hosted @font-face in src/");
+
+  const missing = unique.filter((url) => !fs.existsSync(path.resolve("public", url.replace(/^\//, ""))));
+  assert.deepEqual(
+    missing,
+    [],
+    `@font-face points at a file that is not in public/, so the browser silently falls back: ${missing.join(", ")}`,
+  );
 });
