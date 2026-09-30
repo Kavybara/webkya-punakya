@@ -2,61 +2,400 @@
  * The landing page's own surfaces.
  *
  * Everything else on this page is Tailwind utilities against tokens, which is
- * the right tool for spacing and type. It is the wrong tool for the four
- * things below, because each needs a value the arbitrary-value syntax has to
- * encode by hand: a backdrop blur, an elevation, a gradient that mixes two
- * tokens, and a pair of button states that have to agree with every other
- * primary button in the product. Those are the reasons this file exists and
- * the reasons nothing else from the page moved into it.
+ * the right tool for spacing and type. It is the wrong tool for the things
+ * below, because each needs a value the arbitrary-value syntax has to encode
+ * by hand: a backdrop blur, an elevation, a gradient that mixes two tokens,
+ * and a pair of button states that have to agree with every other primary
+ * button in the product. Those are the reasons this file exists.
+ *
+ * It is a much smaller file than it was. The bento tile, the pointer spotlight
+ * it was paired with, the order-timeline node, the liquid blob and its twelve
+ * keyframes, the three-card deck, and the hero's chip and trust rows all went
+ * with the sections that used them.
  */
 
-/* The bento tile.
+/* ---------------------------------------------------------------- the nav
  *
- * This was `#080808` with a hand-written `rgba(255,255,255,0.11)` border --
- * an opaque black box on a near-black page, which is the single reason the
- * marketing page read as a template even though the marketing page was the
- * part that already had a grid overlay and a spotlight. It is glass now, so the
- * aurora the shell paints behind the whole document continues *through* it
- * and the bento stops being a set of tiles laid on the background. */
-.home-bento-card {
-  position: relative;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-lift);
-  backdrop-filter: blur(var(--glass-blur)) saturate(140%);
-  transition:
-    border-color var(--duration-normal) var(--ease-out-expo),
-    background var(--duration-normal) var(--ease-out-expo),
-    box-shadow var(--duration-normal) var(--ease-out-expo);
-}
-
-.home-bento-card:hover {
-  border-color: var(--border-strong);
-  background: var(--surface-hover);
-  box-shadow: var(--shadow-float);
-}
-
-/* The pointer-following wash. Kept as its own element because it is driven by
-   two motion values written from a pointer handler, not by a class change. */
-.home-spotlight {
-  position: absolute;
-  inset: 0;
+ * Floating, inset, and always glass.
+ *
+ * The old bar was full-bleed and went from `background: transparent` to glass
+ * on scroll. Over a 100vh hero that meant the navbar was invisible for exactly
+ * as long as the page looked its best, and when it did appear it arrived as a
+ * horizontal rule across the whole screen -- the one element on the page with
+ * a hard edge, sitting on top of the one surface that has none.
+ *
+ * Inset and permanently glass instead, so the aurora reads behind it and the
+ * navbar is an object floating over the composition rather than a border
+ * drawn across it. The blur is what makes that read: it is sampling the
+ * moving background, so the glass is never a flat fill even at rest.
+ */
+.home-nav {
+  position: fixed;
+  inset-inline: 0;
+  top: 14px;
+  z-index: 50;
+  /* Column, and centred on the cross axis. The mobile sheet is a sibling of
+     the bar, not a child of it, so a row here would lay the two out side by
+     side -- the open menu appearing to the right of the navbar. */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-inline: 16px;
   pointer-events: none;
 }
 
-/* The product card.
- *
- * Same material as the bento tile, and it needs its own rule rather than a
- * shared one for a performance reason: a `backdrop-filter` is a per-element
- * surface read, and the bento's three large tiles are far cheaper to blur than
- * a four-up grid of small ones is to keep correct while the list scrolls.
+.home-nav-inner {
+  pointer-events: auto;
+  display: flex;
+  width: 100%;
+  max-width: 1180px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 60px;
+  padding: 0 10px 0 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-glass);
+  box-shadow: var(--shadow-lift);
+  backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
+}
 
-   It also drops the `content-visibility: auto` and its `contain-intrinsic-size`
-   that used to sit on this element. The list is sliced to four products before
-   it renders, so there was never a long list for the browser to skip past --
-   the declarations were reserving space for content that could not arrive. */
+.home-nav-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-primary);
+}
+
+.home-nav-mark {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--accent-cyan);
+}
+
+.home-nav-links {
+  display: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.home-nav-link {
+  padding: 9px 14px;
+  border-radius: var(--radius-pill);
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: var(--tracking-wide);
+  transition:
+    color var(--duration-fast) var(--ease-out-expo),
+    background var(--duration-fast) var(--ease-out-expo);
+}
+
+.home-nav-link:hover {
+  background: var(--surface);
+  color: var(--text-primary);
+}
+
+.home-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.home-nav-login {
+  display: none;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 20px;
+  border-radius: var(--radius-pill);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: var(--tracking-wide);
+  transition: background var(--duration-fast) var(--ease-out-expo);
+}
+
+.home-nav-login:hover {
+  background: var(--surface);
+}
+
+/* The one saturated control on the page, and the only place an accent is
+   allowed to cast light rather than be lit. The glow is what a "premium"
+   button is actually made of; without it this is just a purple rectangle. */
+.home-nav-signup {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 20px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(100deg, var(--accent-violet), var(--accent-cyan));
+  color: var(--text-on-accent);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  box-shadow: var(--shadow-glow);
+  transition:
+    transform var(--duration-normal) var(--ease-out-expo),
+    box-shadow var(--duration-normal) var(--ease-out-expo);
+}
+
+.home-nav-signup:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent-cyan) 40%, transparent),
+    0 20px 52px -14px color-mix(in srgb, var(--accent-violet) 70%, transparent);
+}
+
+.home-nav-toggle {
+  display: inline-flex;
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--text-primary);
+  transition: background var(--duration-fast) var(--ease-out-expo);
+}
+
+.home-nav-toggle:hover {
+  background: var(--surface);
+}
+
+.home-nav-sheet {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1180px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-glass-strong);
+  box-shadow: var(--shadow-float);
+  backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
+}
+
+.home-nav-sheet-link {
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.home-nav-sheet-link:hover {
+  background: var(--surface);
+  color: var(--text-primary);
+}
+
+@media (min-width: 640px) {
+  .home-nav-login {
+    display: inline-flex;
+  }
+}
+
+@media (min-width: 900px) {
+  .home-nav-links {
+    display: flex;
+  }
+
+  .home-nav-toggle {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------------- the hero
+ *
+ * One word, one sentence, one background.
+ *
+ * The aurora is not drawn here. It is the page root's `::before` and
+ * `::after` (index.css), which means it keeps running behind everything below
+ * this fold too -- the alternative was a hero-local gradient that stopped dead
+ * at the section border, and a background that stops is a background you
+ * notice stopping.
+ */
+.home-hero {
+  position: relative;
+  display: flex;
+  min-height: 100svh;
+  align-items: center;
+  justify-content: center;
+  padding: 120px 24px 80px;
+}
+
+.home-hero-centre {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+/* The wordmark.
+ *
+ * 800 rather than 600, and tracking pulled to -0.05em, because at this size
+ * the letterforms are the logo and they have to be set like a logotype rather
+ * than like a heading: tight, dense, and optically even across the whole
+ * word. Inter at 600 is a text face pretending to be a display face. */
+.home-hero-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--text-hero);
+  font-weight: 800;
+  line-height: 0.86;
+  letter-spacing: var(--tracking-tight);
+  /* The word has to be allowed to be as wide as the word is. */
+  text-wrap: balance;
+}
+
+.home-hero-lede {
+  margin: 28px auto 0;
+  max-width: 34rem;
+  color: var(--text-secondary);
+  font-size: var(--text-lede);
+  font-weight: 400;
+  line-height: 1.6;
+  letter-spacing: var(--tracking-wide);
+  text-wrap: balance;
+}
+
+/* ------------------------------------------------------------- the numbers
+ *
+ * Four counted figures, separated by hairlines rather than boxed into four
+ * cards. A card each would put a border and a background around every number,
+ * which is the same "everything is a tile" reflex the whole redesign is
+ * trying to get rid of -- and here it would be worse, because these are the
+ * four least interactive things on the page. */
+.home-stats {
+  border-top: 1px solid var(--border);
+  padding: 40px 0;
+}
+
+.home-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 28px 20px;
+}
+
+.home-stat {
+  min-width: 0;
+}
+
+.home-stat-value {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--text-display);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: var(--tracking-tight);
+  font-variant-numeric: tabular-nums;
+}
+
+.home-stat-value.is-pending {
+  display: block;
+  width: 72px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-hover);
+}
+
+.home-stat-label {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: var(--text-label);
+  font-weight: 600;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+@media (min-width: 720px) {
+  .home-stats-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 20px;
+  }
+
+  /* Vertical hairlines between the four, on the wide layout only. */
+  .home-stat + .home-stat {
+    border-left: 1px solid var(--border);
+    padding-left: 20px;
+  }
+}
+
+/* ------------------------------------------------------------- the brands
+ *
+ * A quiet strip. The brand's own gradient does the work and the name does the
+ * rest, so there is no logo to fetch and nothing to mis-render.
+ */
+.home-brands {
+  padding: 8px 0 48px;
+}
+
+.home-brands-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 14px 6px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+}
+
+.home-brand-mark {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--fx-art-plate-ink);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.home-brand-name {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: var(--tracking-wide);
+}
+
+.home-brand-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+}
+
+.home-brand-dot.is-empty {
+  background: var(--text-muted);
+}
+
+/* ------------------------------------------------------------- the product
+ *
+ * Same material as everything else on the page -- a translucent sheet over the
+ * aurora rather than an opaque box -- and it needs its own rule rather than a
+   shared one for a performance reason: a `backdrop-filter` is a per-element
+   surface read, and four small tiles are far cheaper to blur than a set of
+   large ones is to keep correct while the list scrolls. */
 .home-product-card {
   position: relative;
   overflow: hidden;
@@ -77,26 +416,15 @@
   box-shadow: var(--shadow-float);
 }
 
-/* A node on the order timeline.
- *
- * It sits on top of a gradient line and has to be opaque in the middle or the
- * line shows through its face. `--bg-canvas` is the only opaque fill the
- * public pages have, and using it here reads as a cut-out in the line rather
- * than as a second card. */
-.home-stage-node {
-  position: relative;
-  z-index: 10;
-  display: flex;
-  height: 36px;
-  width: 36px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border-strong);
-  border-radius: 50%;
-  background: var(--bg-canvas);
+/* The pointer-following wash. Kept as its own element because it is driven by
+   two motion values written from a pointer handler, not by a class change. */
+.home-spotlight {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 }
 
-/* The two calls to action.
+/* ------------------------------------------------------------- the buttons
  *
  * The primary is the same near-white plate the sign-in button, the owner
  * console's save row and the reseller's top-up all use, and it hovers the
@@ -160,282 +488,23 @@
 }
 
 .home-cta:focus-visible,
-.home-cta-ghost:focus-visible {
+.home-cta-ghost:focus-visible,
+.home-nav-link:focus-visible,
+.home-nav-brand:focus-visible,
+.home-nav-login:focus-visible,
+.home-nav-signup:focus-visible,
+.home-nav-toggle:focus-visible,
+.home-nav-sheet-link:focus-visible,
+.home-brand:focus-visible {
   outline: 2px solid var(--accent-cyan);
   outline-offset: 3px;
 }
 
-/* ---------------------------------------------------------------- the hero
- *
- * Everything below exists for the new hero composition, which is a single
- * centred column with a mass of liquid behind it and a deck of real catalogue
- * cards breaking out of the bottom edge. The old hero needed none of it
- * because it was two columns and a bordered box. */
-
-/* The blob's frame.
- *
- * It is a fixed-size box centred on the copy rather than an absolutely
- * positioned layer, because the copy has to be able to overlap it and the
- * amount of overlap is the composition. `overflow: visible` is deliberate: a
- * blob that gets clipped by its own frame is a circle again. */
-.liquid-blob {
-  position: relative;
-  z-index: 0;
-  width: min(720px, 118vw);
-  aspect-ratio: 1;
-  margin-inline: auto;
-  pointer-events: none;
-}
-
-.liquid-blob svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-
-/* The four bodies of liquid.
- *
- * Each one is a circle that travels a small ellipse around the centre of the
- * frame, so the union of the four keeps changing shape without any of them
- * ever moving far enough to leave the box. Durations are coprime-ish on
- * purpose: four loops that share a period would visibly return to the same
- * silhouette together and the motion would read as a pulse. */
-.liquid-blob-body {
-  transform-box: fill-box;
-  transform-origin: center;
-  will-change: transform;
-}
-
-.liquid-blob-body--a {
-  animation: liquid-drift-a 19s ease-in-out infinite;
-}
-
-.liquid-blob-body--b {
-  animation: liquid-drift-b 23s ease-in-out infinite;
-}
-
-.liquid-blob-body--c {
-  animation: liquid-drift-c 17s ease-in-out infinite;
-}
-
-.liquid-blob-body--d {
-  animation: liquid-drift-d 29s ease-in-out infinite;
-}
-
-/* A slow breath on top of the drift. Transform only, so it stays on the
-   compositor: the blobs are several hundred square pixels of live filter
-   output and a repaint here would be the most expensive thing on the page. */
-.liquid-blob svg {
-  animation: liquid-breathe 26s ease-in-out infinite;
-}
-
-@keyframes liquid-drift-a {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  33% { transform: translate(16px, -20px) scale(1.06); }
-  66% { transform: translate(-12px, 14px) scale(0.95); }
-}
-
-@keyframes liquid-drift-b {
-  0%, 100% { transform: translate(0, 0) scale(1.04); }
-  40% { transform: translate(30px, 24px) scale(0.92); }
-  70% { transform: translate(-18px, 30px) scale(1.1); }
-}
-
-@keyframes liquid-drift-c {
-  0%, 100% { transform: translate(0, 0) scale(0.96); }
-  45% { transform: translate(-28px, 26px) scale(1.08); }
-  75% { transform: translate(14px, -22px) scale(1); }
-}
-
-@keyframes liquid-drift-d {
-  0%, 100% { transform: translate(0, 0) scale(1.02); }
-  50% { transform: translate(10px, -32px) scale(0.94); }
-}
-
-@keyframes liquid-breathe {
-  0%, 100% { transform: scale(1) rotate(0deg); }
-  50% { transform: scale(1.07) rotate(4deg); }
-}
-
-/* Motion off: the composition still has to hold together, so the blob stays
-   and simply stops moving. Removing it would leave a hole in the middle of
-   the hero that the type was composed around. */
-@media (prefers-reduced-motion: reduce) {
-  .liquid-blob-body,
-  .liquid-blob svg {
-    animation: none;
-  }
-}
-
-/* The deck.
- *
- * Three real catalogue cards, fanned and overlapping the hero's bottom edge.
- * The overlap is the point -- a card that stops exactly where the section ends
- * is a card inside a section, and one that crosses the line is a product shot
- * breaking the frame. The negative bottom margin is what does the crossing.
- *
- * 40px is the number to be careful with. It has to be deep enough to read as
- * an overhang and shallow enough to land inside the cards' 22px of bottom
- * padding: any deeper and the catalogue that scrolls over it eats the stock
- * count, which is the one line on the card that is there to be read. The
- * catalogue section below is opaque and later in the paint order, which is
- * what makes the crossing read as the cards being in front of it. */
-.home-deck {
-  position: relative;
-  z-index: 2;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-  width: min(1080px, calc(100% - 2rem));
-  margin: 56px auto -40px;
-  perspective: 1400px;
-}
-
-.home-deck-card {
-  position: relative;
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 18px;
-  padding: 22px;
+/* ---------------------------------------------------------------- the steps */
+.home-step {
+  padding: 20px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: var(--surface-glass-strong);
-  box-shadow: var(--shadow-float);
-  backdrop-filter: blur(calc(var(--glass-blur) * 1.4)) saturate(150%);
-  text-decoration: none;
-  transform-origin: 50% 120%;
-  transition:
-    transform 520ms var(--ease-out-expo),
-    border-color var(--duration-normal) var(--ease-out-expo),
-    box-shadow var(--duration-normal) var(--ease-out-expo);
-}
-
-/* The fan. Each card is rotated and pushed down a little, so the row reads as
-   a hand of cards rather than as a row of boxes, and the middle one -- the
-   one the eye should land on -- is the only one that is not tilted. */
-.home-deck-card:nth-child(1) {
-  transform: rotate(-4.5deg) translateY(16px);
-}
-
-.home-deck-card:nth-child(2) {
-  transform: translateY(-10px);
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-glow);
-}
-
-.home-deck-card:nth-child(3) {
-  transform: rotate(4.5deg) translateY(16px);
-}
-
-.home-deck-card:hover {
-  transform: rotate(0deg) translateY(-14px);
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-glow);
-}
-
-.home-deck-card:focus-visible {
-  outline: 2px solid var(--accent-cyan);
-  outline-offset: 3px;
-}
-
-.home-deck-mark {
-  display: grid;
-  height: 46px;
-  width: 46px;
-  place-items: center;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--bg-raised);
-}
-
-/* A stack on a phone. The fan is a perspective effect and perspective is
-   meaningless at 340px wide -- the cards would overlap into each other and the
-   middle one's glow would be the only thing distinguishing the row. */
-@media (max-width: 720px) {
-  .home-deck {
-    grid-template-columns: minmax(0, 1fr);
-    margin-bottom: -32px;
-  }
-
-  .home-deck-card:nth-child(1),
-  .home-deck-card:nth-child(2),
-  .home-deck-card:nth-child(3) {
-    transform: none;
-  }
-
-  .home-deck-card:hover {
-    transform: translateY(-4px);
-  }
-}
-
-/* The centred headline.
- *
- * Two words, set on top of each other, with the second one held back in
- * colour and given a hair of tracking. The product is called Kavya; a
- * headline that only says the product name is a logo, not a sentence, so the
- * line under it does the describing. */
-.home-hero-title {
-  font-size: clamp(3.25rem, 1.4rem + 8.4vw, 8.5rem);
-  font-weight: 600;
-  line-height: 0.92;
-  letter-spacing: -0.045em;
-}
-
-.home-hero-lede {
-  max-width: 38rem;
-  margin-inline: auto;
-  font-size: clamp(1.0625rem, 0.95rem + 0.5vw, 1.3125rem);
-  line-height: 1.55;
-  color: var(--text-secondary);
-  text-wrap: balance;
-}
-
-/* The eyebrow above the headline. A pill because it is the one element in the
-   composition with a hard edge on all four sides, and the blob behind is
-   entirely soft -- the contrast is what makes it read as a label. */
-.home-hero-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  padding: 7px 15px 7px 11px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--surface-glass);
+  background: var(--surface);
   backdrop-filter: blur(var(--glass-blur));
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: var(--text-secondary);
 }
-
-.home-hero-chip-dot {
-  height: 6px;
-  width: 6px;
-  border-radius: 50%;
-  background: var(--accent-cyan);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-cyan) 18%, transparent);
-}
-
-/* The three assurances under the buttons. A row of small marks, because they
-   are the last thing before the eye leaves for the catalogue. */
-.home-hero-trust {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 10px 26px;
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-.home-hero-trust li {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.home-hero-trust svg {
-  color: var(--accent-cyan);
-}
-

@@ -978,7 +978,7 @@ export default function ProductsPage() {
         <main className="theme-dark min-h-screen bg-[var(--bg-canvas)] px-4 py-8 text-[var(--text-primary)]">
           <header className="mx-auto flex max-w-6xl items-center justify-between">
             <button type="button" onClick={backToCatalog} className="inline-flex min-h-11 items-center gap-3 rounded-lg font-semibold">
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface)] font-serif">K</span>
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface)] font-sans">K</span>
               <span>Kavya</span>
             </button>
             <Link to="/reseller-v2/catalog" className="inline-flex min-h-11 items-center rounded-full border border-[var(--border)] px-5 text-sm font-medium text-[var(--text-secondary)]">
@@ -1016,7 +1016,7 @@ export default function ProductsPage() {
         <main className="theme-dark min-h-screen bg-[var(--bg-canvas)] px-4 py-6 text-[var(--text-primary)] sm:px-6 sm:py-8">
           <header className="mx-auto flex max-w-6xl items-center justify-between">
             <button type="button" onClick={backToCatalog} className="inline-flex min-h-11 items-center gap-3 rounded-lg font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent-violet)]">
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface-hover)] font-serif">K</span>
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface-hover)] font-sans">K</span>
               <span>Kavya</span>
             </button>
             <Link to={isResellerCheckout ? "/reseller-v2/catalog" : "/"} className="inline-flex min-h-11 items-center rounded-lg border border-[var(--border)] px-4 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]">
@@ -1428,7 +1428,7 @@ export default function ProductsPage() {
       <main className="theme-dark min-h-screen bg-[var(--bg-canvas)] px-4 py-6 text-[var(--text-primary)] sm:px-6 sm:py-8">
         <header className="mx-auto flex max-w-6xl items-center justify-between">
           <Link to="/" className="inline-flex min-h-11 items-center gap-3 rounded-lg font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent-violet)]">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface-hover)] font-serif">K</span>
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface-hover)] font-sans">K</span>
             <span>Kavya</span>
           </Link>
           <nav className="flex items-center gap-2 sm:gap-3">
@@ -1443,7 +1443,7 @@ export default function ProductsPage() {
 
         <div className="mx-auto mt-14 max-w-2xl text-center sm:mt-20">
           <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[var(--text-muted)]">Digital Account Catalog</p>
-          <h1 className="mt-4 font-serif text-4xl font-semibold leading-tight md:text-5xl">Pilih Paket Akun Digital</h1>
+          <h1 className="mt-4 font-sans text-4xl font-semibold leading-tight md:text-5xl">Pilih Paket Akun Digital</h1>
           <p className="mx-auto mt-5 max-w-lg text-base leading-7 text-[var(--text-secondary)]">
             Semua akun premium dengan garansi penuh selama masa langganan. Harga terjangkau, proses cepat, aman terpercaya.
           </p>

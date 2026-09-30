@@ -19,7 +19,24 @@ export default {
     extend: {
       fontFamily: {
         sans: ["Inter", "system-ui", "sans-serif"],
-        serif: ["Playfair Display", "Georgia", "serif"],
+      },
+      // The type scale is tokens (see styles/tokens.css), so a page asks for
+      // `text-display` rather than re-deriving a clamp() of its own. The site
+      // had no type layer at all before this, which is why every size used to
+      // be a hand-written clamp() in whichever stylesheet happened to need one.
+      fontSize: {
+        hero: "var(--text-hero)",
+        display: "var(--text-display)",
+        title: "var(--text-title)",
+        lede: "var(--text-lede)",
+        small: "var(--text-small)",
+        label: "var(--text-label)",
+      },
+      letterSpacing: {
+        tight: "var(--tracking-tight)",
+        normal: "var(--tracking-normal)",
+        wide: "var(--tracking-wide)",
+        label: "var(--tracking-label)",
       },
       colors: {
         canvas: "var(--bg-canvas)",

@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState, type PointerEvent, type ReactNode } from "react";
+import { useMemo, type PointerEvent, type ReactNode } from "react";
 import { motion, useMotionTemplate, useMotionValue, useReducedMotion } from "framer-motion";
 import { Archive, ArrowRight, Tv, WifiOff } from "lucide-react";
 import { Link } from "react-router-dom";
-import { api, subscribeRealtime, type CatalogProduct } from "../../../lib/api";
+import type { CatalogProduct } from "../../../lib/api";
 import { sortedAllowedPriceEntries } from "../../../lib/durations";
 import { productBrandAsset, productLogoUrl } from "../../../lib/productBrandAssets";
 import { formatRupiah } from "../../../lib/format";
+import type { Catalog } from "../useCatalog";
 
 function minPrice(product: CatalogProduct) {
   const prices = product.variants
@@ -51,36 +52,22 @@ function SpotlightProductCard({ children }: { children: ReactNode }) {
   );
 }
 
-export default function ProductCatalog() {
+/**
+ * The live catalogue.
+ *
+ * The data is a prop. This component used to open its own request and its own
+ * `db-change` subscription, which was the second of the two the page was
+ * making for the same payload -- the hero had one too -- so every visitor
+ * paid for `GET /public/catalog?includeEmpty=1` twice and the two halves of
+ * the page could disagree about what was in stock. The page owns it now.
+ *
+ * `id="produk"` is load-bearing beyond the anchor: `/store` and `/katalog`
+ * both redirect here, so renaming it breaks two routes nobody would think to
+ * check.
+ */
+export default function ProductCatalog({ catalog }: { catalog: Catalog }) {
   const reduceMotion = useReducedMotion();
-  const [products, setProducts] = useState<CatalogProduct[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
-  const [refreshKey, setRefreshKey] = useState(0);
-
-  useEffect(() => {
-    let mounted = true;
-    const loadCatalog = async () => {
-      try {
-        const catalog = await api.catalogAll();
-        if (mounted) {
-          setProducts(catalog);
-          setLoadError("");
-        }
-      } catch {
-        if (mounted) setLoadError("Katalog belum dapat dimuat. Silakan coba lagi.");
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
-
-    void loadCatalog();
-    const unsubscribe = subscribeRealtime(() => void loadCatalog());
-    return () => {
-      mounted = false;
-      unsubscribe();
-    };
-  }, [refreshKey]);
+  const { products, loading, error: loadError, reload } = catalog;
 
   const readyProducts = useMemo(
     () => products.filter((product) => product.isActive !== false).sort((a, b) => b.stockCount - a.stockCount).slice(0, 4),
@@ -91,9 +78,9 @@ export default function ProductCatalog() {
     <section id="produk" className="border-b border-[var(--border)] bg-[var(--bg-raised)] py-12 md:py-16">
       <div className="mx-auto max-w-[1240px] px-4 sm:px-6 md:px-8 lg:px-10">
         <header className="mb-7 max-w-2xl md:mb-9">
-          <p className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">Produk</p>
-          <h2 className="mt-3 text-2xl font-extrabold leading-tight text-[var(--text-primary)] sm:text-3xl lg:text-4xl">Pilih layanan yang kamu butuhkan.</h2>
-          <p className="mt-3 text-base leading-6 text-[var(--text-secondary)]">Harga dan ketersediaan mengikuti katalog aktif Kavya.</p>
+          <p className="text-label font-bold uppercase text-[var(--text-muted)]">Produk</p>
+          <h2 className="mt-3 text-title font-extrabold leading-tight text-[var(--text-primary)]">Pilih layanan yang kamu butuhkan.</h2>
+          <p className="mt-3 text-lede leading-6 text-[var(--text-secondary)]">Harga dan ketersediaan mengikuti katalog aktif Kavya.</p>
         </header>
 
         {loading ? (
@@ -114,7 +101,7 @@ export default function ProductCatalog() {
         ) : loadError ? (
           <div role="alert" className="flex max-w-2xl flex-col gap-4 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-raised)] text-[var(--text-secondary)]"><WifiOff size={18} aria-hidden="true" /></span><div><h3 className="font-extrabold text-[var(--text-primary)]">Katalog belum tersedia</h3><p className="mt-1 text-sm leading-5 text-[var(--text-secondary)]">{loadError}</p></div></div>
-            <button type="button" onClick={() => { setLoading(true); setRefreshKey((value) => value + 1); }} className="home-cta min-h-11 shrink-0 text-sm">Coba Lagi</button>
+            <button type="button" onClick={reload} className="home-cta min-h-11 shrink-0 text-sm">Coba Lagi</button>
           </div>
         ) : readyProducts.length ? (
           <motion.div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4" variants={catalogGridVariants} initial={reduceMotion ? false : "hidden"} animate="visible">

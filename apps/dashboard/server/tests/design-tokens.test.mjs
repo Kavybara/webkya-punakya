@@ -12,9 +12,10 @@ import test from "node:test";
  * nothing, including three copies of one magenta.
  *
  * Consolidation is exactly the kind of change that a later contributor
- * undoes with a well-meaning copy-paste, so this holds the line on the two
- * ways it comes back: a component inventing its own palette, and a token
- * declared in one theme but not the other.
+ * undoes with a well-meaning copy-paste, so this holds the line on the three
+ * ways it comes back: a component inventing its own palette, a colour
+ * spelled out again instead of naming a token, and a second copy of the
+ * palette itself growing somewhere nobody meant to put it.
  */
 
 const SRC = path.resolve("src");
@@ -39,8 +40,24 @@ function declaredIn(blockPattern) {
   return new Set([...block[0].matchAll(/(--[a-z0-9-]+)\s*:/g)].map((match) => match[1]));
 }
 
-const LIGHT = declaredIn(/:root\s*\{[\s\S]*?\n\}/);
-const DARK = declaredIn(/\.theme-dark,\s*[\s\S]*?\{[\s\S]*?\n\}/);
+/**
+ * The whole palette, in one block.
+ *
+ * There used to be two: a light `:root` and a dark palette on `.theme-dark`,
+ * `.auth-shell` and `.ui-shell`, which had to be kept in step by a test. The
+ * light one was never rendered by anything -- `index.css` set the page colour
+ * on `:root`, so every page inherited light and then had to be told, again,
+ * that it was supposed to be dark. Kavya is dark everywhere now, permanently,
+ * so the dark values moved up into `:root` and the second block is gone.
+ *
+ * The check that survived is stronger, not weaker: a second palette cannot
+ * creep back in unnoticed, because a rule that declares `--bg-canvas` anywhere
+ * other than `:root` fails the build rather than shipping.
+ *
+ * `:root` has to stay flat -- no nested `@media` or `@supports` -- because the
+ * pattern below stops at the first line-initial `}`.
+ */
+const PALETTE = declaredIn(/:root\s*\{[\s\S]*?\n\}/);
 
 test("tokens.css declares the palette in one place", () => {
   const others = sourceFiles(SRC)
@@ -51,26 +68,12 @@ test("tokens.css declares the palette in one place", () => {
   assert.deepEqual(others, [], `a stylesheet declares its own tokens: ${others.join(", ")}`);
 });
 
-test("both themes declare the same token names", () => {
-  // A token present in one theme and not the other is not a theme variant,
-  // it is a bug waiting for a visitor: the property falls back to `unset`.
-  // The dark roots inherit the accents and status colours from `:root`, so
-  // those are shared by construction and are the only permitted asymmetry.
-  const INHERITED = /^--(accent|status)-/;
-
-  const darkOnly = [...DARK].filter((name) => !LIGHT.has(name));
-  const lightOnly = [...LIGHT].filter((name) => !DARK.has(name) && !INHERITED.test(name));
-
-  assert.deepEqual(darkOnly, [], "token missing from the light theme");
-  assert.deepEqual(lightOnly, [], "token missing from the dark roots");
-});
-
 test("no component reaches for a colour that is not a token", () => {
   // Tailwind's stock ramp is how a design system quietly stops being one:
   // `text-slate-500` is unanswerable to the question "what is this meant to
   // mean?". Arbitrary values are fine -- they are the escape hatch for the
   // rare one-off -- but they must name a token.
-  const allowed = new Set([...LIGHT, ...DARK]);
+  const allowed = PALETTE;
   const offenders = [];
 
   for (const file of sourceFiles(SRC)) {
@@ -151,7 +154,7 @@ test("every Tailwind colour points at a token that exists", () => {
   // nothing at all, so `text-primary` would quietly stop colouring text and
   // nobody would find out until the page looked wrong.
   const config = fs.readFileSync(path.resolve("tailwind.config.js"), "utf8");
-  const declared = new Set([...LIGHT, ...DARK]);
+  const declared = PALETTE;
   const dangling = [...config.matchAll(/var\((--[a-z0-9-]+)\)/g)]
     .map((match) => match[1])
     .filter((name) => !declared.has(name));
@@ -159,21 +162,34 @@ test("every Tailwind colour points at a token that exists", () => {
   assert.deepEqual([...new Set(dangling)], [], `tailwind.config.js points at an undeclared token`);
 });
 
-test("the dark roots are declared once, as a single selector list", () => {
-  // The three dark roots are the same colour: the public marketing pages, the
-  // sign-in shell, and the one signed-in frame both consoles share. The moment
-  // a fourth stylesheet grows its own copy we are back to four vocabularies.
-  const DARK_ROOTS = [".theme-dark", ".auth-shell", ".ui-shell"];
-
-  // Comments carry no braces here, but they carry prose, and a selector
-  // match that starts at the top of the file would swallow all of it.
+test("the palette is declared once, in :root", () => {
+  // Kavya has one palette and it lives in one rule. This is the guard that
+  // stopped a second copy from creeping back: a `.theme-dark` block that
+  // re-declares the canvas, or a feature stylesheet growing its own, is now a
+  // build failure rather than a second vocabulary that quietly disagrees.
+  //
+  // Comments carry no braces here, but they carry prose, and a selector match
+  // that starts at the top of the file would swallow all of it.
   const declarations = tokensSource.replace(/\/\*[\s\S]*?\*\//g, "");
   const paletteRules = [...declarations.matchAll(/([^{}]+)\{([^}]*--bg-canvas:[^}]*)\}/g)]
     .map((match) => match[1].trim().split(",").map((part) => part.trim()));
 
   assert.deepEqual(
     paletteRules,
-    [[":root"], DARK_ROOTS],
-    "the palette is declared somewhere other than :root and the three dark roots",
+    [[":root"]],
+    "the palette is declared somewhere other than :root -- there is one theme, and it is dark",
   );
+});
+
+test("the type scale is tokens, not hand-written clamps", () => {
+  // The site had no type layer. Every size was a `clamp()` written in
+  // whichever stylesheet happened to need one, and tracking was about ten
+  // unrelated values set inline -- so "the typography" was a set of
+  // accumulated exceptions rather than a decision anybody had made.
+  for (const name of ["hero", "display", "title", "lede", "body", "small", "label"]) {
+    assert.ok(PALETTE.has(`--text-${name}`), `no --text-${name} token`);
+  }
+  for (const name of ["tight", "normal", "wide", "label"]) {
+    assert.ok(PALETTE.has(`--tracking-${name}`), `no --tracking-${name} token`);
+  }
 });

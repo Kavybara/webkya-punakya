@@ -44,6 +44,86 @@ body {
   background: var(--bg-canvas);
 }
 
+/*
+ * The aurora.
+ *
+ * This used to live in `components/ui/ui.css`, which meant the public
+ * marketing pages never had it -- they do not load the kit, so the one
+ * surface that most needs a beautiful background had a flat canvas and the
+ * two signed-in consoles had the gradient. It lives here instead, on the
+ * three roots that are the entire set of full-bleed surfaces the app has.
+ *
+ * `isolation: isolate` is load-bearing. Without it the root is not a stacking
+ * context, so a `z-index: -1` child paints *behind* the root's own background
+ * and the aurora is never seen at all. The pseudo-element has to paint above
+ * its own root's background and below the content inside it.
+ *
+ * Two layers, because a single one cannot move convincingly. The old version
+ * animated `opacity` 0.68 -> 1 over 26s, which breathes without travelling;
+ * what reads as an aurora is the *pools changing position relative to each
+ * other*, and that needs two. `::before` is the wide field of three pools,
+ * `::after` a brighter, tighter pool drifting the other way.
+ *
+ * Both animate `transform` and nothing else. `background-position` would
+ * repaint a full-viewport gradient on every frame; a transform is handed to
+ * the compositor and costs nothing per frame. The two durations are coprime,
+ * so the composition never repeats.
+ */
+.theme-dark,
+.auth-shell,
+.ui-shell {
+  isolation: isolate;
+}
+
+.theme-dark::before,
+.auth-shell::before,
+.ui-shell::before {
+  content: "";
+  position: fixed;
+  inset: -35%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(38% 44% at 18% 12%, var(--fx-aurora-violet) 0%, transparent 72%),
+    radial-gradient(34% 40% at 88% 22%, var(--fx-aurora-cyan) 0%, transparent 70%),
+    radial-gradient(42% 48% at 76% 92%, var(--fx-aurora-magenta) 0%, transparent 74%),
+    radial-gradient(30% 30% at 46% 62%, var(--fx-aurora-ink) 0%, transparent 76%);
+  animation: aurora-field 52s var(--ease-out-expo) infinite alternate;
+}
+
+.theme-dark::after,
+.auth-shell::after,
+.ui-shell::after {
+  content: "";
+  position: fixed;
+  inset: -35%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(26% 30% at 62% 34%, var(--fx-aurora-cyan) 0%, transparent 68%),
+    radial-gradient(22% 26% at 26% 74%, var(--fx-aurora-violet) 0%, transparent 66%);
+  opacity: 0.75;
+  animation: aurora-pool 41s var(--ease-out-expo) infinite alternate;
+}
+
+@keyframes aurora-field {
+  from {
+    transform: translate3d(-3%, -2%, 0) rotate(-1.5deg) scale(1);
+  }
+  to {
+    transform: translate3d(4%, 3%, 0) rotate(1.5deg) scale(1.12);
+  }
+}
+
+@keyframes aurora-pool {
+  from {
+    transform: translate3d(4%, 3%, 0) scale(1.08);
+  }
+  to {
+    transform: translate3d(-4%, -3%, 0) scale(1);
+  }
+}
+
 a {
   color: inherit;
   text-decoration: none;
@@ -224,6 +304,12 @@ textarea {
   *,
   *::before,
   *::after {
+    /* Delay is zeroed for the same reason duration is. A 0.01ms animation that
+       still waits 800ms before its first frame leaves the element sitting in
+       whatever `from` state it was handed for most of a second -- which, under
+       `fill-mode: both`, is the invisible one. Zeroing duration without delay
+       turns "moves too much" into "stays hidden", which is the worse bug. */
+    animation-delay: 0s !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;

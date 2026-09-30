@@ -49,40 +49,12 @@
  * a line drawn around it. That is why `--border` is 7.5% white and not 9%:
  * faint enough to be a rim light, not a rule.
  *
- * `isolation: isolate` is load-bearing. Without it the root is not a
- * stacking context, so a `z-index: -1` child paints *behind* that root's
- * own background -- and the aurora is never seen at all.
+ * The aurora itself -- and the `isolation: isolate` it depends on -- now
+ * lives in `index.css`, not here. It used to be in this file, which meant
+ * the public marketing pages never saw it at all: they do not load the kit,
+ * so the one surface that most needed a background had a flat canvas while
+ * the two signed-in consoles had the gradient.
  * ------------------------------------------------------------------ */
-
-.theme-dark,
-.auth-shell,
-.ui-shell { isolation: isolate; }
-
-.theme-dark::before,
-.auth-shell::before,
-.ui-shell::before {
-  content: "";
-  position: fixed;
-  /* Larger than the viewport so the falloff has room to run out. The pools
-     are placed in this box's own coordinates, which is why the offsets are
-     fractions of a box that is already oversized. */
-  inset: -25%;
-  z-index: -1;
-  pointer-events: none;
-  background:
-    radial-gradient(38% 44% at 18% 12%, var(--fx-aurora-violet) 0%, transparent 72%),
-    radial-gradient(34% 40% at 88% 22%, var(--fx-aurora-cyan) 0%, transparent 70%),
-    radial-gradient(42% 48% at 76% 92%, var(--fx-aurora-magenta) 0%, transparent 74%),
-    radial-gradient(30% 30% at 46% 62%, var(--fx-aurora-ink) 0%, transparent 76%);
-  animation: ui-aurora 26s var(--ease-out-expo) infinite alternate;
-}
-
-/* The breath. Opacity only: the one property that composites without asking
-   the layer to be painted again. */
-@keyframes ui-aurora {
-  from { opacity: 0.68; }
-  to { opacity: 1; }
-}
 
 /* ------------------------------------------------------------------ *
  * 1. Buttons
@@ -445,7 +417,7 @@
 .ui-balance h2 {
   margin: 10px 0 0;
   color: var(--text-primary);
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: clamp(30px, calc(1.6rem + 1.6vw), 46px);
   font-weight: 400;
   line-height: 1.05;
@@ -638,7 +610,7 @@
    face and given the room to be read. */
 .ui-metric > strong {
   color: var(--text-primary);
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 25px;
   font-weight: 400;
   letter-spacing: -0.01em;
@@ -1160,7 +1132,7 @@
 
 .ui-bento-stat > strong {
   color: var(--text-primary);
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 27px;
   font-weight: 400;
   letter-spacing: -0.015em;

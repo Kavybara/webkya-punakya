@@ -16,19 +16,29 @@
  * A component asks for `--surface`, not for "the console grey". If the
  * palette changes, the component is untouched.
  *
- * Two themes:
- *   - `:root` is the public light surface.
- *   - The dark palette is applied to the four dark roots the app already
- *     had. It is declared once, in one selector list, so there is no second
- *     copy to drift.
+ * -----------------------------------------------------------------------
+ * ONE PALETTE, IN ONE RULE
  *
- * Both blocks declare the same names. A token that exists in only one theme
- * resolves to nothing in the other and the property silently falls back to
- * `unset`, which is how `bg-[var(--surface)]` ends up rendering as a
- * transparent box with a currentColor border. Keep the two lists in step.
+ * This file used to declare two themes: a light `:root` and a dark palette on
+ * three roots (`.theme-dark`, `.auth-shell`, `.ui-shell`). Both were real
+ * rules and both had to be kept in step, which was a standing invitation to
+ * drift -- and it was drift nobody had to experience to know about, because
+ * nothing ever rendered the light one. `index.css` sets its colour on `:root`,
+ * and `:root` *was* the light palette, so every page inherited light and then
+ * had to be told, again, that it was supposed to be dark.
+ *
+ * The light palette is gone. Kavya is dark, on every surface, permanently.
+ * So the dark values move up into `:root` and the second block is deleted. The
+ * `.theme-dark` / `.auth-shell` / `.ui-shell` class names stay where they are:
+ * they are layout and scoping hooks now (`AppShell` uses `.ui-shell` for the
+ * whole signed-in frame, and the focus ring hangs off it), not colour hooks.
+ *
+ * `design-tokens.test.mjs` holds the line this time in the other direction: the
+ * palette must live in exactly one rule, `:root`. A second copy cannot creep
+ * back in unnoticed, and if it does, it fails the build instead of shipping.
  *
  * -----------------------------------------------------------------------
- * WHY THE DARK PALETTE IS TRANSLUCENT RATHER THAN SOLID
+ * WHY THE PALETTE IS TRANSLUCENT RATHER THAN SOLID
  *
  * The consoles were drawn as opaque slabs: a solid near-black card, a solid
  * near-black rail, a 1px white line between them. Every one of those panels
@@ -40,41 +50,36 @@
  * So the surfaces stop being colours and become *layers of light*. A panel
  * is now a translucent sheet over the canvas, separated by what is behind it
  * rather than by a line drawn around it. `--surface` carries a 4% white wash,
- * `--border` drops from 9% to 7.5% because the edge of a lit surface is
- * carried by the blur behind it, and the aurora below is what there is to
- * see through to. That is the whole trick: depth comes from a background with
- * something in it, not from stacking greys.
+ * `--border` drops to 7.5% because the edge of a lit surface is carried by the
+ * blur behind it, and the aurora below is what there is to see through to.
+ * That is the whole trick: depth comes from a background with something in it,
+ * not from stacking greys.
  *
- * `design-tokens.test.mjs` holds the two lists in step, so the one thing that
- * must never happen here is a token added to one block and forgotten in the
- * other. Light gets the same treatment, weaker: paper is already a light, so
- * its "aurora" is a faint wash and its glass is white at high opacity.
+ * The canvas is midnight rather than black: `#030305` keeps a trace of blue in
+ * it, which is what stops the aurora from looking like dirt on a dark screen
+ * and what makes a 4% white surface read as *lit* rather than as grey.
  */
 
 :root {
-  /* --- the light canvas --- */
-  --bg-canvas: #f6f5fa;
-  --bg-raised: rgba(255, 255, 255, 0.7);
-  --surface: rgba(255, 255, 255, 0.74);
-  --surface-hover: rgba(255, 255, 255, 0.95);
-  --surface-glass: rgba(255, 255, 255, 0.66);
-  --surface-glass-strong: rgba(255, 255, 255, 0.86);
+  /* --- the canvas --- */
+  --bg-canvas: #030305;
+  --bg-raised: rgba(255, 255, 255, 0.028);
+  --surface: rgba(255, 255, 255, 0.042);
+  --surface-hover: rgba(255, 255, 255, 0.072);
+  --surface-glass: rgba(10, 12, 24, 0.58);
+  --surface-glass-strong: rgba(9, 11, 22, 0.78);
 
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #64748b;
-  --text-inverse: #f8fafc;
-  /* The ink for a button whose ground is the primary text colour. */
-  --text-on-inverse: #ffffff;
+  --text-primary: #f2f5ff;
+  --text-secondary: #a5adc7;
+  --text-muted: #7c86a3;
+  --text-inverse: #0b0e1a;
+  --text-on-inverse: #f2f5ff;
 
-  --border: rgba(15, 23, 42, 0.1);
-  --border-strong: rgba(15, 23, 42, 0.19);
+  --border: rgba(255, 255, 255, 0.075);
+  --border-strong: rgba(255, 255, 255, 0.16);
 
-  /*
-   * Accents and status colours are the same in both themes -- they are
-   * chosen for how they read against a dark ground, and there is no light
-   * variant of "this order is overdue". Declared once, inherited everywhere.
-   */
+  /* Accents are chosen for how they read against a dark ground. There is no
+     second palette for them to agree with, so they are declared once. */
   --accent-violet: #8b5cf6;
   --accent-magenta: #ec4899;
   --accent-cyan: #38bdf8;
@@ -113,9 +118,9 @@
      object is off the page; `--shadow-glow` is the coloured bloom that says
      it is *live*, and it is deliberately the only place an accent casts
      light rather than being lit. */
-  --shadow-lift: 0 18px 44px -20px rgba(15, 23, 42, 0.32), 0 2px 6px -3px rgba(15, 23, 42, 0.14);
-  --shadow-float: 0 34px 76px -26px rgba(15, 23, 42, 0.4), 0 4px 12px -6px rgba(15, 23, 42, 0.16);
-  --shadow-glow: 0 0 0 1px rgba(139, 92, 246, 0.28), 0 14px 40px -12px rgba(139, 92, 246, 0.5);
+  --shadow-lift: 0 18px 44px -20px rgba(0, 0, 0, 0.72), 0 1px 0 0 rgba(255, 255, 255, 0.045) inset;
+  --shadow-float: 0 34px 80px -28px rgba(0, 0, 0, 0.85), 0 1px 0 0 rgba(255, 255, 255, 0.07) inset;
+  --shadow-glow: 0 0 0 1px rgba(139, 92, 246, 0.34), 0 16px 44px -14px rgba(139, 92, 246, 0.55);
 
   /* --- the aurora ---
      Three coloured pools and one white one, painted as fixed radial
@@ -124,24 +129,54 @@
      alpha. Concentrated at the top-left and bottom-right so the pools pull
      in opposite directions and the middle of the page stays quiet enough to
      read a table in. */
-  --fx-aurora-violet: rgba(139, 92, 246, 0.16);
-  --fx-aurora-cyan: rgba(56, 189, 248, 0.13);
-  --fx-aurora-magenta: rgba(236, 72, 153, 0.1);
-  --fx-aurora-ink: rgba(255, 255, 255, 0.028);
+  --fx-aurora-violet: rgba(139, 92, 246, 0.34);
+  --fx-aurora-cyan: rgba(56, 189, 248, 0.24);
+  --fx-aurora-magenta: rgba(236, 72, 153, 0.2);
+  --fx-aurora-ink: rgba(255, 255, 255, 0.05);
+
+  /* Decorative washes for the marketing pages. Effects, not surfaces --
+     nothing legible ever sits on them. */
+  --fx-grid-dot: rgba(255, 255, 255, 0.8);
+  --fx-shimmer: rgba(255, 255, 255, 0.045);
+
+  /* --- type ---
+     There was no type layer at all until this. Every size on the site was a
+     hand-written `clamp()` in whichever stylesheet needed one, and tracking
+     was about ten unrelated values written inline -- which is the definition
+     of a page that has no typographic opinion, only accumulated exceptions.
+
+     Sizes are tokens; weight, leading and tracking stay with the component,
+     because a custom property holds one value and these are three different
+     axes. A token per axis per step would be a vocabulary nobody could hold in
+     their head, which is the thing this file exists to prevent. */
+  --text-hero: clamp(4rem, 1.2rem + 12vw, 12rem);
+  --text-display: clamp(2.25rem, 1.4rem + 3.6vw, 4rem);
+  --text-title: clamp(1.375rem, 1.15rem + 1.1vw, 1.875rem);
+  --text-lede: clamp(1.0625rem, 1rem + 0.3vw, 1.25rem);
+  --text-body: 1rem;
+  --text-small: 0.875rem;
+  --text-label: 0.75rem;
+
+  /* A display face and a text face that happen to be the same family today.
+     Split anyway: the hero wants weight 800 and tight tracking, the rest of
+     the site wants 400-500 and open tracking, and one token cannot be both.
+     When a second family is ever warranted, this is the seam. */
+  --tracking-tight: -0.05em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.01em;
+  --tracking-label: 0.14em;
 
   /* --- over brand art ---
-     The one family of surfaces on the page that must NOT follow the theme.
-     A product's logo plate and its category chip sit on a per-product
-     gradient that arrives from `productBrandAssets` and is a fixed light
-     image in both themes. Ink-on-white is what makes those read as the
-     product's own mark; a dark theme that inverted them would make the
-     monogram look like a hole in the tile.
+     The one family of surfaces on the page that does NOT follow the theme. A
+     product's logo plate sits on a per-product gradient that arrives from
+     `productBrandAssets`. Ink-on-white is what makes those read as the
+     product's own mark; a theme that inverted them would make the monogram
+     look like a hole in the tile.
 
-     So these are declared once and deliberately identical in both palettes.
-     Putting them here rather than inlining them in the catalogue means the
-     exception is stated in the one file whose job is stating exceptions, and
-     a reader of the catalogue sees four tokens instead of four magic numbers
-     that each had to be re-decided. */
+     Stated here rather than inlined in the catalogue so the exception lives
+     in the one file whose job is stating exceptions, and a reader of the
+     catalogue sees four tokens instead of four magic numbers that each had to
+     be re-decided. */
   --fx-art-plate: rgba(255, 255, 255, 0.92);
   --fx-art-plate-ink: #0b0e1a;
   --fx-art-scrim: rgba(0, 0, 0, 0.7);
@@ -149,103 +184,17 @@
   --fx-art-drop: rgba(2, 6, 23, 0.45);
   /* The QRIS code's plate. Same reasoning, harder requirement: a scanner
      resolves the code from the contrast between its dark and light modules,
-     so this one cannot even be translucent. Opaque, in both themes. */
+     so this one cannot even be translucent. */
   --fx-scan-plate: #ffffff;
 
   /* Ink for text sitting on a fully-saturated accent plate -- the cyan count
-     badge in the rail, the stock dot on a product tile. The plate is the same
-     colour in both palettes, so its ink is too; and it is near-black because
-     white on a light cyan is the one pairing in the whole system that fails
-     contrast outright. */
+     badge in the rail, the stock dot on a product tile. The plate is a light
+     colour, so its ink is near-black: white on a light cyan is the one
+     pairing in the whole system that fails contrast outright. */
   --text-on-accent: #04121a;
 }
 
-/*
- * The dark palette. One declaration, three roots -- the public marketing
- * pages, the login shell, and the signed-in frame both consoles share. They
- * were already the same colour; they just each carried their own copy.
- *
- * `.theme-dark` is the public pages' hook for "this subtree is dark". It was
- * called `.kavya-public-dark`, which named a theme hook after the product, so a
- * reader could not tell from the class name that it was generic. `.auth-shell`
- * and `.ui-shell` are the same idea bound to the two components that need it.
- *
- * The canvas is midnight rather than black: `#05060b` keeps a trace of blue in
- * it, which is what stops the aurora from looking like dirt on a dark screen
- * and what makes a 4% white surface read as *lit* rather than as grey.
- */
-.theme-dark,
-.auth-shell,
-.ui-shell {
-  --bg-canvas: #05060b;
-  --bg-raised: rgba(255, 255, 255, 0.028);
-  --surface: rgba(255, 255, 255, 0.042);
-  --surface-hover: rgba(255, 255, 255, 0.072);
-  --surface-glass: rgba(10, 12, 24, 0.58);
-  --surface-glass-strong: rgba(9, 11, 22, 0.78);
-
-  --text-primary: #f2f5ff;
-  --text-secondary: #a5adc7;
-  --text-muted: #7c86a3;
-  --text-inverse: #0b0e1a;
-  --text-on-inverse: #f2f5ff;
-
-  --border: rgba(255, 255, 255, 0.075);
-  --border-strong: rgba(255, 255, 255, 0.16);
-
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 18px;
-  --radius-xl: 26px;
-  --radius-pill: 999px;
-
-  --space-card: 20px;
-  --space-gutter: 32px;
-  --space-section: 72px;
-
-  --glass-blur: 22px;
-  --glass-blur-strong: 34px;
-
-  --duration-fast: 150ms;
-  --duration-normal: 280ms;
-  --duration-slow: 620ms;
-  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
-
-  /* Shadows on a near-black ground cannot be black -- a black shadow is
-     invisible on black. They are therefore built from the canvas colour and
-     an inner rim light, which is what actually reads as a raised edge. */
-  --shadow-lift: 0 18px 44px -20px rgba(0, 0, 0, 0.72), 0 1px 0 0 rgba(255, 255, 255, 0.045) inset;
-  --shadow-float: 0 34px 80px -28px rgba(0, 0, 0, 0.85), 0 1px 0 0 rgba(255, 255, 255, 0.07) inset;
-  --shadow-glow: 0 0 0 1px rgba(139, 92, 246, 0.34), 0 16px 44px -14px rgba(139, 92, 246, 0.55);
-
-  --fx-aurora-violet: rgba(139, 92, 246, 0.3);
-  --fx-aurora-cyan: rgba(56, 189, 248, 0.2);
-  --fx-aurora-magenta: rgba(236, 72, 153, 0.17);
-  --fx-aurora-ink: rgba(255, 255, 255, 0.045);
-
-  /* Unchanged on purpose -- see the light block's note. A product's own logo
-     does not invert when the product does. */
-  --fx-art-plate: rgba(255, 255, 255, 0.92);
-  --fx-art-plate-ink: #0b0e1a;
-  --fx-art-scrim: rgba(0, 0, 0, 0.7);
-  --fx-art-scrim-ink: #f2f5ff;
-  --fx-art-drop: rgba(2, 6, 23, 0.45);
-  --fx-scan-plate: #ffffff;
-  --text-on-accent: #04121a;
-}
-
-/*
- * Decorative washes for the marketing pages. Kept out of the block above
- * because they are effects, not surfaces -- nothing legible ever sits on
- * them, and they have no light-theme counterpart because there is nothing
- * behind them to wash.
- */
-.theme-dark {
-  --fx-grid-dot: rgba(255, 255, 255, 0.8);
-  --fx-shimmer: rgba(255, 255, 255, 0.045);
-}
-
-.theme-dark ::selection {
+::selection {
   background: color-mix(in srgb, var(--accent-violet) 50%, transparent);
   color: var(--text-primary);
 }
