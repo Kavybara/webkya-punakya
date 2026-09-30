@@ -30,11 +30,34 @@ project-root/
 ## Cari fitur di mana
 
 ```text
-apps/dashboard/src/pages/owner/      # Halaman panel owner
-apps/dashboard/src/pages/reseller/   # Halaman panel reseller
-apps/dashboard/src/pages/public/     # Homepage, login, products/order publik
-apps/dashboard/src/components/       # Komponen UI yang dipakai berulang
-apps/dashboard/server/index.js       # API dashboard, order, QRIS, Sheets, Gmail, sewa bot
+apps/dashboard/src/pages/home/         # Landing page publik (satu layar, tanpa scroll)
+apps/dashboard/src/pages/pricelist/    # Halaman harga publik /harga + katalog produk
+apps/dashboard/src/pages/login/        # Login, register, lupa password
+apps/dashboard/src/pages/owner-v2/     # Panel owner
+apps/dashboard/src/pages/reseller-v2/  # Panel reseller
+apps/dashboard/src/pages/products/     # Checkout reseller (butuh auth)
+apps/dashboard/src/components/ui/      # Design-system kit: tombol, field, panel, tabel
+apps/dashboard/src/components/feature/ # Komponen lintas halaman (navbar, footer, katalog)
+apps/dashboard/server/index.js         # Composition root Express (0 route handler)
+apps/dashboard/server/routes/          # 15 modul route, satu domain per file
+apps/dashboard/server/services/        # Logika bisnis per domain
+```
+
+Catatan: path lama `src/pages/owner/`, `src/pages/reseller/`, dan
+`src/pages/public/` **sudah tidak ada**. Yang aktif adalah `owner-v2` dan
+`reseller-v2`. URL lama tetap hidup sebagai redirect, jadi bookmark lama
+tidak rusak:
+
+| URL lama | Sekarang |
+| --- | --- |
+| `/store` | redirect ke `/harga` |
+| `/track-order` | redirect ke `/order-tracking` |
+| `/dashboard/*` | redirect ke `/owner-v2/*` |
+| `/reseller/*` | redirect ke `/reseller-v2/*` |
+
+`server/index.js` sudah bukan tempat handler route. Ia hanya composition
+root: konfigurasi Express, mount 15 modul dari `server/routes/`, lalu
+`app.listen`. Detail tiap domain ada di `apps/dashboard/server/routes/README.md`.
 
 apps/bot/handle/connection.js        # Koneksi Baileys, reconnect, backup, sync grup
 apps/bot/handle/messages.js          # Gate pesan masuk, webhook dashboard, blokir grup expired

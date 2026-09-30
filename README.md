@@ -36,8 +36,48 @@ npm run app:build
 npm run app:start
 ```
 
+## Verifikasi (gate wajib sebelum commit)
+
+Dijalankan dari `apps/dashboard`:
+
+```bash
+npx tsc -b --force      # typecheck
+npx eslint src server   # lint
+node --test server/tests/   # 426 test API/server
+npm run test:ui             # 40 test UI
+```
+
+Lalu build dari root:
+
+```bash
+npm run web:build
+```
+
+Tidak ada `npm run test:all` atau `npm run lint` di root — keduanya hanya
+ada di `apps/dashboard` (`test:all` = `node --test server/tests/`,
+`lint` = `eslint src` saja, tanpa `server`).
+
+## Routing publik
+
+```text
+/                 Landing page, satu layar
+/harga            Katalog harga publik
+/order-tracking   Lacak pesanan
+/store            -> redirect ke /harga
+/dashboard/*      -> redirect ke /owner-v2/*
+/reseller/*       -> redirect ke /reseller-v2/*
+```
+
+## Catatan struktural
+
+- `kavya-digital-dashboard/runtime/` bukan folder sampah. `apps/bot` masih
+  membaca `kavya-db.json` dan `rentals.json` dari sana. Jangan dihapus.
+- `apps/dashboard/server/index.js` sudah 0 route handler; ia composition root
+  saja. Handler ada di `server/routes/`.
+
 Panduan deploy ada di:
 
 ```text
 docs/DEPLOYMENT.md
+docs/PROJECT_STRUCTURE.md
 ```
