@@ -164,6 +164,16 @@ textarea {
   }
 }
 
+/*
+ * `@keyframes drawer-in` is the only one left in this file. The eight that sat
+ * beside it -- fade-in, float-slow/medium/fast, pulse-glow, spin-slow,
+ * spin-reverse, toast-rise -- were the landing page's motion vocabulary, and
+ * the landing page stopped moving.
+ *
+ * `css-integrity.test.mjs` checks that every `animation` *has* a keyframe. It
+ * cannot check the reverse, so a name nothing names is invisible to it. These
+ * were removed after a grep confirmed zero references anywhere in `src`.
+ */
 @keyframes drawer-in {
   from {
     transform: translateX(-100%);
@@ -172,93 +182,6 @@ textarea {
     transform: translateX(0);
   }
 }
-
-@keyframes fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes float-slow {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-12px);
-  }
-}
-
-@keyframes float-medium {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-8px);
-  }
-}
-
-@keyframes float-fast {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-5px);
-  }
-}
-
-@keyframes pulse-glow {
-  0%,
-  100% {
-    opacity: 0.4;
-  }
-  50% {
-    opacity: 0.7;
-  }
-}
-
-@keyframes spin-slow {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes spin-reverse {
-  from {
-    transform: rotate(360deg);
-  }
-  to {
-    transform: rotate(0deg);
-  }
-}
-
-@keyframes toast-rise {
-  0% {
-    opacity: 0;
-    transform: translate(-50%, -10px);
-  }
-  12%,
-  82% {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
-  100% {
-    opacity: 0;
-    transform: translate(-50%, -18px);
-  }
-}
-
-
-
-
 
 @media (prefers-reduced-motion: reduce) {
   html {
