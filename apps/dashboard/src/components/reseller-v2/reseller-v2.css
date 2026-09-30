@@ -58,14 +58,14 @@
   gap: 5px;
   border: 0;
   border-radius: var(--radius-sm);
-  background: var(--text-primary);
-  color: var(--text-on-inverse);
+  background: var(--status-success);
+  color: var(--text-inverse);
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
   transition: background 200ms var(--ease-out-expo), transform 200ms var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo);
 }
-.reseller-v2-side-balance > button:hover { background: color-mix(in srgb, var(--text-primary) 58%, white); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.reseller-v2-side-balance > button:hover { background: color-mix(in srgb, var(--status-success) 84%, black); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
 .reseller-v2-topup {
   display: inline-flex;
   height: 40px;
@@ -75,8 +75,8 @@
   padding: 0 15px;
   border: 0;
   border-radius: var(--radius-sm);
-  background: var(--text-primary);
-  color: var(--text-on-inverse);
+  background: var(--status-success);
+  color: var(--text-inverse);
   font-size: 11px;
   font-weight: 700;
   line-height: 1;
@@ -85,7 +85,7 @@
   cursor: pointer;
   transition: background 200ms var(--ease-out-expo), transform 200ms var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo);
 }
-.reseller-v2-topup:hover { background: color-mix(in srgb, var(--text-primary) 58%, white); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.reseller-v2-topup:hover { background: color-mix(in srgb, var(--status-success) 84%, black); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
 .reseller-v2-top-balance {
   display: inline-flex;
   min-height: 38px;
@@ -446,15 +446,15 @@
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-sm);
-  background: var(--text-primary);
+  background: var(--status-success);
   padding: 0 17px;
-  color: var(--text-on-inverse);
+  color: var(--text-inverse);
   font-size: 13px;
   font-weight: 700;
   text-decoration: none;
   transition: background 200ms var(--ease-out-expo), transform 200ms var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo);
 }
-.reseller-v2-purchase-banner a:hover { background: color-mix(in srgb, var(--text-primary) 58%, white); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.reseller-v2-purchase-banner a:hover { background: color-mix(in srgb, var(--status-success) 84%, black); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
 @media (max-width: 560px) {
   .reseller-v2-purchase-banner {
     align-items: stretch;
@@ -521,14 +521,14 @@
   padding: 0 13px;
   border: 0;
   border-radius: var(--radius-sm);
-  background: var(--text-primary);
-  color: var(--text-on-inverse);
+  background: var(--status-success);
+  color: var(--text-inverse);
   font-size: 11px;
   font-weight: 750;
   cursor: pointer;
   transition: background 200ms var(--ease-out-expo), transform 200ms var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo);
 }
-.reseller-v2-delivery-template > header button:hover { background: color-mix(in srgb, var(--text-primary) 58%, white); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.reseller-v2-delivery-template > header button:hover { background: color-mix(in srgb, var(--status-success) 84%, black); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
 .reseller-v2-delivery-template pre {
   max-height: min(58svh, 520px);
   margin: 0;
@@ -797,12 +797,12 @@ a) {
 .reseller-v2-topup-actions .is-primary,
 .reseller-v2-topup-actions a {
   border-color: transparent;
-  background: var(--text-primary);
-  color: var(--text-on-inverse);
+  background: var(--status-success);
+  color: var(--text-inverse);
   font-weight: 700;
 }
 .reseller-v2-topup-actions .is-primary:hover,
-.reseller-v2-topup-actions a:hover { border-color: transparent; background: color-mix(in srgb, var(--text-primary) 58%, white); color: var(--text-on-inverse); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.reseller-v2-topup-actions a:hover { border-color: transparent; background: color-mix(in srgb, var(--status-success) 84%, black); color: var(--text-on-inverse); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
 .reseller-v2-topup-error {
   margin: 0;
   padding: 12px;
@@ -1297,14 +1297,14 @@ a) {
   margin-top: 15px;
   padding: 0 16px;
   border-radius: var(--radius-sm);
-  background: var(--text-primary);
-  color: var(--text-on-inverse);
+  background: var(--status-success);
+  color: var(--text-inverse);
   font-size: 12px;
   font-weight: 750;
   text-decoration: none;
   transition: background 200ms var(--ease-out-expo), transform 200ms var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo);
 }
-.reseller-guide-detail aside a:hover { background: color-mix(in srgb, var(--text-primary) 58%, white); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.reseller-guide-detail aside a:hover { background: color-mix(in srgb, var(--status-success) 84%, black); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
 @media (max-width: 1050px) {
   .reseller-guide-layout {
     grid-template-columns: 1fr;

@@ -142,8 +142,8 @@
   padding: 0 18px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: var(--text-primary);
-  color: var(--text-on-inverse);
+  background: var(--status-success);
+  color: var(--text-inverse);
   font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
@@ -155,7 +155,7 @@
     opacity var(--duration-fast) var(--ease-out-expo);
 }
 .reseller-v2-access-submit:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--text-primary) 58%, white);
+  background: color-mix(in srgb, var(--status-success) 84%, black);
   transform: translateY(-1px);
   box-shadow: var(--shadow-lift);
 }

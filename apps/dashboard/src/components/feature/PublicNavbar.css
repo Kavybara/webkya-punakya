@@ -44,6 +44,7 @@
   align-items: center;
   gap: 10px;
   color: var(--text-primary);
+  text-shadow: 0 1px 6px var(--farm-scrim-top);
 }
 
 .home-nav-mark {
@@ -54,7 +55,7 @@
   justify-content: center;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: color-mix(in srgb, var(--accent-cyan) 14%, var(--surface));
   color: var(--accent-cyan);
 }
 
@@ -64,12 +65,21 @@
   gap: 4px;
 }
 
+/* The three nav links.
+ *
+ * The halo is the same one the wordmark wears, and for the same reason: these
+ * sit on open sky, and a cloud drifting behind "Harga" is enough to drop a
+ * 14px label below contrast. The scrim band under the navbar helps, but it is
+ * a gradient -- it thins as the frame moves and the text does not move. The
+ * shadow travels with the glyph, so the label keeps its own contrast
+ * regardless of what is behind it. */
 .home-nav-link {
   padding: 9px 12px;
   color: var(--text-secondary);
   font-size: 14px;
   font-weight: 500;
   letter-spacing: var(--tracking-wide);
+  text-shadow: 0 1px 6px var(--farm-scrim-top);
   transition: color var(--duration-fast) var(--ease-out-expo);
 }
 
@@ -83,22 +93,40 @@
   gap: 8px;
 }
 
+/* Sign in, and the register button beside it.
+ *
+ * The register button is the farm's grass green and the sign-in button is an
+ * outlined plate. They used to be the same solid fill, one at 86% opacity on
+ * hover and one not -- two buttons of equal weight for two different levels of
+ * commitment. Now the filled one is the only filled one, and it is the action
+ * the page wants.
+
+ * The hover is a lift plus a deepening rather than an opacity fade. Opacity on
+ * a light plate sends the label's contrast with its own background down, and
+ * against a moving background that is a legibility problem, not a flourish. */
 .home-nav-login {
   display: none;
   min-height: 42px;
   align-items: center;
   justify-content: center;
   padding: 0 16px;
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-pill);
+  background: var(--surface);
   color: var(--text-primary);
   font-size: 14px;
   font-weight: 600;
   letter-spacing: var(--tracking-wide);
-  transition: background var(--duration-fast) var(--ease-out-expo);
+  transition:
+    background-color var(--duration-fast) var(--ease-out-expo),
+    border-color var(--duration-fast) var(--ease-out-expo),
+    transform var(--duration-fast) var(--ease-out-expo);
 }
 
 .home-nav-login:hover {
-  background: var(--surface);
+  background: var(--surface-hover);
+  border-color: var(--accent-cyan);
+  transform: translateY(-1px);
 }
 
 .home-nav-signup {
@@ -108,16 +136,26 @@
   justify-content: center;
   padding: 0 18px;
   border-radius: var(--radius-pill);
-  background: var(--text-primary);
-  color: var(--bg-canvas);
+  background: var(--status-success);
+  box-shadow: var(--shadow-lift);
+  color: var(--text-inverse);
   font-size: 14px;
   font-weight: 700;
   letter-spacing: var(--tracking-wide);
-  transition: opacity var(--duration-fast) var(--ease-out-expo);
+  transition:
+    background-color var(--duration-fast) var(--ease-out-expo),
+    transform var(--duration-fast) var(--ease-out-expo),
+    box-shadow var(--duration-fast) var(--ease-out-expo);
 }
 
 .home-nav-signup:hover {
-  opacity: 0.86;
+  background: color-mix(in srgb, var(--status-success) 84%, black);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-float);
+}
+
+.home-nav-signup:active {
+  transform: translateY(0);
 }
 
 /* `<details>` rather than a stateful sheet: the platform already implements a

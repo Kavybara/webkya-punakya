@@ -993,7 +993,7 @@ export default function ProductsPage() {
                 </div>
                 <h1 className="mt-4 text-lg font-semibold">Checkout tidak tersedia</h1>
                 <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">{error}</p>
-                <button type="button" onClick={backToCatalog} className="mt-5 inline-flex min-h-11 items-center justify-center rounded-lg bg-[var(--text-primary)] px-4 text-sm font-semibold text-[var(--text-on-inverse)] transition-colors hover:bg-[color-mix(in_srgb,var(--text-primary)_58%,white)]">
+                <button type="button" onClick={backToCatalog} className="mt-5 inline-flex min-h-11 items-center justify-center rounded-lg bg-[var(--text-primary)] px-4 text-sm font-semibold text-[var(--text-inverse)] transition-colors hover:bg-[color-mix(in_srgb,var(--status-success)_84%,black)]">
                   Pilih Produk Lain
                 </button>
               </>
@@ -1027,7 +1027,7 @@ export default function ProductsPage() {
           <div aria-label="Tahap checkout" className="mx-auto mt-8 grid max-w-xl grid-cols-3 gap-2 px-1 text-xs sm:mt-10 sm:flex sm:items-center sm:justify-center sm:gap-4">
             {steps.map((item, index) => (
               <div key={item.id} className="flex min-w-0 flex-col items-center gap-2 sm:flex-row sm:gap-4" aria-current={index === activeStep ? "step" : undefined}>
-                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-xs font-semibold ${index <= activeStep ? "border-[var(--border-strong)] bg-[var(--text-primary)] text-[var(--text-on-inverse)]" : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)]"}`}>
+                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-xs font-semibold ${index <= activeStep ? "border-[var(--border-strong)] bg-[var(--status-success)] text-[var(--text-inverse)]" : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)]"}`}>
                   {index + 1}
                 </div>
                 <span className={`${index <= activeStep ? "font-semibold text-[var(--text-primary)]" : "text-[var(--text-muted)]"} text-center text-[11px] leading-4 sm:whitespace-nowrap sm:text-xs`}>{item.label}</span>
@@ -1218,7 +1218,7 @@ export default function ProductsPage() {
                     type="button"
                     onClick={submitOrder}
                     disabled={submitting || !selection || resellerCheck.status === "checking" || resellerCheck.status === "invalid"}
-                    className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[var(--text-primary)] px-4 text-sm font-semibold text-[var(--text-on-inverse)] transition-colors hover:bg-[color-mix(in_srgb,var(--text-primary)_58%,white)] disabled:cursor-not-allowed disabled:bg-[var(--bg-raised)] disabled:text-[var(--text-muted)]"
+                    className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[var(--text-primary)] px-4 text-sm font-semibold text-[var(--text-inverse)] transition-colors hover:bg-[color-mix(in_srgb,var(--status-success)_84%,black)] disabled:cursor-not-allowed disabled:bg-[var(--bg-raised)] disabled:text-[var(--text-muted)]"
                   >
                     {submitting ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-[color-mix(in_srgb,var(--text-on-inverse)_22%,transparent)] border-t-[var(--text-on-inverse)]" aria-hidden="true" /> : <ArrowRight size={16} aria-hidden="true" />}
                     {submitting ? "Memproses pesanan..." : "Lanjut ke Pembayaran"}
@@ -1306,7 +1306,7 @@ export default function ProductsPage() {
                       type="button"
                       onClick={() => refreshCurrentOrder({ manual: true })}
                       disabled={checkingPayment || paymentRefreshLockRef.current}
-                      className="inline-flex min-h-12 items-center justify-center rounded-lg bg-[var(--text-primary)] px-4 text-sm font-semibold text-[var(--text-on-inverse)] transition-colors hover:bg-[color-mix(in_srgb,var(--text-primary)_58%,white)] disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex min-h-12 items-center justify-center rounded-lg bg-[var(--text-primary)] px-4 text-sm font-semibold text-[var(--text-inverse)] transition-colors hover:bg-[color-mix(in_srgb,var(--status-success)_84%,black)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {checkingPayment ? <span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-[color-mix(in_srgb,var(--text-on-inverse)_22%,transparent)] border-t-[var(--text-on-inverse)]" aria-hidden="true" /> : null}
                       {checkingPayment ? "Sedang memeriksa..." : "Cek Status Pembayaran"}
@@ -1399,14 +1399,14 @@ export default function ProductsPage() {
                     <div className="min-w-0 rounded-lg border border-[color-mix(in_srgb,var(--accent-violet)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-violet)_7%,transparent)] p-4">
                       <div className="flex min-h-11 flex-wrap items-center justify-between gap-3">
                         <div><p className="text-sm font-semibold text-[var(--text-primary)]">Template Siap Kirim</p><p className="mt-1 text-xs text-[var(--text-muted)]">{deliveryTemplateLabel}</p></div>
-                        {deliveryTemplateText ? <button type="button" onClick={() => copyCheckoutValue("template", deliveryTemplateText)} className="min-h-9 rounded-lg bg-[var(--text-primary)] px-3 text-xs font-semibold text-[var(--text-on-inverse)] hover:bg-[color-mix(in_srgb,var(--text-primary)_58%,white)]">{copiedValue === "template" ? "Template berhasil disalin" : "Salin Semua"}</button> : null}
+                        {deliveryTemplateText ? <button type="button" onClick={() => copyCheckoutValue("template", deliveryTemplateText)} className="min-h-9 rounded-lg bg-[var(--text-primary)] px-3 text-xs font-semibold text-[var(--text-inverse)] hover:bg-[color-mix(in_srgb,var(--status-success)_84%,black)]">{copiedValue === "template" ? "Template berhasil disalin" : "Salin Semua"}</button> : null}
                       </div>
                       {deliveryTemplateText ? <pre className="mt-3 max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-[var(--border)] bg-[var(--bg-canvas)] p-4 font-mono text-xs leading-5 text-[var(--text-secondary)]">{deliveryTemplateText}</pre> : <div className="mt-3 flex min-h-36 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-canvas)] p-4 text-center text-sm leading-6 text-[var(--text-muted)]">{deliveryTemplateEmptyText}</div>}
                     </div>
                   </div>
                 ) : null}
                 <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row sm:flex-wrap">
-                  <Link to={isAuthenticatedResellerCheckout && deliveredAccountId ? `/reseller-v2/accounts?account=${encodeURIComponent(deliveredAccountId)}&tab=template` : isResellerCheckout ? "/reseller-v2/accounts" : trackingHref} className="inline-flex min-h-12 items-center justify-center rounded-lg bg-[var(--text-primary)] px-5 text-sm font-semibold text-[var(--text-on-inverse)] transition-colors hover:bg-[color-mix(in_srgb,var(--text-primary)_58%,white)]">
+                  <Link to={isAuthenticatedResellerCheckout && deliveredAccountId ? `/reseller-v2/accounts?account=${encodeURIComponent(deliveredAccountId)}&tab=template` : isResellerCheckout ? "/reseller-v2/accounts" : trackingHref} className="inline-flex min-h-12 items-center justify-center rounded-lg bg-[var(--text-primary)] px-5 text-sm font-semibold text-[var(--text-inverse)] transition-colors hover:bg-[color-mix(in_srgb,var(--status-success)_84%,black)]">
                     {isAuthenticatedResellerCheckout ? "Lihat Akun yang Dibeli" : "Lacak Pesanan"}
                   </Link>
                   {isAuthenticatedResellerCheckout ? <Link to="/reseller-v2/orders" className="inline-flex min-h-12 items-center justify-center rounded-lg border border-[var(--border)] px-5 text-sm font-semibold text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]">Lihat Pesanan</Link> : null}
@@ -1548,7 +1548,7 @@ export default function ProductsPage() {
                         const selectedVariant = selectedForProduct?.variant.id === variant.id;
                         return (
                           <button key={variant.id} type="button" onClick={() => selectCatalogVariant(product, variant, duration.duration, duration.price)} className={`catalog-variant ${selectedVariant ? "is-selected" : ""}`}>
-                            <span className={`flex h-7 w-7 items-center justify-center rounded-full ${selectedVariant ? "bg-[var(--accent-violet)] text-[var(--text-on-inverse)]" : variant.stockCount > 0 ? "bg-[color-mix(in_srgb,var(--accent-violet)_12%,transparent)] text-[var(--accent-violet)]" : "bg-[var(--bg-raised)] text-[var(--text-muted)]"}`}>
+                            <span className={`flex h-7 w-7 items-center justify-center rounded-full ${selectedVariant ? "bg-[var(--accent-violet)] text-[var(--text-inverse)]" : variant.stockCount > 0 ? "bg-[color-mix(in_srgb,var(--accent-violet)_12%,transparent)] text-[var(--accent-violet)]" : "bg-[var(--bg-raised)] text-[var(--text-muted)]"}`}>
                               {selectedVariant ? <Check size={12} aria-hidden="true" /> : <Circle size={12} aria-hidden="true" />}
                             </span>
                             <span className="min-w-0">

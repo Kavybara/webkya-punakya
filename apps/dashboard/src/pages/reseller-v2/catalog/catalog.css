@@ -534,8 +534,8 @@
   margin-top: 16px;
   border: 0;
   border-radius: var(--radius-sm);
-  background: var(--text-primary);
-  color: var(--text-on-inverse);
+  background: var(--status-success);
+  color: var(--text-inverse);
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
@@ -547,7 +547,7 @@
 }
 
 .reseller-v2-catalog-checkout:hover:not(:disabled):not(.is-pending) {
-  background: color-mix(in srgb, var(--text-primary) 58%, white);
+  background: color-mix(in srgb, var(--status-success) 84%, black);
   transform: translateY(-1px);
   box-shadow: var(--shadow-lift);
 }
@@ -625,8 +625,8 @@
   padding: 0 16px;
   border: 0;
   border-radius: var(--radius-md);
-  background: var(--text-primary);
-  color: var(--text-on-inverse);
+  background: var(--status-success);
+  color: var(--text-inverse);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
@@ -638,7 +638,7 @@
 }
 
 .reseller-v2-catalog-mobile-bar button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--text-primary) 58%, white);
+  background: color-mix(in srgb, var(--status-success) 84%, black);
   transform: translateY(-1px);
   box-shadow: var(--shadow-lift);
 }

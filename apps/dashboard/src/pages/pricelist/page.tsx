@@ -29,7 +29,13 @@ export default function PriceListPage() {
     <main className="theme-dark flex min-h-screen flex-col font-sans">
       <PublicNavbar />
       <div className="mx-auto w-full max-w-[1180px] flex-1 px-4 pb-16 sm:px-6 md:px-8 lg:px-10">
-        <header className="pb-9 pt-28">
+        {/* The farm is playing behind this page, so the three blocks of text
+            that are not on a surface of their own carry a halo rather than a
+            plate. `price-stats` below has a plate because a 4rem figure has no
+            glyph edge to hang a shadow off; these do, and a plate here would
+            be a box around a heading, which is what this page is trying not
+            to be. */}
+        <header className="price-header">
           <p className="text-label font-bold uppercase text-[var(--text-muted)]">Katalog</p>
           <h1 className="mt-3 text-display font-extrabold leading-tight tracking-tight text-[var(--text-primary)]">
             Harga.
@@ -42,7 +48,7 @@ export default function PriceListPage() {
         <StatsStrip catalog={catalog} />
         <ProductCatalog catalog={catalog} />
 
-        <p className="mt-10 text-small text-[var(--text-muted)]">
+        <p className="price-note text-small text-[var(--text-secondary)]">
           Butuh harga satuan atau reseller?{" "}
           <a
             href={ownerWhatsappLink()}

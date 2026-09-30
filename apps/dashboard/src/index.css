@@ -60,6 +60,24 @@
     U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
+/*
+ * The canvas lives on `:root`, not on `body`, and that placement is load-
+ * bearing for the farm backdrop.
+ *
+ * The video is `position: fixed` at `z-index: -2`. A background painted on
+ * `body` covers it: the body's own background is painted above every
+ * negatively-stacked descendant, so the video mounted, decoded, autoplayed,
+ * reported `paused === false`, and stayed completely invisible behind an
+ * opaque sheet. A background on the root element propagates to the canvas,
+ * which is painted below the whole document, so the video shows through it.
+ *
+ * The consequence for the rest of the codebase: `body` stays transparent, and
+ * so does every full-bleed surface inside the app. `.auth-shell` and the
+ * `.theme-dark` roots are transparent sheets for the same reason, and any
+ * page that fills the viewport with `--bg-canvas` puts the farm back out of
+ * sight. `--bg-canvas` is still what you paint with -- on the root, where it
+ * is behind the video instead of over it.
+ */
 :root {
   color: var(--text-primary);
   background: var(--bg-canvas);
@@ -84,7 +102,10 @@ body {
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
-  background: var(--bg-canvas);
+  /* Transparent on purpose -- see the `:root` block above. The canvas is on
+     the root element, behind the video; painting it here as well would cover
+     the video with a second opaque layer. */
+  background: transparent;
 }
 
 /*
@@ -110,6 +131,14 @@ body {
  *
  * Three pools, because one reads as a spotlight and three read as depth. The
  * colour is unchanged from the animated version; only the travel is gone.
+ *
+ * This is the *fallback* layer. The public pages play `media/capybara-farm.mp4`
+ * behind it and this gradient is what shows through wherever the video is
+ * covered or has not started yet; the owner console and reseller panel carry
+ * no video, so for them this IS the background. Either way the pools are the
+ * sky from the same frame -- sun top right, sky top left, pond glow at the
+ * foot -- which is what keeps every surface the same daylight rather than two
+ * different times of day.
  */
 .theme-dark,
 .auth-shell,
@@ -126,9 +155,9 @@ body {
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(52% 46% at 50% 8%, var(--fx-aurora-violet) 0%, transparent 68%),
-    radial-gradient(44% 40% at 88% 92%, var(--fx-aurora-cyan) 0%, transparent 66%),
-    radial-gradient(30% 30% at 46% 62%, var(--fx-aurora-ink) 0%, transparent 76%);
+    radial-gradient(54% 50% at 84% 4%, var(--fx-aurora-magenta) 0%, transparent 60%),
+    radial-gradient(58% 52% at 14% 14%, var(--fx-aurora-violet) 0%, transparent 64%),
+    radial-gradient(52% 46% at 52% 98%, var(--fx-aurora-cyan) 0%, transparent 66%);
 }
 
 a {

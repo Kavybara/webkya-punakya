@@ -23,7 +23,7 @@ type ButtonVariant = "primary" | "outline" | "danger" | "ghost";
 type ButtonSize = "sm" | "md";
 
 const variants: Record<ButtonVariant, string> = {
-  primary: "border-transparent bg-[var(--text-primary)] text-[var(--text-on-inverse)] hover:bg-[color-mix(in_srgb,var(--text-primary)_58%,white)]",
+  primary: "border-transparent bg-[var(--status-success)] text-[var(--text-inverse)] hover:bg-[color-mix(in_srgb,var(--status-success)_84%,black)]",
   outline: "border-[var(--border)] bg-[var(--surface)] text-[var(--text-primary)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]",
   // The one variant that keeps a colour, because a destructive action should
   // not look like every other button on the page.

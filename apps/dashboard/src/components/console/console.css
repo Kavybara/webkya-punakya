@@ -151,8 +151,8 @@
 .console-privacy-note svg { flex: 0 0 auto; }
 /* The drawer's call to action. It is the last thing in the panel, so it is
    filled -- and it is a link into the full audit, not a second close button. */
-.console-drawer-footer { display: flex; min-height: 46px; align-items: center; justify-content: center; gap: 7px; margin-top: 20px; border-radius: var(--radius-md); background: var(--text-primary); color: var(--text-on-inverse); font-size: 12px; font-weight: 700; text-decoration: none; transition: background 200ms var(--ease-out-expo), transform 200ms var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo); }
-.console-drawer-footer:hover { background: color-mix(in srgb, var(--text-primary) 58%, white); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.console-drawer-footer { display: flex; min-height: 46px; align-items: center; justify-content: center; gap: 7px; margin-top: 20px; border-radius: var(--radius-md); background: var(--status-success); color: var(--text-inverse); font-size: 12px; font-weight: 700; text-decoration: none; transition: background 200ms var(--ease-out-expo), transform 200ms var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo); }
+.console-drawer-footer:hover { background: color-mix(in srgb, var(--status-success) 84%, black); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
 .console-orders-page-panel { overflow: hidden; }
 .console-order-trace { margin-top: 22px; }
 .console-order-trace h3 { margin: 0 0 12px; color: var(--text-primary); font-size: 12px; }

@@ -11,14 +11,69 @@
  * order. What the two genuinely have in common is the token, not the rule.
  */
 
+/* ------------------------------------------------------------- the free text
+ *
+ * Two blocks on this page sit on the video rather than on a surface: the
+ * heading block and the closing note.
+ *
+ * The heading block got a plate, and the halo was tried first and was not
+ * enough. A 4rem heading over the left third of this clip lands on the cottage
+ * and the treeline -- the highest-contrast patch in the frame -- and a
+ * text-shadow can only hold a glyph that still has an edge to hold. The
+ * stats row below solves the same problem the same way, and two plates on one
+ * page still leaves the farm showing in the margins and behind the cards,
+ * which is the whole reason the video is here.
+ *
+ * The closing note kept its halo instead of a third plate. It is one line of
+ * 14px text, it is a deliberate step down the hierarchy from the two blocks
+ * above it, and boxing it would give a 40-pixel-high footnote the same visual
+ * weight as the page heading. */
+.price-header {
+  /* 112px clears the fixed navbar, which is 18px of padding plus a 42px
+     control. It is a margin rather than padding because it is space between
+     the navbar and the plate, not space inside the plate -- padding it would
+     have put 112px of glass above "Katalog". */
+  margin: 112px 0 28px;
+  padding: 30px 26px 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-glass);
+  box-shadow: var(--shadow-lift);
+  backdrop-filter: blur(8px) saturate(140%);
+}
+
+.price-note {
+  margin-top: 40px;
+  text-shadow:
+    0 1px 3px var(--farm-scrim-top),
+    0 2px 14px var(--farm-scrim-top);
+}
+
 /* ------------------------------------------------------------- the numbers
  *
  * Four counted figures, separated by hairlines rather than boxed into four
  * cards. A card each would put a border and a background around every number,
  * which is the same "everything is a tile" reflex the redesign is trying to
- * get rid of. */
+ * get rid of.
+ *
+ * The four share one plate instead. That is a concession the video forced: a
+ * `--text-display` figure is 4rem of dark green, and four of them sit on the
+ * sunlit meadow at luminance 0.55 with nothing behind them, which is the one
+ * thing on this page that cannot be fixed with a text-shadow because there is
+ * no glyph outline to put one behind. One sheet under the row solves it
+ * without putting four borders on the page.
+ *
+ * 8px of blur rather than `--glass-blur`, for the reason `auth-brand` gives:
+ * this is a translucent sheet over pixel art, and at 18px the farm behind it
+ * stops being a scene. */
 .price-stats {
-  padding-bottom: 40px;
+  margin-bottom: 40px;
+  padding: 26px 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-glass);
+  box-shadow: var(--shadow-lift);
+  backdrop-filter: blur(8px) saturate(140%);
 }
 
 .price-stats-grid {
@@ -116,9 +171,11 @@
 
 /* ------------------------------------------------------------- the buttons
  *
- * The primary is the same near-white plate the sign-in button, the owner
- * console's save row and the reseller's top-up all use, and it hovers the
- * same way. */
+ * The primary is the farm green, the same plate the sign-in button, the owner
+ * console's save row and the reseller's top-up all use, and it hovers the same
+ * way. It was a near-white plate on the dark theme; over daylight a pale plate
+ * disappears into the meadow, and the green is the one colour on this page that
+ * is not in the video behind it. */
 .price-cta {
   display: inline-flex;
   min-height: 48px;
@@ -128,8 +185,8 @@
   padding: 0 24px;
   border: 1px solid transparent;
   border-radius: var(--radius-pill);
-  background: var(--text-primary);
-  color: var(--bg-canvas);
+  background: var(--status-success);
+  color: var(--text-inverse);
   font-size: 15px;
   font-weight: 800;
   text-decoration: none;
@@ -140,8 +197,7 @@
 }
 
 .price-cta:hover {
-  background: color-mix(in srgb, var(--text-primary) 58%, white);
-  color: var(--bg-canvas);
+  background: color-mix(in srgb, var(--status-success) 84%, black);
   transform: translateY(-1px);
   box-shadow: var(--shadow-lift);
 }

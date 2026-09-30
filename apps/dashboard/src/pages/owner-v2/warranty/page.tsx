@@ -532,7 +532,7 @@ export default function OwnerConsoleWarrantyPage() {
             <option value="">{candidateLoading ? "Memuat kandidat..." : candidates.length ? "Pilih stok pengganti" : "Tidak ada stok satu pool"}</option>
             {candidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.identity} · {candidate.profile || "Tanpa profil"} · {candidate.sheetName || "DB"} row {candidate.sheetRow || "-"}</option>)}
           </select>
-          <button type="button" className="h-11 rounded-lg bg-[var(--text-primary)] px-5 text-sm font-semibold text-[var(--text-on-inverse)] disabled:cursor-not-allowed disabled:opacity-40" disabled={!candidateId || busy || !ownerNote.trim()} onClick={() => setConfirmReplace(true)}>Ganti akun</button>
+          <button type="button" className="h-11 rounded-lg bg-[var(--text-primary)] px-5 text-sm font-semibold text-[var(--text-inverse)] disabled:cursor-not-allowed disabled:opacity-40" disabled={!candidateId || busy || !ownerNote.trim()} onClick={() => setConfirmReplace(true)}>Ganti akun</button>
         </div>
         <div className="mt-3 flex justify-end">
           <button type="button" className="h-11 rounded-lg border border-[var(--border)] px-4 text-sm font-semibold text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40" disabled={busy} onClick={() => {

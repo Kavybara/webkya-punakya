@@ -84,7 +84,7 @@ export function ErrorScreen({ error, onRetry }: { error: unknown; onRetry: () =>
           <button
             type="button"
             onClick={onRetry}
-            className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-[var(--radius-pill)] border border-transparent bg-[var(--text-primary)] px-4 text-sm font-medium text-[var(--text-on-inverse)] transition-[background-color,transform,box-shadow] duration-[--duration-normal] ease-[--ease-out-expo] hover:-translate-y-px hover:bg-[color-mix(in_srgb,var(--text-primary)_58%,white)] hover:shadow-[var(--shadow-lift)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-cyan)]"
+            className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-[var(--radius-pill)] border border-transparent bg-[var(--text-primary)] px-4 text-sm font-medium text-[var(--text-inverse)] transition-[background-color,transform,box-shadow] duration-[--duration-normal] ease-[--ease-out-expo] hover:-translate-y-px hover:bg-[color-mix(in_srgb,var(--status-success)_84%,black)] hover:shadow-[var(--shadow-lift)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-cyan)]"
           >
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
             Coba lagi

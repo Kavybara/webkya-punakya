@@ -37,10 +37,30 @@
  * 800 rather than 600, and tracking pulled to -0.05em, because at this size
  * the letterforms are the logo and they have to be set like a logotype rather
  * than like a heading: tight, dense, and optically even across the whole
- * word. Inter at 600 is a text face pretending to be a display face. */
+ * word. Inter at 600 is a text face pretending to be a display face.
+ *
+ * The gradient is the one place on the site that is not flat ink, and it is
+ * here on purpose. The wordmark is the logo, and the logo is allowed to be a
+ * picture: it takes the same three colours the footage is sampled from -- the
+ * deep leaf of the ink, the grass, the sun -- so the name in the middle of the
+ * frame belongs to the scene it sits in rather than being a sticker on top.
+ *
+ * The halo is load-bearing, not decoration. Grass in this clip sits at
+ * luminance 0.59 and the sky at 0.56, and deep green type at this size loses
+ * its edges against either as the scene moves. The pale glow re-establishes the
+ * silhouette on every frame, and it is the only reason the text survives a
+ * moving background at all. */
 .home-hero-title {
   margin: 0;
-  color: var(--text-primary);
+  background: linear-gradient(
+    168deg,
+    var(--text-primary) 6%,
+    var(--status-success) 62%,
+    var(--status-warning) 100%
+  );
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 2px 12px var(--farm-scrim-top));
   font-size: var(--text-hero);
   font-weight: 800;
   line-height: 0.9;
@@ -48,6 +68,12 @@
   text-wrap: balance;
 }
 
+/* The sentence under the word.
+ *
+ * The same halo the wordmark gets, at a much smaller radius: the gradient text
+ * needs it to hold an edge at 12rem, and this needs it at 1.25rem. Without it
+ * the lede washes out every time a bright sky passes behind the middle of the
+ * line -- which, on a twelve-second loop, is often. */
 .home-hero-lede {
   margin: 24px auto 0;
   max-width: 34rem;
@@ -55,12 +81,26 @@
   font-size: var(--text-lede);
   line-height: 1.6;
   letter-spacing: var(--tracking-wide);
+  text-shadow:
+    0 1px 3px var(--farm-scrim-top),
+    0 2px 14px var(--farm-scrim-top);
   text-wrap: balance;
 }
 
 /* The one control on the page. Same near-white plate as the sign-in button and
    the owner console's save row, so it does not read as a different kind of
    button from the ones two clicks away. */
+/* The one control on the page.
+ *
+ * It was ink-on-canvas, which is a button that borrows the type colour. Over a
+ * moving background that reads as a hole punched in the frame, and it tied
+ * the primary action to the colour of text. It is the field's own grass green
+ * now, at the same `--status-success` the navbar's register button uses -- two
+ * calls to action, one colour, and the colour is the scene's.
+ *
+ * The lift on hover, not an opacity fade, for the reason the navbar button
+ * gives: fading a fill over a moving background drops the label's contrast
+ * against whatever frame happens to be passing underneath it. */
 .home-hero-cta {
   display: inline-flex;
   min-height: 50px;
@@ -69,22 +109,22 @@
   margin-top: 38px;
   padding: 0 30px;
   border-radius: var(--radius-pill);
-  background: var(--text-primary);
-  color: var(--bg-canvas);
+  background: var(--status-success);
+  box-shadow: var(--shadow-lift);
+  color: var(--text-inverse);
   font-size: 15px;
   font-weight: 800;
   text-decoration: none;
   transition:
     background-color var(--duration-normal) var(--ease-out-expo),
     transform var(--duration-normal) var(--ease-out-expo),
-    box-shadow 260ms var(--ease-out-expo);
+    box-shadow var(--duration-normal) var(--ease-out-expo);
 }
 
 .home-hero-cta:hover {
-  background: color-mix(in srgb, var(--text-primary) 58%, white);
-  color: var(--bg-canvas);
+  background: color-mix(in srgb, var(--status-success) 84%, black);
   transform: translateY(-1px);
-  box-shadow: var(--shadow-lift);
+  box-shadow: var(--shadow-float);
 }
 
 /*

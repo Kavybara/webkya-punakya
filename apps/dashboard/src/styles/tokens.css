@@ -27,15 +27,21 @@
  * and `:root` *was* the light palette, so every page inherited light and then
  * had to be told, again, that it was supposed to be dark.
  *
- * The light palette is gone. Kavya is dark, on every surface, permanently.
- * So the dark values move up into `:root` and the second block is deleted. The
- * `.theme-dark` / `.auth-shell` / `.ui-shell` class names stay where they are:
- * they are layout and scoping hooks now (`AppShell` uses `.ui-shell` for the
- * whole signed-in frame, and the focus ring hangs off it), not colour hooks.
+ * The second block is gone, and the values live in `:root` alone. That is
+ * still the rule, and it is now load-bearing in the other direction too: the
+ * palette is *sampled from* the background video, so a second copy of it
+ * would be a second set of colours that had stopped matching the footage.
  *
- * `design-tokens.test.mjs` holds the line this time in the other direction: the
- * palette must live in exactly one rule, `:root`. A second copy cannot creep
- * back in unnoticed, and if it does, it fails the build instead of shipping.
+ * The `.theme-dark` / `.auth-shell` / `.ui-shell` class names stay where they
+ * are: they are layout and scoping hooks now (`AppShell` uses `.ui-shell` for
+ * the whole signed-in frame, and the focus ring hangs off it), not colour
+ * hooks. `.theme-dark` is a misnomer that survived the inversion -- it now
+ * means "full-bleed public surface", and renaming it is a mechanical change
+ * nobody has needed yet.
+ *
+ * `design-tokens.test.mjs` holds the line: the palette must live in exactly
+ * one rule, `:root`. A second copy cannot creep back in unnoticed, and if it
+ * does, it fails the build instead of shipping.
  *
  * -----------------------------------------------------------------------
  * WHY THE PALETTE IS TRANSLUCENT RATHER THAN SOLID
@@ -48,46 +54,60 @@
  * borders, and this one was all borders.
  *
  * So the surfaces stop being colours and become *layers of light*. A panel
- * is now a translucent sheet over the canvas, separated by what is behind it
- * rather than by a line drawn around it. `--surface` carries a 4% white wash,
- * `--border` drops to 7.5% because the edge of a lit surface is carried by the
- * blur behind it, and the aurora below is what there is to see through to.
- * That is the whole trick: depth comes from a background with something in it,
- * not from stacking greys.
+ * is a translucent sheet over the canvas, separated by what is behind it
+ * rather than by a line drawn around it. That was load-bearing when the
+ * background was a dark aurora and it is more load-bearing now: on the public
+ * pages there is a moving video behind every panel, and an opaque surface
+ * would be the one place the video stopped showing. A 72%-white sheet keeps a
+ * legible text contrast over both the bright sky and the dark tree line as the
+ * footage moves underneath.
  *
- * The canvas is midnight rather than black: `#030305` keeps a trace of blue in
- * it, which is what stops the aurora from looking like dirt on a dark screen
- * and what makes a 4% white surface read as *lit* rather than as grey.
+ * The canvas is a pale field-green rather than white: `#eaf6e2` carries a
+ * trace of the grass in it, which is what stops a card from reading as a piece
+ * of paper dropped on a photograph.
  */
 
 :root {
-  /* --- the canvas --- */
-  --bg-canvas: #030305;
-  --bg-raised: rgba(255, 255, 255, 0.028);
-  --surface: rgba(255, 255, 255, 0.042);
-  --surface-hover: rgba(255, 255, 255, 0.072);
-  --surface-glass: rgba(10, 12, 24, 0.58);
-  --surface-glass-strong: rgba(9, 11, 22, 0.78);
+  /* --- the canvas ---
+     The palette is daylight now, and it was sampled rather than chosen.
 
-  --text-primary: #f2f5ff;
-  --text-secondary: #a5adc7;
-  --text-muted: #7c86a3;
-  --text-inverse: #0b0e1a;
-  --text-on-inverse: #f2f5ff;
+     The values below come out of `media/capybara-farm.mp4`, the background the
+     public pages play: sky #18A8F0, grass #48A818, sun #D8D830, pond cyan.
+     Tying the UI to the footage means the buttons and the wordmark are the same
+     world as the background instead of a dark console laid over a bright
+     field -- which is what it was, and it read as two sites in one.
 
-  --border: rgba(255, 255, 255, 0.075);
-  --border-strong: rgba(255, 255, 255, 0.16);
+     Ink is a deep leaf green rather than neutral black. Pure black on this
+     green is a hole; a green-black at the same weight reads as a shadow the
+     grass is casting. */
+  --bg-canvas: #eaf6e2;
+  --bg-raised: rgba(255, 255, 255, 0.62);
+  --surface: rgba(255, 255, 255, 0.72);
+  --surface-hover: rgba(255, 255, 255, 0.88);
+  --surface-glass: rgba(255, 255, 255, 0.6);
+  --surface-glass-strong: rgba(255, 255, 255, 0.86);
 
-  /* Accents are chosen for how they read against a dark ground. There is no
-     second palette for them to agree with, so they are declared once. */
-  --accent-violet: #8b5cf6;
-  --accent-magenta: #ec4899;
-  --accent-cyan: #38bdf8;
+  --text-primary: #123a14;
+  --text-secondary: #2f5c33;
+  --text-muted: #527a55;
+  --text-inverse: #f4fbee;
+  --text-on-inverse: #123a14;
 
-  --status-success: #34d399;
-  --status-warning: #fbbf24;
-  --status-danger: #fb7185;
-  --status-info: #60a5fa;
+  --border: rgba(18, 58, 20, 0.14);
+  --border-strong: rgba(18, 58, 20, 0.28);
+
+  /* Accents sampled from the same frame: the pond, the grass, the sun, and
+     the mountain haze. Green is the primary because it is what the eye reads
+     as the page's own colour, and blue carries every interactive affordance so
+     a link never competes with the field behind it. */
+  --accent-violet: #2f7fd4;
+  --accent-magenta: #d94f8a;
+  --accent-cyan: #1f9ec4;
+
+  --status-success: #1f9e4a;
+  --status-warning: #b8860b;
+  --status-danger: #c62f43;
+  --status-info: #2f7fd4;
 
   /* --- shape --- */
   --radius-sm: 8px;
@@ -101,9 +121,14 @@
   --space-gutter: 32px;
   --space-section: 72px;
 
-  /* --- glass --- */
-  --glass-blur: 22px;
-  --glass-blur-strong: 34px;
+  /* --- glass ---
+     Light glass over a moving background cannot be a dark tint any more: a
+     0.6-alpha white sheet is the only thing that keeps text legible while the
+     video scrolls behind it, and it is the reason the blur below is generous.
+     Glass that darkens becomes an opaque grey slab the moment the bright sky
+     passes under it. */
+  --glass-blur: 18px;
+  --glass-blur-strong: 28px;
 
   /* --- motion --- */
   --duration-fast: 150ms;
@@ -114,30 +139,59 @@
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 
   /* --- elevation ---
-     Two shadows, not one. `--shadow-lift` is the contact shadow that says an
-     object is off the page; `--shadow-glow` is the coloured bloom that says
-     it is *live*, and it is deliberately the only place an accent casts
-     light rather than being lit. */
-  --shadow-lift: 0 18px 44px -20px rgba(0, 0, 0, 0.72), 0 1px 0 0 rgba(255, 255, 255, 0.045) inset;
-  --shadow-float: 0 34px 80px -28px rgba(0, 0, 0, 0.85), 0 1px 0 0 rgba(255, 255, 255, 0.07) inset;
-  --shadow-glow: 0 0 0 1px rgba(139, 92, 246, 0.34), 0 16px 44px -14px rgba(139, 92, 246, 0.55);
+     Three shadows. `--shadow-lift` is the contact shadow that says an object
+     is off the page; `--shadow-float` is the deeper one for something that
+     should sit above a panel. On a light ground the shadow has to carry a
+     green-grey cast and a lower alpha than a black shadow, or every surface
+     reads as a grey smudge on paper. `--shadow-glow` is the coloured bloom
+     that says it is *live*, and it is deliberately the only place an accent
+     casts light rather than being lit. */
+  --shadow-lift: 0 10px 26px -14px rgba(15, 48, 20, 0.4), 0 1px 2px 0 rgba(255, 255, 255, 0.6) inset;
+  --shadow-float: 0 22px 48px -20px rgba(15, 48, 20, 0.46), 0 1px 2px 0 rgba(255, 255, 255, 0.7) inset;
+  --shadow-glow: 0 0 0 1px rgba(47, 127, 212, 0.34), 0 12px 30px -12px rgba(47, 127, 212, 0.5);
 
-  /* --- the aurora ---
-     Three coloured pools and one white one, painted as fixed radial
-     gradients behind the canvas and blurred into each other. These are the
-     only saturated values on the page: everything else is a grey with an
-     alpha. Concentrated at the top-left and bottom-right so the pools pull
-     in opposite directions and the middle of the page stays quiet enough to
-     read a table in. */
-  --fx-aurora-violet: rgba(139, 92, 246, 0.34);
-  --fx-aurora-cyan: rgba(56, 189, 248, 0.24);
-  --fx-aurora-magenta: rgba(236, 72, 153, 0.2);
-  --fx-aurora-ink: rgba(255, 255, 255, 0.05);
+  /* --- the backdrop ---
+     These are the fallback for the pages that do NOT play video. The public
+     pages sit on `media/capybara-farm.mp4`; the owner console and the reseller
+     panel have no video behind them, so they get these instead -- and they are
+     the same sky, sampled from the same frame, which is what keeps a signed-in
+     user feeling like they are in the same place as someone who never signed in.
+
+     Daylight washes rather than aurora pools: a bright field needs its depth
+     from atmosphere, so the light comes from the sun in the top right and the
+     shadow gathers bottom left, the way the actual scene is lit. */
+  --fx-aurora-violet: rgba(24, 168, 240, 0.22);
+  --fx-aurora-cyan: rgba(72, 200, 190, 0.18);
+  --fx-aurora-magenta: rgba(216, 216, 48, 0.16);
+  --fx-aurora-ink: rgba(255, 255, 255, 0.34);
 
   /* Decorative washes for the marketing pages. Effects, not surfaces --
      nothing legible ever sits on them. */
-  --fx-grid-dot: rgba(255, 255, 255, 0.8);
-  --fx-shimmer: rgba(255, 255, 255, 0.045);
+  --fx-grid-dot: rgba(18, 58, 20, 0.5);
+  --fx-shimmer: rgba(255, 255, 255, 0.5);
+
+  /* --- over the farm video ---
+     The scrim behind the public pages, in the three layers
+     `FarmVideoBackdrop.css` paints: a band for the navbar, a band for the
+     footer, and an ellipse for the hero. Pale rather than dark, because the
+     ink is now dark green -- a black veil would be visible as a grey smear
+     across the sky rather than as light.
+
+     The centre ellipse is the strongest of the three and the least obvious.
+     The navbar and the footer each hold a strip of text on a predictable
+     strip of footage, so a gradient band aimed at them solves them. The hero
+     does not: it holds the wordmark, the sentence and the button over the
+     middle of the frame, which is where this clip has its highest contrast --
+     a dark treeline at luminance 0.34 with the sunlit meadow at 0.55 directly
+     underneath. Sampling the corners said the sky and the grass were the
+     problem and they were not; the middle was, and the sentence was
+     unreadable against it for a whole loop before this layer existed.
+
+     0.74 rather than the 0.5 that looked right in isolation. This is measured
+     against the worst frame, not the prettiest one. */
+  --farm-scrim-top: rgba(244, 252, 238, 0.82);
+  --farm-scrim-centre: rgba(240, 250, 234, 0.74);
+  --farm-scrim-bottom: rgba(240, 250, 234, 0.72);
 
   /* --- type ---
      There was no type layer at all until this. Every size on the site was a

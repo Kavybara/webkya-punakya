@@ -104,7 +104,7 @@ export default function OrderTrackingPage() {
 
   return (
     
-      <main className="theme-dark min-h-screen bg-[var(--bg-canvas)] px-4 py-6 text-[var(--text-primary)] sm:px-6 sm:py-8">
+      <main className="theme-dark min-h-screen bg-transparent px-4 py-6 text-[var(--text-primary)] sm:px-6 sm:py-8">
         <header className="mx-auto flex max-w-5xl items-center justify-between">
           <Link to="/" className="inline-flex min-h-11 items-center gap-3 rounded-lg font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--accent-violet)]">
             <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface-hover)] font-sans">K</span>
@@ -177,7 +177,7 @@ export default function OrderTrackingPage() {
                 <button
                   type="submit"
                   disabled={!canSubmit || loading}
-                  className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-[var(--text-primary)] px-5 text-sm font-semibold text-[var(--text-on-inverse)] transition-colors hover:bg-[color-mix(in_srgb,var(--text-primary)_58%,white)] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-violet)]"
+                  className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-[var(--text-primary)] px-5 text-sm font-semibold text-[var(--text-inverse)] transition-colors hover:bg-[color-mix(in_srgb,var(--status-success)_84%,black)] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-violet)]"
                 >
                   <Search size={17} /> {loading ? "Memeriksa..." : "Lacak Pesanan"}
                 </button>
@@ -204,7 +204,7 @@ export default function OrderTrackingPage() {
                 </dl>
 
                 <div className="flex flex-col gap-3 border-t border-[var(--border)] pt-5 sm:flex-row">
-                  <button type="button" onClick={() => track()} disabled={loading} className="inline-flex min-h-11 items-center justify-center rounded-lg bg-[var(--text-primary)] px-5 text-sm font-semibold text-[var(--text-on-inverse)] transition-colors hover:bg-[color-mix(in_srgb,var(--text-primary)_58%,white)] disabled:opacity-50">
+                  <button type="button" onClick={() => track()} disabled={loading} className="inline-flex min-h-11 items-center justify-center rounded-lg bg-[var(--text-primary)] px-5 text-sm font-semibold text-[var(--text-inverse)] transition-colors hover:bg-[color-mix(in_srgb,var(--status-success)_84%,black)] disabled:opacity-50">
                     {loading ? "Memperbarui..." : "Perbarui Status"}
                   </button>
                   <Link to="/login" className="inline-flex min-h-11 items-center justify-center rounded-lg border border-[var(--border)] px-5 text-sm font-semibold text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]">

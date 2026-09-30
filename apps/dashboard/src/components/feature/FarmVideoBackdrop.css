@@ -1,0 +1,91 @@
+/*
+ * The farm background.
+ *
+ * This stylesheet is a sibling of `FarmVideoBackdrop.tsx` and the component
+ * imports it, which is the whole point. Vite splits CSS per lazy route chunk
+ * and it splits it by *importer*, not by subject: rules living in a page's
+ * stylesheet only reach the routes that load that page's chunk. The navbar
+ * arrived unstyled on /harga for exactly this reason once already.
+ *
+ * `cover` rather than `contain` because the source is 16:9 and phones are tall.
+ * `cover` fills, cropping the sides; `contain` would letterbox the whole farm
+ * into a band with empty canvas above and below it, which is worse than losing
+ * a fence post.
+ *
+ * The focus position is set to 50% 38% rather than the default centre. The
+ * horizon and the capybaras sit above the midline of the frame, and a centred
+ * crop on a tall phone pushes the animals off the bottom of the screen, leaving
+ * a screen of empty grass. 38% keeps the subject in frame.
+ */
+.farm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--bg-canvas);
+}
+
+.farm-backdrop-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 38%;
+  /* The video is 1600x900 going into a viewport that can be 2000px wide, so it
+     is upscaled on large displays. The footage is pixel art with hard edges,
+     and smoothing it would turn deliberate 2x2 blocks into mush. */
+  image-rendering: pixelated;
+}
+
+/*
+ * The scrim. Three layers, and the middle one is the one that took two
+ * attempts to get right.
+ *
+ * The numbers come from the frame, not from taste. Grass sits at luminance
+ * 0.59 and the sky at 0.56 -- both far too light for --text-primary at 0x123a14
+ * to clear 4.5:1, and the waterfall on the right edge is brighter still. But
+ * measuring only those two was a mistake: the band that actually broke
+ * legibility was the *middle* of the frame, where the treeline sits at
+ * luminance 0.34 with the sunlit meadow at 0.55 directly under the wordmark,
+ * and it is exactly where the sentence and the button are. A scrim that only
+ * covers the navbar and the footer leaves the hero -- the one thing every
+ * visitor reads -- sitting on the busiest, highest-contrast part of a
+ * 12-second loop.
+ *
+ * So the middle gets its own wash: a wide, soft ellipse centred on the
+ * viewport, which is where `.home-hero-centre` puts everything. It is 40% of
+ * a viewport tall and 76% wide, so it darkens the hero without reaching the
+ * left and right thirds -- the capybara pool on the right and the cottage on
+ * the left, which are the parts of the scene worth seeing.
+ *
+ * All three are pale, not black. The ink is dark green now, so a black veil
+ * would read as a grey smear across the sky rather than as light.
+ */
+.farm-backdrop-scrim {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      76% 40% at 50% 52%,
+      var(--farm-scrim-centre) 0%,
+      transparent 72%
+    ),
+    linear-gradient(to bottom, var(--farm-scrim-top) 0%, transparent 26%),
+    linear-gradient(to top, var(--farm-scrim-bottom) 0%, transparent 30%);
+}
+
+/*
+ * The video is behind everything, so a keyboard user tabbing into the page must
+ * not be able to land on it. It is `aria-hidden` and `tabIndex={-1}` already;
+ * this is the belt to that pair of braces, for the case where a stylesheet is
+ * loaded without the component.
+ */
+.farm-backdrop video:focus {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .farm-backdrop-video {
+    display: none;
+  }
+}
