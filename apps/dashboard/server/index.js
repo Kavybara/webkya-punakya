@@ -2709,12 +2709,6 @@ function dateTimeText(date) {
   return `${normalized.getFullYear()}-${pad(normalized.getMonth() + 1)}-${pad(normalized.getDate())} ${pad(normalized.getHours())}:${pad(normalized.getMinutes())}`;
 }
 
-function addDaysText(days, from = new Date()) {
-  const date = toDateTime(from) || new Date();
-  date.setDate(date.getDate() + Number(days || 0));
-  return dateOnlyText(date);
-}
-
 function addAccountDaysText(days, from = new Date(), options = {}) {
   const date = toAccountDateTime(from) || new Date();
   date.setTime(date.getTime() + Number(days || 0) * 86400000);
@@ -2736,16 +2730,6 @@ function durationParts(value = "") {
   return { amount, unit: "" };
 }
 
-function addCalendarMonths(date, months) {
-  const next = new Date(date);
-  const wantedDay = next.getDate();
-  next.setDate(1);
-  next.setMonth(next.getMonth() + Math.max(1, Number(months || 1)));
-  const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
-  next.setDate(Math.min(wantedDay, lastDay));
-  return next;
-}
-
 function accountExpiryFromDurationText(startedAt, durationText = "", durationDayCount = 0) {
   const start = toAccountDateTime(startedAt);
   if (!start) return "";
@@ -2760,20 +2744,6 @@ function accountExpiryFromDurationText(startedAt, durationText = "", durationDay
   }
   if (!expires) return "";
   return hasTimePart(startedAt) || unit ? dateTimeText(expires) : dateOnlyText(expires);
-}
-
-function isCanvaManagedAccount(account = {}) {
-  const text = [
-    account.product,
-    account.productId,
-    account.variant,
-    account.variantCode,
-    account.accountType,
-    account.source,
-  ]
-    .join(" ")
-    .toLowerCase();
-  return text.includes("canva");
 }
 
 function repairManagedAccountExpiry(account = {}) {
@@ -3787,34 +3757,6 @@ function applyManagedAccountOwnershipSnapshot(account = {}, snapshot = {}, optio
   return updated;
 }
 
-function syncOrderResellerMetadata(db) {
-  db.orders = db.orders || [];
-  let updated = 0;
-
-  for (const order of db.orders) {
-    if (!order || typeof order !== "object") continue;
-    const reseller = resellerById(db, order.resellerId) || activeResellerByWhatsapp(db, order.whatsapp);
-    const expectedResellerId = String(reseller?.id || order.resellerId || "").trim();
-    const expectedWhatsapp = normalizeWhatsappNumber(order.whatsapp || primaryResellerWhatsapp(reseller) || "");
-    const expectedReseller = canonicalResellerDisplayName(reseller, order.reseller || order.customer || expectedWhatsapp || "");
-
-    if (expectedResellerId && String(order.resellerId || "").trim() !== expectedResellerId) {
-      order.resellerId = expectedResellerId;
-      updated += 1;
-    }
-    if (expectedWhatsapp && normalizeWhatsappNumber(order.whatsapp || "") !== expectedWhatsapp) {
-      order.whatsapp = expectedWhatsapp;
-      updated += 1;
-    }
-    if (expectedReseller && String(order.reseller || "").trim() !== expectedReseller) {
-      order.reseller = expectedReseller;
-      updated += 1;
-    }
-  }
-
-  return updated;
-}
-
 function syncManagedAccountWhatsappFromOrders(db) {
   db.managedAccounts = db.managedAccounts || [];
   let updated = 0;
@@ -4081,30 +4023,6 @@ function repairManagedAccountOwnership(db, options = {}) {
   };
 }
 
-function householdTargetForEmail(email) {
-  const domain = String(email || "").split("@").pop()?.toLowerCase().trim() || "";
-  if (!domain) return null;
-  if (["wesaveearth.xyz", "vya.baby", "vya.com"].some((item) => domain === item || domain.endsWith(`.${item}`))) {
-    return { label: "www.vya.baby", url: "https://www.vya.baby" };
-  }
-  if (["freenet.de", "gmx.com"].some((item) => domain === item || domain.endsWith(`.${item}`))) {
-    return { label: "storeify.id", url: "https://storeify.id" };
-  }
-  return null;
-}
-
-function householdFormForAccount(account) {
-  return [
-    "Form Household",
-    "",
-    `Email: ${account.email}`,
-    `Profil: ${account.profile || "-"}`,
-    `Tanggal beli: ${account.startedAt || "-"}`,
-    "Jam OTP:",
-    "Screenshot akun terkena household:",
-  ].join("\n");
-}
-
 function safeAccountForAccess(account) {
   return {
     id: account.id,
@@ -4222,29 +4140,6 @@ function syncPasswordByEmail(db, email, password, options = {}) {
   return { stockUpdated, accountUpdated, affectedAccounts };
 }
 
-function resellerByAccount(db, account = {}) {
-  const resellerId = String(account.resellerId || "").trim();
-  if (resellerId) {
-    const reseller = (db.resellers || []).find((item) => item.id === resellerId);
-    if (reseller) return reseller;
-  }
-
-  const whatsapp = normalizeWhatsappNumber(account.whatsapp || "");
-  if (whatsapp) {
-    const reseller = activeResellerByWhatsapp(db, whatsapp);
-    if (reseller) return reseller;
-  }
-
-  const resellerKey = String(account.reseller || account.buyer || "").trim().toLowerCase();
-  if (!resellerKey) return null;
-  return (db.resellers || []).find((reseller) => {
-    if (reseller.isActive === false) return false;
-    return [reseller.name, reseller.username, reseller.email, reseller.id]
-      .filter(Boolean)
-      .some((value) => String(value).trim().toLowerCase() === resellerKey);
-  }) || null;
-}
-
 function strictAccountNotificationReseller(db, account = {}) {
   const resellerId = String(account.resellerId || "").trim();
   if (resellerId) {
@@ -4278,35 +4173,6 @@ function accountCredentialLabel(account = {}) {
   if (text.includes("canva")) return { identity: "Email customer", secret: "Link Canva" };
   if (text.includes("viu") || text.includes("vidio")) return { identity: "Account", secret: "Password" };
   return { identity: "Email akun", secret: /^https?:\/\//i.test(String(account.password || "")) ? "Password/Link" : "Password" };
-}
-
-function buildAccountChangeNotificationText(account = {}, changes = []) {
-  const labels = changes.map((item) => item.label).join(", ") || "Data akun";
-  const credentialLabel = accountCredentialLabel(account);
-  const remaining = remainingAccountDuration(account);
-  const lines = [
-    "IKY - UPDATE DATA AKUN",
-    "",
-    "Data akun kamu diperbarui oleh admin.",
-    `Perubahan: ${labels}`,
-    "",
-    "----------",
-    `Aplikasi : ${[account.product, account.variant].filter(Boolean).join(" - ") || "-"}`,
-    `${credentialLabel.identity} : ${account.email || "-"}`,
-    `${credentialLabel.secret} : ${account.canvaLink || account.password || "-"}`,
-  ];
-  if (account.profile || account.pin) {
-    lines.push(`Profil + PIN : ${[account.profile || "", account.pin ? `PIN ${account.pin}` : ""].filter(Boolean).join(" / ") || "-"}`);
-  }
-  if (account.device) lines.push(`Device : ${account.device}`);
-  lines.push(
-    `Durasi sisa : ${remaining.label || "-"}`,
-    `Status : ${accountStatusFromDate(account.expiresAt, account.durationDays)}`,
-    "----------",
-    "",
-    "Gunakan data terbaru ini untuk login.",
-  );
-  return lines.join("\n");
 }
 
 async function notifyResellerAccountChanged(db, account = {}, changes = [], options = {}) {
@@ -4498,63 +4364,6 @@ function buildDailyStockAssignment(db, stock = {}, body = {}) {
   };
 }
 
-function returnManagedAccountToStock(db, account = {}) {
-  if (!isNetflixManagedAccount(account)) {
-    const error = new Error("Balikin ke stok hanya berlaku untuk akun Netflix");
-    error.status = 400;
-    throw error;
-  }
-  const { product, variant } = resolveAccountProductVariant(db, account);
-  if (!product || !variant) {
-    const error = new Error("Produk atau varian akun tidak ditemukan untuk balik ke stok");
-    error.status = 400;
-    throw error;
-  }
-
-  let stock = account.stockId ? (db.stock || []).find((item) => item.id === account.stockId) : null;
-  if (stock && isGoogleSheetsBackedStock(stock)) {
-    const error = new Error("Stok Google Sheets harus dikembalikan lewat row Sheets, bukan dari web.");
-    error.status = 409;
-    throw error;
-  }
-  if (!stock) {
-    stock = {
-      id: makeId("stk"),
-      productId: product.id,
-      variantId: variant.id,
-      createdAt: todayText(),
-      notes: `Balik dari manajemen akun ${account.id || ""}`.trim(),
-    };
-    db.stock = db.stock || [];
-    db.stock.unshift(stock);
-  }
-
-  Object.assign(stock, {
-    productId: product.id,
-    variantId: variant.id,
-    email: account.email || stock.email || "",
-    password: account.password || stock.password || "",
-    profile: account.profile || "",
-    pin: account.pin || "",
-    signInCode: account.signInCode || "",
-    verificationCode: account.verificationCode || "",
-    resetLink: account.resetLink || "",
-    householdLink: account.householdLink || "",
-    device: "",
-    status: "available",
-    reservedFor: "",
-    reservedAccountId: "",
-    reservedUntil: "",
-    soldAt: "",
-    soldVariant: "",
-    soldVariantId: "",
-    soldDuration: "",
-    soldDurationDays: 0,
-    sheetOrderId: "",
-  });
-  return stock;
-}
-
 function managedAccountPoolKey(db, account = {}) {
   if (account.stockPoolKey) return account.stockPoolKey;
   const { product, variant } = resolveAccountProductVariant(db, account);
@@ -4564,28 +4373,6 @@ function managedAccountPoolKey(db, account = {}) {
 function isExpiredManagedAccountForReturn(account = {}) {
   const status = String(account.status || "").toLowerCase();
   return status === "expired" || accountStatusFromDate(account.expiresAt, account.durationDays) === "expired";
-}
-
-function returnBatchForManagedAccount(db, targetAccount = {}) {
-  if (!isNetflixManagedAccount(targetAccount)) return [];
-  const emailKey = normalizeEmailKey(targetAccount.email);
-  const poolKey = managedAccountPoolKey(db, targetAccount);
-  const seen = new Set();
-  return (db.managedAccounts || []).filter((account) => {
-    if (!account || seen.has(account.id)) return false;
-    if (!isNetflixManagedAccount(account)) return false;
-    const status = String(account.status || "").toLowerCase();
-    if (account.returnedToStockAt || account.hidden || ["replaced", "disabled"].includes(status)) return false;
-    if (account.id === targetAccount.id) {
-      seen.add(account.id);
-      return true;
-    }
-    if (!emailKey || normalizeEmailKey(account.email) !== emailKey) return false;
-    if (!poolKey || managedAccountPoolKey(db, account) !== poolKey) return false;
-    if (!isExpiredManagedAccountForReturn(account)) return false;
-    seen.add(account.id);
-    return true;
-  });
 }
 
 function stockProductVariant(db, stock = {}) {
@@ -4606,32 +4393,6 @@ function remainingAccountDuration(account = {}) {
     expiresAt: hasTimePart(account.expiresAt) ? dateTimeText(expires) : dateOnlyText(expires),
     label: hours < 48 ? `${hours} jam` : `${Math.ceil(hours / 24)} hari`,
   };
-}
-
-function buildWarrantyCompleteText(account = {}, remainingLabel = "") {
-  return [
-    "IKY ✦ WARRANTY COMPLETE ──",
-    "",
-    "Akun garansi telah diproses.",
-    "Jika masih ada kendala, kirim screenshot lalu reply chat ini.",
-    "",
-    "──────────",
-    `⊳ aplikasi : ${account.product || "-"}`,
-    `⊳ email akun : ${account.email || "-"}`,
-    `⊳ password : ${account.password || "-"}`,
-    `⊳ profil + pin : ${[account.profile, account.pin].filter(Boolean).join(" / ") || "-"}`,
-    `⊳ durasi sisa : ${remainingLabel || "-"}`,
-    "──────────",
-    "",
-    "NOTE !",
-    "• Disarankan login melalui aplikasi.",
-    "• Gunakan akun hanya pada 1 device.",
-    "• Jika gagal login, gunakan tips login sebelumnya.",
-    "",
-    "──────────",
-    "IKY ✦ Warranty Service",
-    "Secure • Reliable • Trusted",
-  ].join("\n");
 }
 
 function accountStartedAtMs(account = {}) {
@@ -5385,16 +5146,6 @@ function isNetflixAccountChangeVerification(text = "") {
   return /konfirmasikan\s+perubahan\s+akun|perubahan\s+akun(?:mu)?|mengubah\s+informasi\s+akun|kode\s+ini\s+untuk\s+mengonfirmasi|confirm(?:asikan)?\s+(?:perubahan|change)|change\s+(?:your\s+)?account|account\s+information|10\s*(?:menit|min|mins|minutes?)/i.test(source);
 }
 
-function isNetflixResetPasswordMessage(text = "") {
-  const source = String(text || "");
-  return /selesaikan\s+permintaan(?:mu)?\s+untuk\s+(?:mengatur|atur)\s+ulang\s+(?:kata\s+)?sandi|(?:ayo\s+)?atur\s+ulang\s+(?:kata\s+)?sandi|mengatur\s+ulang\s+(?:kata\s+)?sandi|reset\s+(?:your\s+)?password|password\s+reset|set\s+a\s+new\s+password|forgot\s+(?:your\s+)?password/i.test(source);
-}
-
-function isNetflixSecurityNoticeMessage(text = "") {
-  const source = String(text || "");
-  return /perangkat\s+baru\s+menggunakan\s+akun(?:mu)?|new\s+device\s+(?:is\s+)?using\s+your\s+account/i.test(source);
-}
-
 function isNetflixSigninMessage(text = "") {
   const source = String(text || "");
   return /enter\s+this\s+code\s+to\s+sign\s+in|your\s+sign[-\s]?in\s+code|kode\s+masuk(?:mu)?|masukkan\s+kode\s+(?:di\s+atas\s+)?(?:di\s+)?(?:perangkatmu|perangkat|device)[\s\S]{0,120}(?:masuk|netflix)|untuk\s+masuk\s+ke\s+netflix/i.test(source);
@@ -5403,12 +5154,6 @@ function isNetflixSigninMessage(text = "") {
 function isNetflixAccessVerification(text = "") {
   const source = String(text || "");
   return /verification\s+code\s*[.:]?\s*expires\s+in\s+15|verify\s+with\s+this\s+code|someone\s+is\s+trying\s+to\s+access\s+your\s+account|you(?:'|\u2019)ll\s+have\s+15\s+minutes|verifikasi\s+dengan\s+kode\s+ini|kode\s+verifikasi[\s\S]{0,90}15\s*(?:mnt|menit|min)|kode\s+ini\s+akan\s+(?:kedaluwarsa|kadaluarsa|berakhir)[\s\S]{0,80}15\s*(?:mnt|menit|min)|(?:seseorang|ada\s+yang)\s+(?:mencoba|ingin)\s+(?:mengakses|akses)\s+akun(?:mu| kamu)?/i.test(source);
-}
-
-function isNetflixHouseholdAccessMessage(text = "") {
-  const source = String(text || "");
-  if (isNetflixSigninMessage(source) || isNetflixAccessVerification(source) || isNetflixAccountChangeVerification(source)) return false;
-  return /kode\s+akses\s+sementara(?:mu| netflix-mu)?|temporary\s+access\s+code|akses\s+sementara\s+untuk\s+menonton\s+netflix|temporary\s+access\s+outside\s+your\s+netflix\s+household|outside\s+your\s+netflix\s+household|kode\s+ini\s+digunakan\s+saat\s+kamu\s+bepergian|kode\s+akses\s+sementara\s+dari\s+perangkat|we\s+received\s+a\s+request\s+for\s+a\s+temporary\s+access\s+code|kami\s+menerima\s+permintaan\s+kode\s+akses\s+sementara/i.test(source);
 }
 
 async function extractAccessValue(type, message, account = {}) {
