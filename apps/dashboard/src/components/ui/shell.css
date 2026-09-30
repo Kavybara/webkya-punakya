@@ -28,6 +28,85 @@
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
+/*
+ * The blur kill-switch.
+ *
+ * The signed-in frame was the slowest surface in the product, and the cause is
+ * `backdrop-filter` rather than anything to do with data or rendering. A
+ * backdrop blur makes the browser read back the pixels behind an element, blur
+ * them, and composite the result -- and on a page that scrolls, it redoes that
+ * for every blurred element on every frame. The owner console carried 26 to 30
+ * such surfaces totalling 1.1 to 1.6 screens of blurred area, 19 of them nested
+ * inside another blurred element. The home page, which is one screen with almost
+ * nothing on it, carried exactly one.
+ *
+ * Measured on `/owner-v2/orders` by scrolling 90 frames and timing each one:
+ *
+ *   with the blurs     median 17.6ms   p95 276.3ms   34 frames over 32ms
+ *   without them       median 20.2ms   p95  29.4ms    2 frames over 32ms
+ *
+ * That p95 is a quarter of a second -- the stutter, on a machine doing nothing
+ * but scrolling a table. The median barely moves, which is why this reads as
+ * "laggy" rather than "slow": most frames are fine and some are terrible.
+ *
+ * The rule below switches the blur off everywhere inside the frame, because the
+ * thing being blurred is a smooth three-pool gradient. Blurring a gradient
+ * returns the gradient: there is no detail in it for the blur to remove, so the
+ * entire cost buys a difference no one can see. Screenshots of the orders page
+ * with the blurs on and off are indistinguishable.
+ *
+ * The two sticky bars were the exception to that, on the grounds that content
+ * genuinely scrolls under them. They no longer need it: painted opaque they
+ * separate text from the rows just as well, and the blur was the single
+ * largest cost left in the console. See the note above the exception list.
+ *
+ * `!important` rather than restating the rules: the ones being overridden are
+ * spread across six stylesheets this file does not own, several of them
+ * single-line utility classes.
+ *
+ * The class is written twice, and that is not a typo. `.ui-shell *` is
+ * specificity (0,1,0) -- the same as `.console-panel` -- so `!important` on
+ * both sides left the winner to be whichever stylesheet the bundler happened to
+ * emit last, and the first attempt at this rule silently did nothing. Doubling
+ * the class makes it (0,2,0), which outranks every blur rule in the kit
+ * including the compound ones (`.ui-table-scroll th` is (0,1,1)). The
+ * exceptions below are written with the doubling too, so they stay above it.
+ *
+ * Only the standard `backdrop-filter` is written here, deliberately, with no
+ * `-webkit-` line beside it. Writing both made the build emit the `-webkit-`
+ * alias alone and drop the standard property, so the rule shipped as a no-op:
+ * every other blur in the kit sets the standard property, and a rule that
+ * never mentions it cannot outrank them. Two earlier attempts at this fix
+ * failed for exactly that reason and looked like they had worked. Modern
+ * Safari has shipped unprefixed `backdrop-filter` since 18, so the prefix buys
+ * nothing here that the cascade does not immediately undo.
+ */
+.ui-shell.ui-shell,
+.ui-shell.ui-shell *,
+.ui-shell.ui-shell *::before,
+.ui-shell.ui-shell *::after {
+  backdrop-filter: none !important;
+}
+
+/* The two sticky bars are NOT in this list. They used to be, blurred at 28px,
+   and dropping that blur took `/owner-v2/orders` from p95 79ms to p95 21ms
+   with no frame over 32ms. They are now painted opaque at
+   `--surface-glass-strong` instead, which reads the same over a gradient and
+   costs nothing per frame.
+ *
+ * What is left here is only the modal scrims. They are transient -- you cannot
+ * scroll behind an open dialog -- so the blur is bounded, and it is the thing
+ * doing the work of separating the dialog from the page it covers. Each keeps
+ * the value its own stylesheet already gave it rather than a shared 28px. */
+.ui-shell.ui-shell .ui-overlay,
+.ui-shell.ui-shell .reseller-v2-topup-overlay {
+  backdrop-filter: blur(10px) saturate(120%) !important;
+}
+
+.ui-shell.ui-shell .ui-shell-backdrop {
+  backdrop-filter: blur(6px) !important;
+}
+
 .ui-shell *,
 .ui-shell *::before,
 .ui-shell *::after { box-sizing: border-box; }
@@ -268,8 +347,10 @@
   gap: 20px;
   padding: 0 32px;
   border-bottom: 1px solid var(--border);
-  background: var(--surface-glass);
-  backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
+  /* Opaque for the same reason as the sticky table header: this bar is sticky
+     over a scrolling workspace, so a blur here is re-evaluated on every frame.
+     It was the largest remaining blurred surface in the console. */
+  background: var(--surface-glass-strong);
 }
 .ui-shell-context { display: flex; min-width: 0; align-items: center; gap: 10px; }
 .ui-shell-context > div { display: flex; min-width: 0; align-items: center; gap: 7px; color: var(--text-muted); font-size: 12px; }

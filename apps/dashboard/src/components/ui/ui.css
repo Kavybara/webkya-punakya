@@ -967,7 +967,11 @@
 .ui-selection-bar button:disabled { cursor: wait; opacity: 0.55; }
 .ui-table-scroll { width: 100%; overflow-x: auto; scrollbar-width: thin; }
 .ui-table-scroll table { width: 100%; min-width: 940px; border-collapse: collapse; white-space: nowrap; }
-.ui-table-scroll th { position: sticky; top: 0; z-index: 2; height: 44px; padding: 0 14px; border-bottom: 1px solid var(--border); background: var(--surface-glass); backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%); color: var(--text-muted); font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-align: left; text-transform: uppercase; }
+/* Opaque, not glassed. This bar is sticky and rows slide under it on every
+   scrolled frame, so a backdrop-filter here is re-blurred constantly -- and it
+   was the last measurable stutter left in the console. At 86% over a smooth
+   gradient the bar reads as solid either way; see shell.css for the numbers. */
+.ui-table-scroll th { position: sticky; top: 0; z-index: 2; height: 44px; padding: 0 14px; border-bottom: 1px solid var(--border); background: var(--surface-glass-strong); color: var(--text-muted); font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-align: left; text-transform: uppercase; }
 .ui-table-scroll th button { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; text-transform: inherit; }
 .ui-table-scroll th button:disabled { cursor: default; }
 .ui-table-scroll td { height: 60px; padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text-secondary); font-size: 11px; vertical-align: middle; }
