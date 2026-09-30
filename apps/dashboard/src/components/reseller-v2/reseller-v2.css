@@ -12,7 +12,7 @@
  * Three changes, all in service of one idea -- the reader should be able to
  * tell what is a *region* from what is a *control*:
  *
- *   1. Panels are glass. `.reseller-v2-panel` and `.reseller-v2-metric` are
+ *   1. Panels are glass. `.reseller-v2-panel` and `.reseller-v2-cell` are
  *      translucent sheets over the aurora, separated by what is behind them
  *      rather than by a line. Line spacing is at 18px where it was 12, and
  *      the metric tiles are 20px inside rather than 16, because once the
@@ -102,13 +102,100 @@
   white-space: nowrap;
 }
 .reseller-v2-panel header > span,
-.reseller-v2-panel header div > span {
+.reseller-v2-panel header div > span,
+.reseller-v2-cell header > span,
+.reseller-v2-cell header div > span {
   margin: 0 0 7px;
   color: var(--accent-violet);
   font-size: 9px;
   font-weight: 750;
   letter-spacing: 0.16em;
   text-transform: uppercase;
+}
+
+/* A bento cell, on this screen.
+
+   The box is the kit's -- border, radius, glass, shadow -- so this rule only
+   supplies what the cell has to do *inside* itself: a fixed header at the top
+   and a body that takes the rest and scrolls if it has to. It is a separate
+   class from `.reseller-v2-panel` rather than a rename of it, because the
+   panel class is still the right one on the eleven other reseller screens and
+   those should not have to learn about bento cells. */
+.reseller-v2-cell {
+  padding-bottom: 0;
+}
+
+.reseller-v2-cell > header {
+  display: flex;
+  min-height: 62px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.reseller-v2-cell > header span {
+  display: block;
+}
+
+.reseller-v2-cell > header h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.reseller-v2-cell > header a {
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color var(--duration-normal) var(--ease-out-expo);
+}
+
+.reseller-v2-cell > header a:hover {
+  color: var(--text-primary);
+}
+
+.reseller-v2-cell > .reseller-v2-compact-list,
+.reseller-v2-cell > .reseller-v2-order-list,
+.reseller-v2-cell > .ui-empty {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+
+/* The link under the quick-action tiles. Drawn as a quiet full-width row
+   rather than a fifth tile: the tiles are 2x2 and a fifth would leave a hole,
+   and guides is somewhere to read rather than something to do. */
+.reseller-v2-action-more {
+  display: flex;
+  min-height: 44px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 9px;
+  margin-top: auto;
+  padding: 0 20px;
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+  text-decoration: none;
+  transition: color var(--duration-normal) var(--ease-out-expo), background var(--duration-normal) var(--ease-out-expo);
+}
+
+.reseller-v2-action-more svg:last-child {
+  margin-left: auto;
+  transition: transform var(--duration-normal) var(--ease-out-expo);
+}
+
+.reseller-v2-action-more:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.reseller-v2-action-more:hover svg:last-child {
+  transform: translateX(3px);
 }
 .reseller-v2-greeting {
   margin-bottom: 24px;
@@ -122,55 +209,10 @@
   color: var(--text-muted);
   font-size: 11px;
 }
-.reseller-v2-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
+.reseller-v2-bento {
+  margin-top: 20px;
 }
-.reseller-v2-metric {
-  display: block;
-  min-width: 0;
-  min-height: 134px;
-  padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface-glass);
-  backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
-  box-shadow: var(--shadow-lift);
-  color: inherit;
-  text-align: left;
-  transition: transform var(--duration-normal) var(--ease-out-expo), border-color var(--duration-normal) var(--ease-out-expo), background var(--duration-normal) var(--ease-out-expo), box-shadow var(--duration-normal) var(--ease-out-expo);
-}
-/* Only the tiles you can click move. The rest get a still frame, so a hover
-   across the row tells the reader which four numbers are links. */
-.reseller-v2-metric.is-interactive {
-  cursor: pointer;
-}
-.reseller-v2-metric.is-interactive:hover {
-  transform: translateY(-3px);
-  border-color: var(--border-strong);
-  background: var(--surface-hover);
-  box-shadow: var(--shadow-float);
-}
-.reseller-v2-metric.is-interactive:active { transform: translateY(-1px); }
-.reseller-v2-metric > strong {
-  display: block;
-  margin-top: 18px;
-  font-size: 24px;
-  line-height: 1;
-}
-.reseller-v2-metric > small {
-  display: block;
-  margin-top: 10px;
-  color: var(--text-muted);
-  font-size: 10px;
-}
-.reseller-v2-overview-grid {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 18px;
-  margin-top: 18px;
-}
+
 .reseller-v2-panel {
   min-width: 0;
   overflow: hidden;
@@ -815,10 +857,7 @@ a) {
   font-size: 11px;
   font-weight: 650;
 }
-.reseller-v2-quick-panel {
-  grid-column: span 5;
-  padding: 20px;
-}.reseller-v2-panel header {
+.reseller-v2-panel header {
   display: flex;
   min-height: 68px;
   align-items: center;
@@ -837,20 +876,21 @@ a) {
   font-size: 10px;
   text-decoration: none;
 }
-.reseller-v2-action-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 16px;
+/* Inside a bento cell the rows are in a four-wide column rather than a
+   half-width panel, so they are one per row. Two across at that width puts a
+   38px mark and two lines of text into 180px, which is where the labels start
+   wrapping mid-word.
+
+   The gap is zero because the bare rows carry their own hairline between
+   them: four separated cards inside one glass cell is the box-inside-a-box
+   problem again, and hairlines are how the other two lists in this grid are
+   divided. */
+.reseller-v2-cell .reseller-v2-action-grid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  padding: 6px 10px 10px;
 }
-.reseller-v2-active-orders {
-  grid-column: span 7;
-  min-height: 260px;
-}
-.reseller-v2-expiry-panel {
-  grid-column: span 5;
-  min-height: 260px;
-}
+
 .reseller-v2-compact-list {
   display: grid;
 }
@@ -883,9 +923,6 @@ a) {
   margin-top: 4px;
   color: var(--text-muted);
   font-size: 9px;
-}
-.reseller-v2-recent {
-  margin-top: 18px;
 }
 .reseller-v2-order-head,
 .reseller-v2-order-row {
@@ -948,8 +985,7 @@ a) {
  * ------------------------------------------------------------------ */
 @supports (animation-timeline: view()) {
   @media (prefers-reduced-motion: no-preference) {
-    .reseller-v2-overview-grid > *,
-    .reseller-v2-summary-grid > *,
+    .reseller-v2-bento > *,
     .reseller-guide-layout > * {
       animation: ui-reveal linear both;
       animation-timeline: view();
@@ -962,20 +998,9 @@ a) {
   .reseller-v2-top-balance {
     display: none;
   }
-  .reseller-v2-summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 @media (max-width: 900px) {
-  .reseller-v2-overview-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .reseller-v2-quick-panel,
-  .reseller-v2-active-orders,
-  .reseller-v2-expiry-panel {
-    grid-column: auto;
-  }
-  .reseller-v2-recent {
+  .reseller-v2-cell {
     overflow-x: auto;
   }
   .reseller-v2-order-list {
@@ -989,19 +1014,10 @@ a) {
   .reseller-v2-greeting {
     margin-top: -5px;
   }
-  .reseller-v2-summary-grid,
-  .reseller-v2-overview-grid {
-    grid-template-columns: 1fr;
-    gap: 12px;
+  .reseller-v2-bento {
+    margin-top: 14px;
   }
-  .reseller-v2-metric {
-    min-height: 124px;
-  }
-  .reseller-v2-active-orders,
-  .reseller-v2-expiry-panel {
-    min-height: 240px;
-  }
-  .reseller-v2-recent {
+  .reseller-v2-cell {
     overflow: visible;
   }
   .reseller-v2-order-head {

@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Link } from "react-router-dom";
-import { Badge, DetailRow, Drawer, ErrorState, LoadingState, MetricRow, Toast } from "../../components/ui";
+import { Badge, Bento, BentoCell, BentoStat, DetailRow, Drawer, ErrorState, LoadingState, Toast } from "../../components/ui";
 import { DataTable, type DataColumn, type DataFilter } from "../../components/ui/DataTable";
 import { ConsoleShell } from "../../components/console/ConsoleShell";
 import { api, type ApiOrder, type ApiReseller, type ApiStockItem, type OperationsCenterResult, type SystemStatus } from "../../lib/api";
@@ -200,20 +200,67 @@ export default function OwnerConsoleOverviewPage() {
       systemState={loading ? "loading" : errors.operations || errors.system ? "unknown" : attentionCount ? "warning" : "healthy"}
       onRefresh={() => loadData(true)}
     >
-      <MetricRow
-        label="Indikator utama"
-        items={[
-          { label: "Pendapatan hari ini", value: formatRupiah(metrics.revenueToday), hint: "Order paid non-smoke-test hari ini", icon: <WalletCards size={17} />, loading, error: errors.orders },
-          { label: "Pesanan hari ini", value: metrics.ordersToday, hint: "Pesanan live pada hari berjalan", icon: <ShoppingCart size={17} />, loading, error: errors.orders },
-          { label: "Stok siap", value: metrics.ready, hint: `${metrics.reserved} reserved / ${metrics.sold} sold`, icon: <PackageCheck size={17} />, loading, error: errors.stock },
-          { label: "Reseller aktif", value: metrics.activeResellers, hint: `${data.resellers.length} reseller terdaftar`, icon: <Users size={17} />, loading, error: errors.resellers },
-        ]}
-      />
+      {/* One grid.
 
-      <section className="console-operational-grid">
-        <article className="console-panel console-revenue-panel">
+          This was a metric row, then a 2x2 panel grid, then a full-width
+          table -- three sections with three different column systems, stacked.
+
+          The change that matters is not that the panels are now in a grid; it
+          is that the four KPIs are *in* the grid. They were a strip above
+          everything, which is the one place on the page where a number cannot
+          be related to anything -- four tiles the same size, the same weight,
+          the same distance from the thing they describe. As row one of the
+          field they are the ticker: today's revenue, today's orders, stock on
+          hand, resellers live, at a glance before anything else. And because
+          the revenue figure is one of them, the chart that plots it no longer
+          has to repeat the number in its own header to be connected to it.
+
+          The chart and the attention queue take two rows together -- eight and
+          four -- because they are the two panels an owner actually opens the
+          console to read, and they are opposites: one is the trend, the other
+          is the list of things that are wrong. */}
+      <Bento className="console-bento" rows={7} rowHeight="132px" label="Ringkasan operasional">
+        <BentoStat
+          span={{ col: 3 }}
+          label="Pendapatan hari ini"
+          value={formatRupiah(metrics.revenueToday)}
+          hint="Order paid hari ini"
+          icon={<WalletCards size={17} />}
+          tone="success"
+          loading={loading}
+          error={errors.orders}
+        />
+        <BentoStat
+          span={{ col: 3 }}
+          label="Pesanan hari ini"
+          value={metrics.ordersToday}
+          hint="Pesanan live hari ini"
+          icon={<ShoppingCart size={17} />}
+          loading={loading}
+          error={errors.orders}
+        />
+        <BentoStat
+          span={{ col: 3 }}
+          label="Stok siap"
+          value={metrics.ready}
+          hint={`${metrics.reserved} reserved / ${metrics.sold} sold`}
+          icon={<PackageCheck size={17} />}
+          loading={loading}
+          error={errors.stock}
+        />
+        <BentoStat
+          span={{ col: 3 }}
+          label="Reseller aktif"
+          value={metrics.activeResellers}
+          hint={`${data.resellers.length} terdaftar`}
+          icon={<Users size={17} />}
+          loading={loading}
+          error={errors.resellers}
+        />
+
+        <BentoCell span={{ col: 8, row: 2 }} emphasis as="section" className="console-cell" aria-labelledby="owner-revenue-title">
           <div className="console-panel-header">
-            <div><span>Pendapatan & pesanan</span><h2>7 hari terakhir</h2></div>
+            <div><span>Pendapatan &amp; pesanan</span><h2 id="owner-revenue-title">7 hari terakhir</h2></div>
             <strong>{formatRupiah(revenueSeries.reduce((sum, item) => sum + item.revenue, 0))}</strong>
           </div>
           {loading ? <LoadingState label="Memuat grafik pendapatan" /> : errors.orders ? <ErrorState message={errors.orders} onRetry={() => void loadData(true)} /> : (
@@ -235,35 +282,10 @@ export default function OwnerConsoleOverviewPage() {
             <span><strong>{revenueSeries.reduce((sum, item) => sum + item.orders, 0)}</strong> pesanan paid</span>
             <span><strong>{liveOrders.filter((order) => order.qrisStatus === "pending").length}</strong> menunggu pembayaran</span>
           </div>
-        </article>
+        </BentoCell>
 
-        <article className="console-panel console-system-panel">
-          <div className="console-panel-header"><div><span>Kondisi layanan</span><h2>Status sistem</h2></div><Server size={19} /></div>
-          {loading ? <LoadingState label="Memuat status sistem" /> : errors.system ? <ErrorState message={errors.system} onRetry={() => void loadData(true)} /> : system ? (
-            <div className="console-system-list">
-              <SystemRow icon={Wifi} label="WhatsApp" detail={system.whatsapp.state || "Status koneksi"} ok={system.whatsapp.connected} />
-              <SystemRow icon={Sheet} label="Google Sheets" detail={lastSync ? `Sync ${formatDateTime(lastSync)}` : "Belum ada waktu sync"} ok={Boolean(sheets?.configured && lastSync)} warning={Boolean(sheets?.configured)} />
-              <SystemRow icon={Server} label="VPS" detail={`${system.server.platform} / uptime ${Math.floor(system.server.uptime / 3600)} jam`} ok={system.ok} />
-              <SystemRow icon={Cloud} label="Tunnel" detail={system.tunnel.publicDomain || "Domain belum terpasang"} ok={system.tunnel.running} warning={system.tunnel.configured} />
-            </div>
-          ) : <ErrorState message="Status sistem belum tersedia." onRetry={() => void loadData(true)} />}
-          <Link to="/owner-v2/integrations" className="console-panel-link">Buka status integrasi <ExternalLink size={14} /></Link>
-        </article>
-
-        <article className="console-panel console-stock-panel">
-          <div className="console-panel-header"><div><span>Ketersediaan</span><h2>Status stok</h2></div><Boxes size={19} /></div>
-          {loading ? <LoadingState label="Memuat status stok" /> : errors.stock ? <ErrorState message={errors.stock} onRetry={() => void loadData(true)} /> : (
-            <div className="console-stock-stats">
-              <div><span>Ready</span><strong>{metrics.ready}</strong><i style={{ width: `${Math.min(100, metrics.ready ? 100 : 0)}%` }} /></div>
-              <div><span>Reserved</span><strong>{metrics.reserved}</strong><i style={{ width: `${Math.min(100, metrics.ready + metrics.reserved ? metrics.reserved / (metrics.ready + metrics.reserved) * 100 : 0)}%` }} /></div>
-              <div><span>Sold</span><strong>{metrics.sold}</strong><i style={{ width: `${Math.min(100, data.stock.length ? metrics.sold / data.stock.length * 100 : 0)}%` }} /></div>
-            </div>
-          )}
-          <Link to="/owner-v2/stock" className="console-panel-link">Kelola stok akun <ExternalLink size={14} /></Link>
-        </article>
-
-        <article className="console-panel console-attention-panel">
-          <div className="console-panel-header"><div><span>Prioritas operasional</span><h2>Attention queue</h2></div><AlertTriangle size={19} /></div>
+        <BentoCell span={{ col: 4, row: 2 }} as="section" className="console-cell" aria-labelledby="owner-attention-title">
+          <div className="console-panel-header"><div><span>Prioritas operasional</span><h2 id="owner-attention-title">Attention queue</h2></div><AlertTriangle size={19} /></div>
           {loading ? <LoadingState label="Memuat antrean prioritas" /> : (
             <div className="console-attention-list">
               {attention.map((item) => (
@@ -275,25 +297,50 @@ export default function OwnerConsoleOverviewPage() {
               ))}
             </div>
           )}
-        </article>
-      </section>
+        </BentoCell>
 
-      <section className="console-panel console-orders-panel" aria-labelledby="recent-orders-title">
-        <div className="console-panel-header console-orders-heading">
-          <div><span>Aktivitas penjualan</span><h2 id="recent-orders-title">Pesanan terbaru</h2></div>
-          <Link to="/owner-v2/orders">Lihat semua pesanan <ArrowUpRight size={15} /></Link>
-        </div>
-        <DataTable
-          rows={recentOrders}
-          columns={orderColumns}
-          filters={orderFilters}
-          rowKey={(order) => order.id}
-          loading={loading}
-          error={errors.orders}
-          emptyText="Belum ada pesanan live."
-          initialPageSize={5}
-        />
-      </section>
+        <BentoCell span={{ col: 6 }} as="section" className="console-cell" aria-labelledby="owner-system-title">
+          <div className="console-panel-header"><div><span>Kondisi layanan</span><h2 id="owner-system-title">Status sistem</h2></div><Server size={19} /></div>
+          {loading ? <LoadingState label="Memuat status sistem" /> : errors.system ? <ErrorState message={errors.system} onRetry={() => void loadData(true)} /> : system ? (
+            <div className="console-system-list">
+              <SystemRow icon={Wifi} label="WhatsApp" detail={system.whatsapp.state || "Status koneksi"} ok={system.whatsapp.connected} />
+              <SystemRow icon={Sheet} label="Google Sheets" detail={lastSync ? `Sync ${formatDateTime(lastSync)}` : "Belum ada waktu sync"} ok={Boolean(sheets?.configured && lastSync)} warning={Boolean(sheets?.configured)} />
+              <SystemRow icon={Server} label="VPS" detail={`${system.server.platform} / uptime ${Math.floor(system.server.uptime / 3600)} jam`} ok={system.ok} />
+              <SystemRow icon={Cloud} label="Tunnel" detail={system.tunnel.publicDomain || "Domain belum terpasang"} ok={system.tunnel.running} warning={system.tunnel.configured} />
+            </div>
+          ) : <ErrorState message="Status sistem belum tersedia." onRetry={() => void loadData(true)} />}
+          <Link to="/owner-v2/integrations" className="console-panel-link">Buka status integrasi <ExternalLink size={14} /></Link>
+        </BentoCell>
+
+        <BentoCell span={{ col: 6 }} as="section" className="console-cell" aria-labelledby="owner-stock-title">
+          <div className="console-panel-header"><div><span>Ketersediaan</span><h2 id="owner-stock-title">Status stok</h2></div><Boxes size={19} /></div>
+          {loading ? <LoadingState label="Memuat status stok" /> : errors.stock ? <ErrorState message={errors.stock} onRetry={() => void loadData(true)} /> : (
+            <div className="console-stock-stats">
+              <div><span>Ready</span><strong>{metrics.ready}</strong><i style={{ width: `${Math.min(100, metrics.ready ? 100 : 0)}%` }} /></div>
+              <div><span>Reserved</span><strong>{metrics.reserved}</strong><i style={{ width: `${Math.min(100, metrics.ready + metrics.reserved ? metrics.reserved / (metrics.ready + metrics.reserved) * 100 : 0)}%` }} /></div>
+              <div><span>Sold</span><strong>{metrics.sold}</strong><i style={{ width: `${Math.min(100, data.stock.length ? metrics.sold / data.stock.length * 100 : 0)}%` }} /></div>
+            </div>
+          )}
+          <Link to="/owner-v2/stock" className="console-panel-link">Kelola stok akun <ExternalLink size={14} /></Link>
+        </BentoCell>
+
+        <BentoCell span={{ col: 12, row: 3 }} as="section" className="console-cell" aria-labelledby="recent-orders-title">
+          <div className="console-panel-header console-orders-heading">
+            <div><span>Aktivitas penjualan</span><h2 id="recent-orders-title">Pesanan terbaru</h2></div>
+            <Link to="/owner-v2/orders">Lihat semua pesanan <ArrowUpRight size={15} /></Link>
+          </div>
+          <DataTable
+            rows={recentOrders}
+            columns={orderColumns}
+            filters={orderFilters}
+            rowKey={(order) => order.id}
+            loading={loading}
+            error={errors.orders}
+            emptyText="Belum ada pesanan live."
+            initialPageSize={5}
+          />
+        </BentoCell>
+      </Bento>
 
       <Drawer
         open={Boolean(selectedOrder)}

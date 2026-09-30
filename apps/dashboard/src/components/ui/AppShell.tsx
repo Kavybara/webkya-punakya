@@ -15,6 +15,7 @@ import { Link, NavLink, useNavigate } from "react-router-dom";
 import { api } from "../../lib/api";
 import { clearSession, readSession } from "../../lib/session";
 import { Button } from "./Button";
+import { ShellNav } from "./ShellNav";
 
 const COLLAPSE_KEY = "kavya-shell-collapsed";
 
@@ -78,10 +79,6 @@ export function useDismiss(open: boolean, onClose: () => void) {
     };
   }, [onClose, open]);
   return ref;
-}
-
-function navClass(isActive: boolean) {
-  return `ui-shell-nav-link${isActive ? " is-active" : ""}`;
 }
 
 /**
@@ -220,7 +217,19 @@ export function AppShell({
 
   if (!allowed) return null;
 
-  const nav = (
+  /* The rail, as four regions rather than one list of children.
+
+     It was a fragment with a conditional in it, and the conditional was the
+     problem: the settings link and the sign-out lived in a footer that was
+     separated from the navigation only by a border, so a reader had no way to
+     know the settings were part of the same place they could reach and the
+     sign-out was somewhere else entirely. Signing out was reachable from
+     exactly one control -- a popover in the top bar, which is the first thing
+     a phone layout drops.
+
+     The two are now peers in the rail's own last region, and signing out does
+     not require finding a menu. */
+  const rail = (
     <>
       <div className="ui-shell-brand-row">
         <Link to={homePath} className="ui-shell-brand" aria-label={homeLabel}>
@@ -244,51 +253,46 @@ export function AppShell({
           <X size={18} />
         </button>
       </div>
+
+      {/* The reseller's balance sits here, between the brand and the
+          navigation, so the number is above the list of things that spend it. */}
       {sidebarTop}
-      <nav className="ui-shell-nav" aria-label={`Navigasi ${product}`}>
-        {navigation.map((group) => (
-          <div key={group.label} className="ui-shell-nav-group">
-            {!collapsed ? <p>{group.label}</p> : <span className="ui-shell-nav-divider" />}
-            {group.items.map((item) => {
-              const Icon = item.icon;
-              return (
-                <NavLink
-                  key={item.path}
-                  to={item.path}
-                  end={item.end}
-                  title={collapsed ? item.label : undefined}
-                  onClick={() => setDrawerOpen(false)}
-                  className={({ isActive }) => navClass(isActive)}
-                >
-                  <Icon size={18} aria-hidden="true" />
-                  {!collapsed ? <span>{item.label}</span> : null}
-                  {item.badge ? (
-                    <b className="ui-shell-nav-badge" aria-label={`${item.badge} baru`}>
-                      {item.badge}
-                    </b>
-                  ) : null}
-                </NavLink>
-              );
-            })}
-          </div>
-        ))}
-      </nav>
-      <div className="ui-shell-sidebar-footer">
-        <Link
+
+      <ShellNav
+        groups={navigation}
+        collapsed={collapsed}
+        label={`Navigasi ${product}`}
+        onNavigate={() => setDrawerOpen(false)}
+      />
+
+      <div className="ui-shell-rail-foot">
+        <NavLink
           to={settings.path}
-          className="ui-shell-nav-link"
+          className="ui-shell-nav-item is-static"
           title={collapsed ? settings.label : undefined}
+          onClick={() => setDrawerOpen(false)}
         >
+          <i className="ui-shell-nav-rail" aria-hidden="true" />
           <Settings size={18} aria-hidden="true" />
           {!collapsed ? <span>{settings.label}</span> : null}
-        </Link>
+        </NavLink>
+        <button
+          type="button"
+          className="ui-shell-nav-item is-static ui-shell-signout"
+          onClick={signOut}
+          title={collapsed ? "Keluar" : undefined}
+        >
+          <i className="ui-shell-nav-rail" aria-hidden="true" />
+          <LogOut size={18} aria-hidden="true" />
+          {!collapsed ? <span>Keluar</span> : null}
+        </button>
       </div>
     </>
   );
 
   return (
     <div className={`ui-shell${collapsed ? " is-collapsed" : ""}`}>
-      <aside className="ui-shell-sidebar is-desktop">{nav}</aside>
+      <aside className="ui-shell-sidebar is-desktop">{rail}</aside>
       {drawerOpen ? (
         <div
           className="ui-shell-backdrop"
@@ -298,7 +302,7 @@ export function AppShell({
           }}
         >
           <aside className="ui-shell-sidebar is-drawer" aria-label={`Menu ${product}`}>
-            {nav}
+            {rail}
           </aside>
         </div>
       ) : null}
@@ -344,14 +348,35 @@ export function AppShell({
                 <span aria-hidden="true">{displayName.slice(0, 1).toUpperCase()}</span>
                 <strong>{displayName}</strong>
               </button>
+              {/* An account menu, not a two-item list.
+
+                  It used to open straight onto "settings" and "sign out", both
+                  of which are now also in the rail, which made it a menu that
+                  duplicated the rail and told you nothing. It opens onto who
+                  you are signed in as and what you can do, so opening it is
+                  worth the click. Signing out stays here as well as in the
+                  rail: it is the one action in the product where two doors is
+                  the right answer, and on a phone the rail is behind a
+                  hamburger while this is one tap away. */}
               {profileOpen ? (
-                <div className="ui-shell-profile-menu" role="menu">
-                  <Link to={settings.path} onClick={() => setProfileOpen(false)} role="menuitem">
-                    <Settings size={16} aria-hidden="true" /> {settings.label}
-                  </Link>
-                  <button type="button" role="menuitem" onClick={signOut}>
-                    <LogOut size={16} aria-hidden="true" /> Keluar
-                  </button>
+                <div className="ui-shell-profile-menu">
+                  <div className="ui-shell-profile-head">
+                    <span aria-hidden="true">{displayName.slice(0, 1).toUpperCase()}</span>
+                    <div>
+                      <strong>{displayName}</strong>
+                      <small>
+                        {session?.user?.username ? `@${session.user.username}` : role === "owner" ? "Owner" : "Reseller"}
+                      </small>
+                    </div>
+                  </div>
+                  <div role="menu">
+                    <Link to={settings.path} onClick={() => setProfileOpen(false)} role="menuitem">
+                      <Settings size={16} aria-hidden="true" /> {settings.label}
+                    </Link>
+                    <button type="button" role="menuitem" onClick={signOut}>
+                      <LogOut size={16} aria-hidden="true" /> Keluar
+                    </button>
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -359,13 +384,23 @@ export function AppShell({
         </header>
 
         <main className="ui-shell-main">
+          {/* The page header is a region of the frame, not a div a page
+              happens to start with, so it lives here and every page inherits
+              the same rhythm. The eyebrow, the title and the sentence under
+              it are one block that is allowed to wrap as a block; the refresh
+              control is the other half of the row and is pinned to the end of
+              it, so a long product name pushes the description down and never
+              shoves a button off the edge. */}
           <header className="ui-shell-page-header">
-            <div>
-              <p>{product}</p>
+            <div className="ui-shell-page-title">
+              <p className="ui-shell-page-eyebrow">
+                <i aria-hidden="true" />
+                {product}
+              </p>
               <h1>{title}</h1>
-              <span>{description}</span>
+              <span className="ui-shell-page-description">{description}</span>
             </div>
-            {(lastUpdated || onRefresh) && (
+            {lastUpdated || onRefresh ? (
               <div className="ui-shell-page-actions">
                 {lastUpdated ? <small>Diperbarui {lastUpdated}</small> : null}
                 {onRefresh ? (
@@ -379,7 +414,7 @@ export function AppShell({
                   </Button>
                 ) : null}
               </div>
-            )}
+            ) : null}
           </header>
           {children}
         </main>

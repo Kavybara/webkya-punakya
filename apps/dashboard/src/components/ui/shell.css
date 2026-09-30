@@ -134,7 +134,7 @@
   scrollbar-width: thin;
 }
 .ui-shell-nav-group + .ui-shell-nav-group { margin-top: 24px; }
-.ui-shell-nav-group > p {
+.ui-shell-nav-caption {
   margin: 0 8px 7px;
   color: var(--text-muted);
   font-size: 10px;
@@ -144,30 +144,76 @@
 }
 .ui-shell-nav-divider { display: block; width: 28px; height: 1px; margin: 10px auto; background: var(--border); }
 
-.ui-shell-nav-link {
+/* ------------------------------------------------------------------ *
+ * A navigation link
+ *
+ * Not a `<NavLink>` with a class on it. It is a row with a lit edge down its
+ * left side, and "selected" is that edge being on -- so the thing the reader
+ * is looking for is an object in the glass rather than a border colour, and it
+ * can be seen from further away than a 12%-tinted background can.
+ *
+ * The edge is on every link, not only the current one. Mounting it on demand
+ * would mean animating it in from nothing on every navigation, which reads as
+ * a flicker; having it sit at zero scale and grow is a movement the reader
+ * asked for by clicking.
+ *
+ * `is-static` is the footer's two links: same anatomy, but no entrance, because
+ * they are not part of the staggered list and animating them would restart the
+ * whole rail's rhythm at the bottom.
+ * ------------------------------------------------------------------ */
+
+.ui-shell-nav-item {
+  position: relative;
   display: flex;
+  width: 100%;
   min-height: 42px;
   align-items: center;
   gap: 11px;
   padding: 0 11px;
   border: 1px solid transparent;
   border-radius: 8px;
+  background: transparent;
   color: var(--text-secondary);
+  font: inherit;
+  text-align: left;
   text-decoration: none;
+  cursor: pointer;
+  animation: ui-shell-nav-in 460ms var(--ease-out-expo) both;
   transition: background 200ms var(--ease-out-expo), border-color 200ms var(--ease-out-expo), color 200ms var(--ease-out-expo), transform 200ms var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo);
 }
-.ui-shell-nav-link + .ui-shell-nav-link { margin-top: 2px; }
-.ui-shell-nav-link > span { min-width: 0; flex: 1; overflow: hidden; font-size: 13px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
-.ui-shell-nav-link:hover { background: var(--surface); color: var(--text-primary); transform: translateX(2px); }
-.ui-shell-nav-link.is-active {
+.ui-shell-nav-item.is-static { animation: none; }
+.ui-shell-nav-item + .ui-shell-nav-item { margin-top: 2px; }
+.ui-shell-nav-item > span { min-width: 0; flex: 1; overflow: hidden; font-size: 13px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.ui-shell-nav-item:hover { background: var(--surface); color: var(--text-primary); transform: translateX(2px); }
+.ui-shell-nav-item.is-active {
   border-color: color-mix(in srgb, var(--accent-violet) 30%, transparent);
   background: color-mix(in srgb, var(--accent-violet) 12%, transparent);
   color: color-mix(in srgb, var(--accent-violet) 28%, var(--text-primary));
   box-shadow: 0 0 26px -10px color-mix(in srgb, var(--accent-violet) 70%, transparent);
 }
-.ui-shell-nav-link.is-active svg { color: var(--accent-violet); }
-.ui-shell.is-collapsed .ui-shell-nav-link { justify-content: center; padding: 0; }
-.ui-shell.is-collapsed .ui-shell-nav-link .ui-shell-nav-badge { position: absolute; top: 4px; right: 8px; padding: 0 4px; font-size: 9px; }
+.ui-shell-nav-item.is-active svg { color: var(--accent-violet); }
+
+.ui-shell-nav-rail {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 0;
+  width: 2px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--accent-cyan), var(--accent-violet));
+  transform: scaleY(0);
+  transition: transform 340ms var(--ease-out-expo), box-shadow 340ms var(--ease-out-expo);
+}
+.ui-shell-nav-item.is-active .ui-shell-nav-rail {
+  transform: scaleY(1);
+  box-shadow: 0 0 12px 1px color-mix(in srgb, var(--accent-cyan) 65%, transparent);
+}
+.ui-shell-nav-item:hover .ui-shell-nav-rail { transform: scaleY(0.4); }
+
+@keyframes ui-shell-nav-in {
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: none; }
+}
 
 .ui-shell-nav-badge {
   min-width: 18px;
@@ -179,7 +225,18 @@
   font-weight: 750;
   text-align: center;
 }
-.ui-shell-sidebar-footer { flex: 0 0 auto; padding: 11px; border-top: 1px solid var(--border); }
+.ui-shell.is-collapsed .ui-shell-nav-item { justify-content: center; padding: 0; }
+.ui-shell.is-collapsed .ui-shell-nav-item .ui-shell-nav-badge { position: absolute; top: 4px; right: 8px; padding: 0 4px; font-size: 9px; }
+
+.ui-shell-rail-foot {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 2px;
+  padding: 11px;
+  border-top: 1px solid var(--border);
+}
+.ui-shell-signout:hover { color: var(--status-danger); }
+.ui-shell-signout:hover .ui-shell-nav-rail { transform: scaleY(0.4); background: var(--status-danger); }
 
 .ui-shell-backdrop {
   position: fixed;
@@ -278,7 +335,7 @@
   top: 47px;
   right: 0;
   z-index: 60;
-  width: 214px;
+  width: 234px;
   padding: 6px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -287,6 +344,29 @@
   box-shadow: var(--shadow-float);
   animation: ui-toast-in 200ms var(--ease-out-expo) both;
 }
+.ui-shell-profile-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 5px;
+  padding: 8px 10px 11px;
+  border-bottom: 1px solid var(--border);
+}
+.ui-shell-profile-head > span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent-violet) 20%, transparent);
+  color: color-mix(in srgb, var(--accent-violet) 32%, var(--text-primary));
+  font-size: 13px;
+  font-weight: 700;
+}
+.ui-shell-profile-head > div { min-width: 0; }
+.ui-shell-profile-head strong { display: block; overflow: hidden; color: var(--text-primary); font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.ui-shell-profile-head small { display: block; overflow: hidden; margin-top: 2px; color: var(--text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .ui-shell-profile-menu a,
 .ui-shell-profile-menu button {
   display: flex;
@@ -321,14 +401,27 @@
   gap: 24px;
   margin-bottom: 32px;
 }
-.ui-shell-page-header p {
-  margin: 0 0 6px;
+/* The eyebrow carries a short lit rule in front of it. It is the one place in
+   the frame where a hairline does real work: it ties the page back to the rail
+   without spending a second accent colour on it. */
+.ui-shell-page-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
   color: var(--accent-violet);
   font-size: 10px;
   font-weight: 750;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
+.ui-shell-page-eyebrow > i {
+  width: 18px;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-cyan), var(--accent-violet));
+}
+.ui-shell-page-title { min-width: 0; }
 .ui-shell-page-header h1 {
   margin: 0;
   color: var(--text-primary);
@@ -337,7 +430,7 @@
   letter-spacing: -0.025em;
   line-height: 1.15;
 }
-.ui-shell-page-header > div > span { display: block; max-width: 720px; margin-top: 7px; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+.ui-shell-page-description { display: block; max-width: 720px; margin-top: 8px; color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
 .ui-shell-page-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 12px; }
 .ui-shell-page-actions small { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
 
@@ -387,8 +480,26 @@
     color: var(--text-muted);
     font-size: 9.5px;
     text-decoration: none;
+    transition: color 200ms var(--ease-out-expo);
+  }
+  /* The bar is a rail turned on its side, so the indicator is a rule along the
+     top edge rather than a colour on the icon. Same object, same language --
+     which is the point of the bar existing instead of being a second nav. */
+  .ui-shell-bottom-nav a::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 22px;
+    height: 2px;
+    margin-left: -11px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent-cyan), var(--accent-violet));
+    transform: scaleX(0);
+    transition: transform 340ms var(--ease-out-expo);
   }
   .ui-shell-bottom-nav a.is-active { color: var(--accent-cyan); }
+  .ui-shell-bottom-nav a.is-active::before { transform: scaleX(1); }
   .ui-shell-bottom-nav a b {
     position: absolute;
     top: 7px;
@@ -419,13 +530,14 @@
 
 @media (max-width: 420px) {
   .ui-shell-actions { gap: 6px; }
-  .ui-shell-page-header > div > span { font-size: 12px; }
+  .ui-shell-page-description { font-size: 12px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .ui-shell *,
   .ui-shell *::before,
   .ui-shell *::after {
+    animation-delay: 0s !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;

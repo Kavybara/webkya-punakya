@@ -164,9 +164,24 @@ test("both consoles render the one shell", async () => {
   // And the frame it delegates to has to actually be there, or the two
   // consoles would be rendering nothing at all.
   const { css } = await kit();
-  for (const name of ["ui-shell-sidebar", "ui-shell-topbar", "ui-shell-nav-link", "ui-shell-bottom-nav", "ui-shell-page-header"]) {
+  for (const name of ["ui-shell-sidebar", "ui-shell-topbar", "ui-shell-nav-item", "ui-shell-bottom-nav", "ui-shell-page-header"]) {
     assert.match(css, new RegExp(`\\.${name}\\b`), `the kit must style .${name}`);
   }
+});
+
+test("the rail's active link is an object, not a border colour", async () => {
+  // The rail used to mark the current page with a tinted border and a
+  // box-shadow, which meant nothing in the markup said "you are here" -- the
+  // state existed only as two computed values. It is now a child element that
+  // grows down the left edge, so the assertion is on the element.
+  const { css, text } = await kit();
+  assert.match(text, /className="ui-shell-nav-rail"/, "each rail link must carry the lit edge");
+  assert.match(css, /\.ui-shell-nav-item\.is-active \.ui-shell-nav-rail\b/, "the lit edge must be what marks the current link");
+
+  // And the nav has to be a component, not a map inside the shell, because it
+  // is rendered twice -- once into the fixed rail, once into the phone drawer.
+  const shell = await readFile(new URL("../../src/components/ui/AppShell.tsx", import.meta.url), "utf8");
+  assert.match(shell, /<ShellNav\b/, "AppShell must delegate its navigation to ShellNav");
 });
 
 test("both consoles search through one palette", async () => {

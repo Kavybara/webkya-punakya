@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ArrowRight,
   BadgeHelp,
   BookOpenCheck,
   Clock3,
@@ -9,7 +10,6 @@ import {
   ReceiptText,
   ShoppingBag,
   TimerReset,
-  WalletCards,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -25,7 +25,7 @@ import {
   summarizeResellerAccounts,
 } from "../../lib/resellerAccounts";
 import { formatRupiah } from "../../lib/format";
-import { ActionCard, Badge, Button, EmptyState, ErrorState, LoadingSkeleton, Metric, maskIdentity } from "../../components/ui";
+import { ActionCard, Badge, Bento, BentoCell, BentoStat, Button, EmptyState, ErrorState, LoadingSkeleton, maskIdentity } from "../../components/ui";
 
 type OverviewData = {
   reseller: ApiReseller | null;
@@ -173,107 +173,127 @@ export default function ResellerV2OverviewPage() {
             </section>
           ) : null}
           {error ? <ErrorState message={error} onRetry={load} /> : null}
-          <section
-            className="reseller-v2-summary-grid"
-            aria-label="Ringkasan reseller"
+
+          {/* One grid.
+
+              This was three stacked sections: a four-across metric row, a
+              5/7 panel grid, and a full-width table below both. Every one of
+              them picked its own column count, so the eye re-found the left
+              edge three times, and the widest object on the screen -- the
+              table, which is the *third* thing a reseller looks at -- was the
+              only thing that got the full width.
+
+              It is now a single twelve-column field, and the reading order *is*
+              the layout. The balance takes five columns over two rows because
+              it is the number the page exists to show. The three counters sit
+              beside it at half its height, and the row below balances them at
+              3 and 4 so the block closes without a seam. The two lists are a
+              deliberate 3/7 pair rather than a 5/5: there are at most three
+              active orders, while an expiring account has to show a masked
+              credential and a date side by side, so it earns the wide cell.
+              The order table is full width because a table that is not full
+              width is not a table. */}
+          <Bento
+            className="reseller-v2-bento"
+            rows={4}
+            /* A shade taller than the kit's 116px: the cells here hold a
+               two-line header and a list row, and at 116 the header and the
+               first row do not both fit without the body scrolling. */
+            rowHeight="132px"
+            label="Ringkasan reseller"
           >
-            {loading ? (
-              Array.from({ length: 4 }, (_, index) => (
-                <article className="reseller-v2-metric" key={index}>
-                  <LoadingSkeleton lines={2} />
-                </article>
-              ))
-            ) : (
-              <>
-                <Metric
-                  label="Saldo tersedia"
-                  value={balance}
-                  hint="Siap digunakan"
-                  icon={<WalletCards size={18} />}
-                  tone="info"
-                  onClick={() =>
-                    document
-                      .getElementById("saldo")
-                      ?.scrollIntoView({ behavior: "smooth" })
-                  }
-                />
-                <Metric
-                  label="Pesanan aktif"
-                  value={activeOrders.length}
-                  hint="Perlu dipantau"
-                  icon={<ShoppingBag size={18} />}
-                  tone={activeOrders.length ? "warning" : "success"}
-                  onClick={() => navigate("/reseller-v2/orders")}
-                />
-                <Metric
-                  label="Akun aktif"
-                  value={accountSummary.active}
-                  hint="Status aktif"
-                  icon={<PackageCheck size={18} />}
-                  tone="success"
-                  onClick={() => navigate("/reseller-v2/accounts")}
-                />
-                <Metric
-                  label="Hampir berakhir"
-                  value={accountSummary.expiring}
-                  hint="Cek masa aktif"
-                  icon={<TimerReset size={18} />}
-                  tone={expiringAccounts.length ? "warning" : "muted"}
-                  onClick={() => navigate("/reseller-v2/accounts")}
-                />
-              </>
-            )}
-          </section>
-          <section className="reseller-v2-overview-grid">
             <BalanceCard
+              span={{ col: 5, row: 2 }}
               balance={balance}
               loading={loading}
               onTopUp={openTopUp}
               onHistory={() => navigate("/reseller-v2/orders")}
             />
-            <article className="reseller-v2-panel reseller-v2-quick-panel">
+
+            <BentoStat
+              span={{ col: 3 }}
+              label="Pesanan aktif"
+              value={activeOrders.length}
+              hint={activeOrders.length ? "Perlu dipantau" : "Semua beres"}
+              icon={<ShoppingBag size={18} />}
+              tone={activeOrders.length ? "warning" : "success"}
+              onClick={() => navigate("/reseller-v2/orders")}
+            />
+            <BentoStat
+              span={{ col: 4 }}
+              label="Akun aktif"
+              value={accountSummary.active}
+              hint="Siap dijual ulang"
+              icon={<PackageCheck size={18} />}
+              tone="success"
+              onClick={() => navigate("/reseller-v2/accounts")}
+            />
+            <BentoStat
+              span={{ col: 3 }}
+              label="Hampir berakhir"
+              value={accountSummary.expiring}
+              hint={expiringAccounts.length ? "Cek masa aktif" : "Tidak ada"}
+              icon={<TimerReset size={18} />}
+              tone={expiringAccounts.length ? "warning" : "default"}
+              onClick={() => navigate("/reseller-v2/accounts")}
+            />
+
+            {/* The quick actions lose their panel chrome. They were a panel
+                with a header and a 2x2 grid inside it, which meant six nested
+                boxes; inside a cell they are four marks on a surface, which
+                is what they are. The fifth action moves out of the grid and
+                onto a full-width row under it, because a 2x2 block of four
+                tiles plus a fifth orphan is a layout that only looks balanced
+                by accident. */}
+            <BentoCell span={{ col: 4 }} as="section" className="reseller-v2-cell" aria-labelledby="reseller-actions-h">
               <header>
-                <span>Aksi cepat</span>
-                <h2>Kebutuhan utama</h2>
+                <div>
+                  <span>Aksi cepat</span>
+                  <h2 id="reseller-actions-h">Kebutuhan utama</h2>
+                </div>
               </header>
               <div className="reseller-v2-action-grid">
-                <ActionCard
+                <ActionCard variant="bare"
                   title="Beli Produk"
                   description="Buka katalog"
                   icon={<Grid2X2 size={18} />}
                   onClick={() => navigate("/reseller-v2/catalog")}
                 />
-                <ActionCard
+                <ActionCard variant="bare"
                   title="Lacak Pesanan"
                   description="Lihat status"
                   icon={<ReceiptText size={18} />}
                   onClick={() => navigate("/reseller-v2/orders")}
                 />
-                <ActionCard
+                <ActionCard variant="bare"
                   title="Cari Kode"
                   description="Akses akun"
                   icon={<KeyRound size={18} />}
                   onClick={() => navigate("/reseller-v2/access")}
                 />
-                <ActionCard
+                <ActionCard variant="bare"
                   title="Klaim Garansi"
                   description="Laporkan kendala"
                   icon={<BadgeHelp size={18} />}
                   onClick={() => navigate("/reseller-v2/warranty")}
                 />
-                <ActionCard
-                  title="Lihat Panduan"
-                  description="Video tutorial"
-                  icon={<BookOpenCheck size={18} />}
-                  onClick={() => navigate("/reseller-v2/guides")}
-                />
               </div>
-            </article>
-            <article className="reseller-v2-panel reseller-v2-active-orders">
+              {/* The fifth action is a link, not a tile. Four tiles make a
+                  2x2; a fifth tile makes a 2x3 with a hole in it. Guides is
+                  also the one destination here that is a place to read rather
+                  than a place to do something, and a link says that. */}
+              <Link to="/reseller-v2/guides" className="reseller-v2-action-more">
+                <BookOpenCheck size={16} aria-hidden="true" />
+                Lihat panduan reseller
+                <ArrowRight size={14} aria-hidden="true" />
+              </Link>
+            </BentoCell>
+
+            <BentoCell span={{ col: 4 }} as="section" className="reseller-v2-cell" aria-labelledby="reseller-orders-h">
               <header>
                 <div>
                   <span>Pesanan aktif</span>
-                  <h2>Sedang berjalan</h2>
+                  <h2 id="reseller-orders-h">Sedang berjalan</h2>
                 </div>
                 <Link to="/reseller-v2/orders">Lihat semua</Link>
               </header>
@@ -305,12 +325,13 @@ export default function ResellerV2OverviewPage() {
                   action={<Link to="/reseller-v2/catalog">Buka katalog</Link>}
                 />
               )}
-            </article>
-            <article className="reseller-v2-panel reseller-v2-expiry-panel">
+            </BentoCell>
+
+            <BentoCell span={{ col: 8 }} as="section" className="reseller-v2-cell" aria-labelledby="reseller-expiry-h">
               <header>
                 <div>
                   <span>Masa aktif</span>
-                  <h2>Akun hampir berakhir</h2>
+                  <h2 id="reseller-expiry-h">Akun hampir berakhir</h2>
                 </div>
                 <Link to="/reseller-v2/accounts">Kelola akun</Link>
               </header>
@@ -339,60 +360,61 @@ export default function ResellerV2OverviewPage() {
                   description="Akun yang mendekati akhir masa aktif akan tampil di sini."
                 />
               )}
-            </article>
-          </section>
-          <section className="reseller-v2-panel reseller-v2-recent">
-            <header>
-              <div>
-                <span>Transaksi</span>
-                <h2>Pesanan terbaru</h2>
-              </div>
-              <Link to="/reseller-v2/orders">Lihat semua pesanan</Link>
-            </header>
-            {loading ? (
-              <LoadingSkeleton lines={5} />
-            ) : recentOrders.length ? (
-              <div className="reseller-v2-order-list">
-                <div className="reseller-v2-order-head">
-                  <span>Pesanan</span>
-                  <span>Produk</span>
-                  <span>Total</span>
-                  <span>Status</span>
-                  <span>Waktu</span>
+            </BentoCell>
+
+            <BentoCell span={{ col: 12, row: 3 }} as="section" className="reseller-v2-cell" aria-labelledby="reseller-recent-h">
+              <header>
+                <div>
+                  <span>Transaksi</span>
+                  <h2 id="reseller-recent-h">Pesanan terbaru</h2>
                 </div>
-                {recentOrders.map((order) => {
-                  const status = statusForOrder(order);
-                  return (
-                    <Link
-                      key={order.id}
-                      to="/reseller-v2/orders"
-                      className="reseller-v2-order-row"
-                    >
-                      <div>
-                        <strong>{order.id}</strong>
-                        <small>{order.variant}</small>
-                      </div>
-                      <span>{order.product}</span>
-                      <strong>{formatRupiah(order.total)}</strong>
-                      <Badge tone={status.tone}>
-                        {status.label}
-                      </Badge>
-                      <span>
-                        <Clock3 size={14} />
-                        {compactDate(order.createdAt)}
-                      </span>
-                    </Link>
-                  );
-                })}
-              </div>
-            ) : (
-              <EmptyState
-                title="Belum ada pesanan"
-                description="Mulai transaksi pertama melalui katalog produk."
-                action={<Link to="/reseller-v2/catalog">Lihat katalog</Link>}
-              />
-            )}
-          </section>
+                <Link to="/reseller-v2/orders">Lihat semua pesanan</Link>
+              </header>
+              {loading ? (
+                <LoadingSkeleton lines={5} />
+              ) : recentOrders.length ? (
+                <div className="reseller-v2-order-list">
+                  <div className="reseller-v2-order-head">
+                    <span>Pesanan</span>
+                    <span>Produk</span>
+                    <span>Total</span>
+                    <span>Status</span>
+                    <span>Waktu</span>
+                  </div>
+                  {recentOrders.map((order) => {
+                    const status = statusForOrder(order);
+                    return (
+                      <Link
+                        key={order.id}
+                        to="/reseller-v2/orders"
+                        className="reseller-v2-order-row"
+                      >
+                        <div>
+                          <strong>{order.id}</strong>
+                          <small>{order.variant}</small>
+                        </div>
+                        <span>{order.product}</span>
+                        <strong>{formatRupiah(order.total)}</strong>
+                        <Badge tone={status.tone}>
+                          {status.label}
+                        </Badge>
+                        <span>
+                          <Clock3 size={14} />
+                          {compactDate(order.createdAt)}
+                        </span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              ) : (
+                <EmptyState
+                  title="Belum ada pesanan"
+                  description="Mulai transaksi pertama melalui katalog produk."
+                  action={<Link to="/reseller-v2/catalog">Lihat katalog</Link>}
+                />
+              )}
+            </BentoCell>
+          </Bento>
         </>
       )}
     </ResellerShell>
@@ -406,14 +428,21 @@ export default function ResellerV2OverviewPage() {
  * is not one: it is this page's only card, it knows about top-ups and
  * transaction history, and nothing else in the app renders it. Keeping it in
  * the kit would have meant the kit grew a component for a single consumer.
+ *
+ * It is the emphasised cell of the bento rather than a card in the flow. That
+ * is not decoration: it is the largest object on the overview, and there is no
+ * reason for a reseller to have to hunt for the number they opened the page
+ * for.
  */
 function BalanceCard({
+  span,
   balance,
   held,
   loading,
   onTopUp,
   onHistory,
 }: {
+  span: { col: number; row: number };
   balance: string;
   held?: string;
   loading?: boolean;
@@ -422,11 +451,18 @@ function BalanceCard({
 }) {
   return (
     // `id="saldo"` is a live anchor, not decoration: the shell links to
-    // `/reseller-v2/ringkasan#saldo` and this page scrolls to it from the
-    // "Saldo tersedia" metric above.
-    <article id="saldo" className="ui-card ui-balance">
+    // `/reseller-v2/ringkasan#saldo`, so the id has to survive the move from a
+    // card in a section to a cell in a grid.
+    <BentoCell
+      id="saldo"
+      span={span}
+      emphasis
+      as="section"
+      aria-labelledby="saldo-heading"
+      className="ui-balance"
+    >
       <div>
-        <span>Saldo reseller</span>
+        <span id="saldo-heading">Saldo reseller</span>
         <h2>{loading ? <LoadingSkeleton /> : balance}</h2>
         <p>{held ? `Saldo tertahan ${held}` : "Siap digunakan untuk transaksi."}</p>
       </div>
@@ -434,6 +470,6 @@ function BalanceCard({
         <Button weight="primary" onClick={onTopUp}>Top Up</Button>
         <Button weight="secondary" onClick={onHistory}>Riwayat saldo</Button>
       </div>
-    </article>
+    </BentoCell>
   );
 }

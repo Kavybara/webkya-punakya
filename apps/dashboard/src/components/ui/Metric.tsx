@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { ArrowRight } from "lucide-react";
 import type { Tone } from "./types";
 
 /**
@@ -75,25 +76,40 @@ export function MetricRow({ items, label }: {
 }
 
 /**
- * A labelled square that does one thing.
+ * A labelled thing that does one thing when you press it.
  *
- * This is the reseller's only. The owner console has no equivalent -- it puts
- * the same shape inline in a grid of hand-written markup on the overview, so
- * the padding, the icon slot and the title/hint pairing are decided per page.
+ * The reseller's only, and it has two shapes for one reason. As `card` it is
+ * the card it always was: a bordered, lifted, self-contained tile for a page
+ * that wants a grid of them.
+ *
+ * As `bare` it is the same object with the box taken off, for when the tile is
+ * already sitting on a surface that is glass -- which is the case now that the
+ * overview's quick actions live inside a bento cell. A card inside a glass cell
+ * puts a second border, a second background and a second shadow inside the
+ * first, and the cell stops reading as one pane of glass. Bare, the four
+ * actions are four rows on the pane: the icon plate still lifts its own
+ * background so the row has a target, and the arrow gives the row the same
+ * "this goes somewhere" signal a border used to give it.
  */
-export function ActionCard({ title, description, icon, onClick }: {
+export function ActionCard({ title, description, icon, onClick, variant = "card" }: {
   title: string;
   description: string;
   icon?: ReactNode;
   onClick: () => void;
+  variant?: "card" | "bare";
 }) {
   return (
-    <button type="button" className="ui-action-card" onClick={onClick}>
-      {icon ? <span aria-hidden="true">{icon}</span> : null}
-      <div>
+    <button
+      type="button"
+      className={`ui-action-card${variant === "bare" ? " is-bare" : ""}`}
+      onClick={onClick}
+    >
+      {icon ? <span className="ui-action-card-mark" aria-hidden="true">{icon}</span> : null}
+      <div className="ui-action-card-text">
         <strong>{title}</strong>
         <small>{description}</small>
       </div>
+      <ArrowRight className="ui-action-card-go" size={15} aria-hidden="true" />
     </button>
   );
 }

@@ -63,17 +63,43 @@
   box-shadow: var(--shadow-lift);
 }
 
-.console-operational-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(310px, 0.85fr); gap: 18px; margin-top: 18px; }
+/* The overview's cells.
+
+   The box is the kit's bento cell, so nothing here draws a border or a
+   background -- that would be a second surface on top of the first, and the
+   cell would stop being glass. What a cell needs is the opposite: it has to
+   push its body to the bottom of whatever height the grid row gave it and let
+   the body take the slack, because two of these cells sit next to a chart
+   that wants 400px and a list that wants 200px and the grid is what decides
+   they are the same height. */
+.console-cell > .console-panel-header {
+  flex: 0 0 auto;
+}
+
+.console-cell > .console-chart-wrap {
+  flex: 1 1 auto;
+  min-height: 240px;
+}
+
+.console-cell > .console-system-list,
+.console-cell > .console-attention-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.console-bento {
+  margin-top: 18px;
+}
+
 .console-panel-header { display: flex; min-height: 70px; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 22px; border-bottom: 1px solid var(--border); }
 .console-panel-header span { display: block; margin-bottom: 4px; color: var(--text-muted); font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
 .console-panel-header h2 { margin: 0; color: var(--text-primary); font-size: 15px; font-weight: 620; letter-spacing: -0.01em; }
 .console-panel-header > strong { color: var(--text-primary); font-size: 16px; font-weight: 650; }
 .console-panel-header > svg { color: var(--text-muted); }
-.console-revenue-panel { grid-row: span 2; min-height: 485px; }
 .console-chart-wrap { height: 310px; padding: 18px 14px 2px 6px; }
-.console-revenue-summary { display: flex; gap: 20px; margin: 10px 22px 20px; padding-top: 14px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 11px; }
+.console-revenue-summary { display: flex; flex: 0 0 auto; gap: 20px; margin: 10px 22px 20px; padding-top: 14px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 11px; }
 .console-revenue-summary strong { margin-right: 3px; color: var(--text-secondary); }
-.console-system-panel, .console-stock-panel { min-height: 235px; }
 .console-system-list { padding: 8px 18px; }
 .console-system-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 56px; border-bottom: 1px solid var(--border); }
 .console-system-row:last-child { border-bottom: 0; }
@@ -95,11 +121,14 @@
 .console-stock-stats i { position: absolute; bottom: 0; left: 0; height: 2px; max-width: 100%; background: var(--accent-cyan); }
 .console-stock-stats > div:nth-child(2) i { background: var(--status-warning); }
 .console-stock-stats > div:nth-child(3) i { background: var(--accent-violet); }
-.console-attention-panel { grid-column: 1 / -1; }
-.console-attention-list { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+/* The attention queue is a four-wide cell now, so its five entries stack
+   instead of sitting in a five-across strip. It is the tallest list on the
+   page and it is beside the chart for that reason: an owner reads the trend
+   and the exceptions side by side, not in sequence. */
+.console-attention-list { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; }
 /* These are the five things worth looking at. They are links, so they lift. */
-.console-attention-list > a { display: grid; min-width: 0; min-height: 94px; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 15px; border-right: 1px solid var(--border); color: inherit; text-decoration: none; transition: background 200ms var(--ease-out-expo); }
-.console-attention-list > a:last-child { border-right: 0; }
+.console-attention-list > a { display: grid; min-width: 0; min-height: 66px; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 12px 18px; border-bottom: 1px solid var(--border); color: inherit; text-decoration: none; transition: background 200ms var(--ease-out-expo); }
+.console-attention-list > a:last-child { border-bottom: 0; }
 .console-attention-list > a:hover { background: var(--surface-hover); }
 .console-attention-dot { display: grid; width: 30px; height: 30px; place-items: center; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--status-success) 8%, transparent); color: var(--status-success); }
 .console-attention-dot.is-warning { background: color-mix(in srgb, var(--status-warning) 8%, transparent); color: var(--status-warning); }
@@ -110,7 +139,6 @@
 .console-attention-list b { color: var(--text-primary); font-size: 17px; font-weight: 650; }
 .console-attention-list .has-issue b { color: var(--status-warning); }
 
-.console-orders-panel { margin-top: 18px; }
 .console-orders-heading > a { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 11px; font-weight: 600; text-decoration: none; }
 .console-orders-heading > a:hover { color: var(--text-primary); }
 .console-order-link { padding: 0; border: 0; background: transparent; color: color-mix(in srgb, var(--accent-violet) 34%, var(--text-primary)); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; cursor: pointer; }
@@ -290,15 +318,9 @@
 
 @media (max-width: 1180px) {
   .console-status-pill { display: none; }
-  .console-attention-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .console-attention-list > a:nth-child(3) { border-right: 0; }
-  .console-attention-list > a:nth-child(n + 4) { border-top: 1px solid var(--border); }
 }
 
 @media (max-width: 1023px) {
-  .console-operational-grid { grid-template-columns: 1fr; }
-  .console-revenue-panel { grid-row: auto; min-height: 450px; }
-  .console-attention-panel { grid-column: auto; }
   .console-settings-grid { grid-template-columns: 1fr; }
   .console-integration-config-grid { grid-template-columns: 1fr; }
   .console-integration-config-grid .console-panel:nth-child(n) { grid-row: auto; }
@@ -309,14 +331,10 @@
 }
 
 @media (max-width: 767px) {
-  .console-operational-grid { gap: 12px; margin-top: 12px; }
   .console-chart-wrap { height: 250px; }
-  .console-revenue-panel { min-height: 400px; }
   .console-revenue-summary { flex-direction: column; gap: 6px; }
   .console-stock-stats { grid-template-columns: 1fr; }
-  .console-attention-list { grid-template-columns: 1fr; }
-  .console-attention-list > a { min-height: 72px; border-right: 0; border-top: 1px solid var(--border); }
-  .console-attention-list > a:first-child { border-top: 0; }
+  .console-attention-list > a { min-height: 72px; }
   .console-panel-header { min-height: 0; align-items: flex-start; flex-direction: column; padding: 16px; }
   .console-panel-toolbar-actions { width: 100%; overflow-x: auto; flex-wrap: nowrap; padding-bottom: 2px; }
   .console-panel-toolbar-actions :is(button, a) { min-height: 44px; flex: 0 0 auto; }
