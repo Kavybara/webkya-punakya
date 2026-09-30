@@ -3,29 +3,89 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Kavya | Dashboard Penjualan Layanan Digital</title>
+    <title>Kavya | Supplying all premium apps you need.</title>
     <meta
       name="description"
-      content="Kelola stok, reseller, pesanan, pembayaran, dan layanan pelanggan untuk penjualan layanan digital melalui dashboard Kavya."
+      content="Kavya menyediakan akun aplikasi premium dengan harga terbuka dan pembayaran QRIS. Daftar sebagai reseller dan mulai berjualan."
     />
-    <meta name="theme-color" content="#f4eee5" />
+    <!--
+      The canvas, not a cream. This was `#f4eee5`, the last light-palette value
+      in the app: the site has no light theme any more, so it was tinting the
+      address bar a colour nothing on screen ever was.
+    -->
+    <meta name="theme-color" content="#030305" />
     <meta name="robots" content="index, follow" />
     <link rel="canonical" href="https://www.vya.baby/" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <meta property="og:locale" content="id_ID" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Kavya" />
-    <meta property="og:title" content="Kavya | Dashboard Penjualan Layanan Digital" />
+    <meta property="og:title" content="Kavya | Supplying all premium apps you need." />
     <meta
       property="og:description"
-      content="Kelola stok, reseller, pesanan, pembayaran, dan layanan pelanggan dalam satu dashboard."
+      content="Akun aplikasi premium dengan harga terbuka dan pembayaran QRIS. Daftar sebagai reseller dan mulai berjualan."
     />
     <meta property="og:url" content="https://www.vya.baby/" />
-    <meta name="twitter:card" content="summary" />
-    <meta name="twitter:title" content="Kavya | Dashboard Penjualan Layanan Digital" />
+    <meta property="og:image" content="https://www.vya.baby/og.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Kavya — supplying all premium apps you need." />
+    <!--
+      `summary` rendered a 1:1 crop of nothing. The site is one image deep
+      nowhere else -- there is no screenshot on any public surface -- so the
+      card is the only place a picture is the whole message.
+    -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Kavya | Supplying all premium apps you need." />
     <meta
       name="twitter:description"
-      content="Kelola stok, reseller, pesanan, pembayaran, dan layanan pelanggan dalam satu dashboard."
+      content="Akun aplikasi premium dengan harga terbuka dan pembayaran QRIS. Daftar sebagai reseller dan mulai berjualan."
     />
+    <meta name="twitter:image" content="https://www.vya.baby/og.png" />
+    <!--
+      The homepage is now the entire brand presence on the web: one word, one
+      sentence, one link out. Search engines were being told this was a
+      "dashboard penjualan" -- true of the console behind the login, never
+      visible to anyone who found the site. `WebSite` says what the front door
+      is; `Organization` says who is behind it and how to reach a human, which
+      is the one thing a search result can carry that a bare title cannot.
+    -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "@id": "https://www.vya.baby/#website",
+            "url": "https://www.vya.baby/",
+            "name": "Kavya",
+            "description": "Akun aplikasi premium dengan harga terbuka dan pembayaran QRIS.",
+            "inLanguage": "id-ID",
+            "publisher": { "@id": "https://www.vya.baby/#organization" }
+          },
+          {
+            "@type": "Organization",
+            "@id": "https://www.vya.baby/#organization",
+            "name": "Kavya",
+            "url": "https://www.vya.baby/",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://www.vya.baby/og.png",
+              "width": 1200,
+              "height": 630
+            },
+            "contactPoint": {
+              "@type": "ContactPoint",
+              "contactType": "customer support",
+              "telephone": "+62-877-7655-549",
+              "url": "https://wa.me/6287777655549",
+              "availableLanguage": ["id", "en"]
+            }
+          }
+        ]
+      }
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <!--

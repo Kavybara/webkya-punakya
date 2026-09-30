@@ -184,7 +184,7 @@
 
 /* "Pesan Sekarang". The same near-white plate the sign-in button, the owner
  * console's save row and the reseller's top-up use, and it hovers the same
- * way. It is stated here rather than shared with the landing page's `.home-cta`
+ * way. It is stated here rather than shared with the price page's `.price-cta`
  * because a page's stylesheet is the boundary for that page's surfaces; the
  * thing the two have in common is the token, not the rule. */
 .catalog-primary {

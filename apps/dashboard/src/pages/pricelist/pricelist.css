@@ -1,0 +1,182 @@
+/*
+ * The price list's own surfaces.
+ *
+ * The card and button rules below used to live in `home.css`, which is now a
+ * single-screen hero and has no use for them.
+ *
+ * The `price-` prefix is the point, not cosmetics. The checkout page has its
+ * own near-identical plate -- `.catalog-primary` in `pages/products/products.css`
+ * -- and both files are loaded into the same document. Sharing the name would
+ * mean the two pages' buttons silently styling each other, decided by import
+ * order. What the two genuinely have in common is the token, not the rule.
+ */
+
+/* ------------------------------------------------------------- the numbers
+ *
+ * Four counted figures, separated by hairlines rather than boxed into four
+ * cards. A card each would put a border and a background around every number,
+ * which is the same "everything is a tile" reflex the redesign is trying to
+ * get rid of. */
+.price-stats {
+  padding-bottom: 40px;
+}
+
+.price-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 28px 20px;
+}
+
+/* A flex column purely for the `order` below: `<dt>` has to come first in the
+   DOM, the number has to come first on screen. */
+.price-stat {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.price-stat-value {
+  order: 1;
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--text-display);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: var(--tracking-tight);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The number has not arrived. A bar, never a zero -- a page that reads "0"
+   while loading has just lied about the catalogue. */
+.price-stat-value.is-pending {
+  display: block;
+  width: 72px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-hover);
+}
+
+.price-stat-label {
+  order: 2;
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: var(--text-label);
+  font-weight: 600;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+@media (min-width: 720px) {
+  .price-stats-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 20px;
+  }
+
+  /* Vertical hairlines between the four, on the wide layout only. */
+  .price-stat + .price-stat {
+    border-left: 1px solid var(--border);
+    padding-left: 20px;
+  }
+}
+
+/* ------------------------------------------------------------- the product
+ *
+ * A translucent sheet over the background rather than an opaque box. It needs
+ * its own rule rather than a shared one for a performance reason: a
+ * `backdrop-filter` is a per-element surface read, and four small tiles are
+ * far cheaper to blur than a set of large ones is to keep correct while the
+ * list scrolls. */
+.price-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-glass);
+  box-shadow: var(--shadow-lift);
+  backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+  transition:
+    border-color var(--duration-normal) var(--ease-out-expo),
+    background var(--duration-normal) var(--ease-out-expo),
+    box-shadow var(--duration-normal) var(--ease-out-expo);
+}
+
+.price-card:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+  box-shadow: var(--shadow-float);
+}
+
+/* The pointer-following wash. Kept as its own element because it is driven by
+   two motion values written from a pointer handler, not by a class change. */
+.price-spotlight {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------- the buttons
+ *
+ * The primary is the same near-white plate the sign-in button, the owner
+ * console's save row and the reseller's top-up all use, and it hovers the
+ * same way. */
+.price-cta {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 24px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--text-primary);
+  color: var(--bg-canvas);
+  font-size: 15px;
+  font-weight: 800;
+  text-decoration: none;
+  transition:
+    background-color var(--duration-normal) var(--ease-out-expo),
+    transform var(--duration-normal) var(--ease-out-expo),
+    box-shadow 260ms var(--ease-out-expo);
+}
+
+.price-cta:hover {
+  background: color-mix(in srgb, var(--text-primary) 58%, white);
+  color: var(--bg-canvas);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lift);
+}
+
+.price-cta-ghost {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+  backdrop-filter: blur(var(--glass-blur));
+  transition:
+    background-color var(--duration-normal) var(--ease-out-expo),
+    border-color var(--duration-normal) var(--ease-out-expo),
+    transform var(--duration-normal) var(--ease-out-expo),
+    box-shadow 260ms var(--ease-out-expo);
+}
+
+.price-cta-ghost:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lift);
+}
+
+.price-cta:focus-visible,
+.price-cta-ghost:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 3px;
+}

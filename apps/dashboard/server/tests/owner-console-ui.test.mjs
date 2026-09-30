@@ -265,9 +265,18 @@ test("shared data tables keep column context on narrow screens", async () => {
 });
 
 test("public store aliases reach the live catalog instead of the not-found page", async () => {
-  const router = await source("router/config.tsx");
-  assert.match(router, /path: "\/store"/);
-  assert.match(router, /to="\/#produk"/);
+  const [router, priceList] = await Promise.all([
+    source("router/config.tsx"),
+    source("pages/pricelist/ProductCatalog.tsx"),
+  ]);
+  // The alias used to be a redirect to `/#produk` -- an anchor on the landing
+  // page. The catalogue now lives on its own route, so the alias points at the
+  // route and the anchor moved with the section. Both halves are asserted: a
+  // redirect with no `id="produk"` behind it lands the reader at the top of a
+  // long page with nothing marked, which is the not-found experience this test
+  // exists to prevent.
+  assert.match(router, /path: "\/store"[\s\S]{0,80}Navigate to="\/harga"/);
+  assert.match(priceList, /id="produk"/);
 });
 
 test("Owner Console rental form only asks for owner-facing rental fields", async () => {

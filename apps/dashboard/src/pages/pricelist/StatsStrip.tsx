@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
-import { formatNumber, formatRupiah } from "../../../lib/format";
-import { catalogStats, type Catalog } from "../useCatalog";
+import { formatNumber, formatRupiah } from "../../lib/format";
+import { catalogStats, type Catalog } from "./useCatalog";
 
 /**
  * Four numbers, counted.
@@ -40,8 +40,12 @@ export function StatsStrip({ catalog }: { catalog: Catalog }) {
   const stats = catalogStats(catalog.products);
 
   return (
-    <section aria-labelledby="angka-heading" className="home-stats">
-      <div className="mx-auto max-w-[1180px] px-4 sm:px-6 md:px-8 lg:px-10">
+    <section aria-labelledby="angka-heading" className="price-stats">
+      {/* No second measure or gutter here. The page wrapper in `page.tsx`
+          already caps the column and pads it; repeating both inside one
+          section is what made these four numbers sit further in than the
+          heading directly above them. */}
+      <div>
         <h2 id="angka-heading" className="sr-only">
           Angka katalog saat ini
         </h2>
@@ -54,7 +58,7 @@ export function StatsStrip({ catalog }: { catalog: Catalog }) {
           </p>
         ) : (
           <motion.dl
-            className="home-stats-grid"
+            className="price-stats-grid"
             initial="hidden"
             whileInView="visible"
             viewport={{ once: true, amount: 0.4 }}
@@ -64,15 +68,20 @@ export function StatsStrip({ catalog }: { catalog: Catalog }) {
               <motion.div
                 key={figure.label}
                 variants={{ hidden: { opacity: 0, y: 14 }, visible: { opacity: 1, y: 0 } }}
-                className="home-stat"
+                className="price-stat"
               >
+                {/* Term before description, which is the only order the HTML
+                    spec allows inside a `<dl>` -- a screen reader announces
+                    "value, label" the other way round. The number still paints
+                    on top: `.price-stat` is a flex column and the label is
+                    ordered after it. */}
+                <dt className="price-stat-label">{figure.label}</dt>
                 {/* The number has not arrived. A bar, never a zero -- a page
                     that reads "0" while loading has just lied about the
                     catalogue. */}
-                <dd className={catalog.loading ? "home-stat-value is-pending" : "home-stat-value"}>
+                <dd className={catalog.loading ? "price-stat-value is-pending" : "price-stat-value"}>
                   {catalog.loading ? <span className="sr-only">sedang dimuat</span> : figure.value}
                 </dd>
-                <dt className="home-stat-label">{figure.label}</dt>
               </motion.div>
             ))}
           </motion.dl>

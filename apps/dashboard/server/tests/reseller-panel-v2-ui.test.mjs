@@ -222,7 +222,7 @@ test("warranty display and WhatsApp payload never include credentials", async ()
 
 test("public catalog and checkout return to the new reseller panel", async () => {
   const [catalog, products] = await Promise.all([
-    source("src/pages/home/components/ProductCatalog.tsx"),
+    source("src/pages/pricelist/ProductCatalog.tsx"),
     source("src/pages/products/page.tsx"),
   ]);
 

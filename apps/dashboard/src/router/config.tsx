@@ -3,6 +3,7 @@ import { Navigate, type RouteObject } from "react-router-dom";
 import { readSession } from "../lib/session";
 
 const HomePage = lazy(() => import("../pages/home/page"));
+const PriceListPage = lazy(() => import("../pages/pricelist/page"));
 const LoginPage = lazy(() => import("../pages/login/page"));
 const RegisterPage = lazy(() => import("../pages/register/page"));
 const ForgotPasswordPage = lazy(() => import("../pages/forgot-password/page"));
@@ -105,7 +106,8 @@ export const routes: RouteObject[] = [
   { path: "/daftar", element: <Navigate to="/register" replace /> },
   { path: "/masuk", element: <Navigate to="/login" replace /> },
   { path: "/forgot-password", element: page(ForgotPasswordPage) },
-  { path: "/store", element: <Navigate to="/#produk" replace /> },
+  { path: "/harga", element: page(PriceListPage) },
+  { path: "/store", element: <Navigate to="/harga" replace /> },
   { path: "/products", element: <ResellerCatalogGate /> },
   { path: "/katalog", element: <ResellerCatalogGate /> },
   { path: "/order", element: <ResellerCatalogGate /> },

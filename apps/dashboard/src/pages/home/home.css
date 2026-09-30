@@ -1,64 +1,35 @@
 /*
- * The landing page's own surfaces.
+ * The landing page.
  *
- * Everything else on this page is Tailwind utilities against tokens, which is
- * the right tool for spacing and type. It is the wrong tool for the things
- * below, because each needs a value the arbitrary-value syntax has to encode
- * by hand: a backdrop blur, an elevation, a gradient that mixes two tokens,
- * and a pair of button states that have to agree with every other primary
- * button in the product. Those are the reasons this file exists.
- *
- * It is a much smaller file than it was. The bento tile, the pointer spotlight
- * it was paired with, the order-timeline node, the liquid blob and its twelve
- * keyframes, the three-card deck, and the hero's chip and trust rows all went
- * with the sections that used them.
+ * This file is small because the page is small. One screen: a bar, a word, a
+ * sentence, a button. The card, button and figure rules that used to live here
+ * moved to `pages/pricelist/pricelist.css` with the components that use them.
  */
 
 /* ---------------------------------------------------------------- the nav
  *
- * Floating, inset, and always glass.
- *
- * The old bar was full-bleed and went from `background: transparent` to glass
- * on scroll. Over a 100vh hero that meant the navbar was invisible for exactly
- * as long as the page looked its best, and when it did appear it arrived as a
- * horizontal rule across the whole screen -- the one element on the page with
- * a hard edge, sitting on top of the one surface that has none.
- *
- * Inset and permanently glass instead, so the aurora reads behind it and the
- * navbar is an object floating over the composition rather than a border
- * drawn across it. The blur is what makes that read: it is sampling the
- * moving background, so the glass is never a flat fill even at rest.
+ * Plain text on the background. It was a floating glass pill until the hero
+ * stopped being something to float over: on a flat, still background a
+ * `backdrop-filter` has nothing to sample, so all that survived of the glass
+ * was the cost and the silhouette.
  */
 .home-nav {
   position: fixed;
   inset-inline: 0;
-  top: 14px;
+  top: 0;
   z-index: 50;
-  /* Column, and centred on the cross axis. The mobile sheet is a sibling of
-     the bar, not a child of it, so a row here would lay the two out side by
-     side -- the open menu appearing to the right of the navbar. */
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding-inline: 16px;
-  pointer-events: none;
+  justify-content: center;
+  padding: 18px 16px;
 }
 
 .home-nav-inner {
-  pointer-events: auto;
   display: flex;
   width: 100%;
   max-width: 1180px;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  min-height: 60px;
-  padding: 0 10px 0 18px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--surface-glass);
-  box-shadow: var(--shadow-lift);
-  backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
 }
 
 .home-nav-brand {
@@ -83,23 +54,19 @@
 .home-nav-links {
   display: none;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
 }
 
 .home-nav-link {
-  padding: 9px 14px;
-  border-radius: var(--radius-pill);
+  padding: 9px 12px;
   color: var(--text-secondary);
   font-size: 14px;
   font-weight: 500;
   letter-spacing: var(--tracking-wide);
-  transition:
-    color var(--duration-fast) var(--ease-out-expo),
-    background var(--duration-fast) var(--ease-out-expo);
+  transition: color var(--duration-fast) var(--ease-out-expo);
 }
 
 .home-nav-link:hover {
-  background: var(--surface);
   color: var(--text-primary);
 }
 
@@ -114,7 +81,7 @@
   min-height: 42px;
   align-items: center;
   justify-content: center;
-  padding: 0 20px;
+  padding: 0 16px;
   border-radius: var(--radius-pill);
   color: var(--text-primary);
   font-size: 14px;
@@ -127,57 +94,56 @@
   background: var(--surface);
 }
 
-/* The one saturated control on the page, and the only place an accent is
-   allowed to cast light rather than be lit. The glow is what a "premium"
-   button is actually made of; without it this is just a purple rectangle. */
 .home-nav-signup {
   display: inline-flex;
   min-height: 42px;
   align-items: center;
   justify-content: center;
-  padding: 0 20px;
+  padding: 0 18px;
   border-radius: var(--radius-pill);
-  background: linear-gradient(100deg, var(--accent-violet), var(--accent-cyan));
-  color: var(--text-on-accent);
+  background: var(--text-primary);
+  color: var(--bg-canvas);
   font-size: 14px;
   font-weight: 700;
   letter-spacing: var(--tracking-wide);
-  box-shadow: var(--shadow-glow);
-  transition:
-    transform var(--duration-normal) var(--ease-out-expo),
-    box-shadow var(--duration-normal) var(--ease-out-expo);
+  transition: opacity var(--duration-fast) var(--ease-out-expo);
 }
 
 .home-nav-signup:hover {
-  transform: translateY(-1px);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--accent-cyan) 40%, transparent),
-    0 20px 52px -14px color-mix(in srgb, var(--accent-violet) 70%, transparent);
+  opacity: 0.86;
+}
+
+/* `<details>` rather than a stateful sheet: the platform already implements a
+   disclosure widget, so the keyboard, Escape and the screen-reader
+   announcement come free and there is no effect to leak. */
+.home-nav-details {
+  position: relative;
 }
 
 .home-nav-toggle {
   display: inline-flex;
   width: 42px;
   height: 42px;
+  cursor: pointer;
+  list-style: none;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   color: var(--text-primary);
-  transition: background var(--duration-fast) var(--ease-out-expo);
 }
 
-.home-nav-toggle:hover {
-  background: var(--surface);
+.home-nav-toggle::-webkit-details-marker {
+  display: none;
 }
 
 .home-nav-sheet {
-  pointer-events: auto;
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
   display: flex;
+  width: 200px;
   flex-direction: column;
-  width: 100%;
-  max-width: 1180px;
-  margin-top: 8px;
   padding: 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -187,7 +153,7 @@
 }
 
 .home-nav-sheet-link {
-  padding: 12px 14px;
+  padding: 11px 12px;
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   font-size: 14px;
@@ -210,28 +176,27 @@
     display: flex;
   }
 
-  .home-nav-toggle {
+  .home-nav-details {
     display: none;
   }
 }
 
 /* ---------------------------------------------------------------- the hero
  *
- * One word, one sentence, one background.
+ * The word, the sentence, the way in. Centred because there is exactly one
+ * thing to centre; a left-aligned layout earns its whitespace only when there
+ * is a second column or a wide image, and there is neither.
  *
- * The aurora is not drawn here. It is the page root's `::before` and
- * `::after` (index.css), which means it keeps running behind everything below
- * this fold too -- the alternative was a hero-local gradient that stopped dead
- * at the section border, and a background that stops is a background you
- * notice stopping.
+ * The background is not drawn here. It is the page root's `::before`
+ * (index.css), which means it runs the full height of the document rather
+ * than stopping at a section border.
  */
 .home-hero {
-  position: relative;
   display: flex;
-  min-height: 100svh;
+  flex: 1;
   align-items: center;
   justify-content: center;
-  padding: 120px 24px 80px;
+  padding: 120px 24px 60px;
 }
 
 .home-hero-centre {
@@ -252,193 +217,31 @@
   color: var(--text-primary);
   font-size: var(--text-hero);
   font-weight: 800;
-  line-height: 0.86;
+  line-height: 0.9;
   letter-spacing: var(--tracking-tight);
-  /* The word has to be allowed to be as wide as the word is. */
   text-wrap: balance;
 }
 
 .home-hero-lede {
-  margin: 28px auto 0;
+  margin: 24px auto 0;
   max-width: 34rem;
   color: var(--text-secondary);
   font-size: var(--text-lede);
-  font-weight: 400;
   line-height: 1.6;
   letter-spacing: var(--tracking-wide);
   text-wrap: balance;
 }
 
-/* ------------------------------------------------------------- the numbers
- *
- * Four counted figures, separated by hairlines rather than boxed into four
- * cards. A card each would put a border and a background around every number,
- * which is the same "everything is a tile" reflex the whole redesign is
- * trying to get rid of -- and here it would be worse, because these are the
- * four least interactive things on the page. */
-.home-stats {
-  border-top: 1px solid var(--border);
-  padding: 40px 0;
-}
-
-.home-stats-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 28px 20px;
-}
-
-.home-stat {
-  min-width: 0;
-}
-
-.home-stat-value {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: var(--text-display);
-  font-weight: 800;
-  line-height: 1.05;
-  letter-spacing: var(--tracking-tight);
-  font-variant-numeric: tabular-nums;
-}
-
-.home-stat-value.is-pending {
-  display: block;
-  width: 72px;
-  height: 34px;
-  border-radius: var(--radius-sm);
-  background: var(--surface-hover);
-}
-
-.home-stat-label {
-  margin-top: 6px;
-  color: var(--text-muted);
-  font-size: var(--text-label);
-  font-weight: 600;
-  letter-spacing: var(--tracking-label);
-  text-transform: uppercase;
-}
-
-@media (min-width: 720px) {
-  .home-stats-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 20px;
-  }
-
-  /* Vertical hairlines between the four, on the wide layout only. */
-  .home-stat + .home-stat {
-    border-left: 1px solid var(--border);
-    padding-left: 20px;
-  }
-}
-
-/* ------------------------------------------------------------- the brands
- *
- * A quiet strip. The brand's own gradient does the work and the name does the
- * rest, so there is no logo to fetch and nothing to mis-render.
- */
-.home-brands {
-  padding: 8px 0 48px;
-}
-
-.home-brands-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.home-brand {
+/* The one control on the page. Same near-white plate as the sign-in button and
+   the owner console's save row, so it does not read as a different kind of
+   button from the ones two clicks away. */
+.home-hero-cta {
   display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  padding: 6px 14px 6px 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--surface);
-}
-
-.home-brand-mark {
-  display: inline-flex;
-  width: 28px;
-  height: 28px;
+  min-height: 50px;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  color: var(--fx-art-plate-ink);
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.home-brand-name {
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: var(--tracking-wide);
-}
-
-.home-brand-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent-cyan);
-}
-
-.home-brand-dot.is-empty {
-  background: var(--text-muted);
-}
-
-/* ------------------------------------------------------------- the product
- *
- * Same material as everything else on the page -- a translucent sheet over the
- * aurora rather than an opaque box -- and it needs its own rule rather than a
-   shared one for a performance reason: a `backdrop-filter` is a per-element
-   surface read, and four small tiles are far cheaper to blur than a set of
-   large ones is to keep correct while the list scrolls. */
-.home-product-card {
-  position: relative;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface-glass);
-  box-shadow: var(--shadow-lift);
-  backdrop-filter: blur(var(--glass-blur)) saturate(140%);
-  transition:
-    border-color var(--duration-normal) var(--ease-out-expo),
-    background var(--duration-normal) var(--ease-out-expo),
-    box-shadow var(--duration-normal) var(--ease-out-expo);
-}
-
-.home-product-card:hover {
-  border-color: var(--border-strong);
-  background: var(--surface-hover);
-  box-shadow: var(--shadow-float);
-}
-
-/* The pointer-following wash. Kept as its own element because it is driven by
-   two motion values written from a pointer handler, not by a class change. */
-.home-spotlight {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-/* ------------------------------------------------------------- the buttons
- *
- * The primary is the same near-white plate the sign-in button, the owner
- * console's save row and the reseller's top-up all use, and it hovers the
- * same way. That consistency is the entire argument for this block existing:
- * before it, the landing page's primary button went to literal white on hover
- * while every other primary in the product went somewhere else. */
-.home-cta {
-  display: inline-flex;
-  min-height: 48px;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 0 24px;
-  border: 1px solid transparent;
+  margin-top: 38px;
+  padding: 0 30px;
   border-radius: var(--radius-pill);
   background: var(--text-primary);
   color: var(--bg-canvas);
@@ -451,60 +254,20 @@
     box-shadow 260ms var(--ease-out-expo);
 }
 
-.home-cta:hover {
+.home-hero-cta:hover {
   background: color-mix(in srgb, var(--text-primary) 58%, white);
   color: var(--bg-canvas);
   transform: translateY(-1px);
   box-shadow: var(--shadow-lift);
 }
 
-.home-cta-ghost {
-  display: inline-flex;
-  min-height: 48px;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 0 24px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--surface);
-  color: var(--text-primary);
-  font-size: 15px;
-  font-weight: 700;
-  text-decoration: none;
-  backdrop-filter: blur(var(--glass-blur));
-  transition:
-    background-color var(--duration-normal) var(--ease-out-expo),
-    border-color var(--duration-normal) var(--ease-out-expo),
-    transform var(--duration-normal) var(--ease-out-expo),
-    box-shadow 260ms var(--ease-out-expo);
-}
-
-.home-cta-ghost:hover {
-  border-color: var(--border-strong);
-  background: var(--surface-hover);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-lift);
-}
-
-.home-cta:focus-visible,
-.home-cta-ghost:focus-visible,
 .home-nav-link:focus-visible,
 .home-nav-brand:focus-visible,
 .home-nav-login:focus-visible,
 .home-nav-signup:focus-visible,
 .home-nav-toggle:focus-visible,
 .home-nav-sheet-link:focus-visible,
-.home-brand:focus-visible {
+.home-hero-cta:focus-visible {
   outline: 2px solid var(--accent-cyan);
   outline-offset: 3px;
-}
-
-/* ---------------------------------------------------------------- the steps */
-.home-step {
-  padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  backdrop-filter: blur(var(--glass-blur));
 }

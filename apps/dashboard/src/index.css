@@ -58,16 +58,15 @@ body {
  * and the aurora is never seen at all. The pseudo-element has to paint above
  * its own root's background and below the content inside it.
  *
- * Two layers, because a single one cannot move convincingly. The old version
- * animated `opacity` 0.68 -> 1 over 26s, which breathes without travelling;
- * what reads as an aurora is the *pools changing position relative to each
- * other*, and that needs two. `::before` is the wide field of three pools,
- * `::after` a brighter, tighter pool drifting the other way.
+ * Static, deliberately. This was two transform-animated layers on coprime
+ * durations -- 52s and 41s -- and the point of the redesign was to stop
+ * moving. The motion was never free: it ran an infinite animation on the root
+ * of *every* full-bleed surface in the product, so the owner console and the
+ * sign-in screen were both paying for a background the visitor never asked
+ * them to look at. A still gradient is painted once and never again.
  *
- * Both animate `transform` and nothing else. `background-position` would
- * repaint a full-viewport gradient on every frame; a transform is handed to
- * the compositor and costs nothing per frame. The two durations are coprime,
- * so the composition never repeats.
+ * Three pools, because one reads as a spotlight and three read as depth. The
+ * colour is unchanged from the animated version; only the travel is gone.
  */
 .theme-dark,
 .auth-shell,
@@ -80,48 +79,13 @@ body {
 .ui-shell::before {
   content: "";
   position: fixed;
-  inset: -35%;
+  inset: 0;
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(38% 44% at 18% 12%, var(--fx-aurora-violet) 0%, transparent 72%),
-    radial-gradient(34% 40% at 88% 22%, var(--fx-aurora-cyan) 0%, transparent 70%),
-    radial-gradient(42% 48% at 76% 92%, var(--fx-aurora-magenta) 0%, transparent 74%),
+    radial-gradient(52% 46% at 50% 8%, var(--fx-aurora-violet) 0%, transparent 68%),
+    radial-gradient(44% 40% at 88% 92%, var(--fx-aurora-cyan) 0%, transparent 66%),
     radial-gradient(30% 30% at 46% 62%, var(--fx-aurora-ink) 0%, transparent 76%);
-  animation: aurora-field 52s var(--ease-out-expo) infinite alternate;
-}
-
-.theme-dark::after,
-.auth-shell::after,
-.ui-shell::after {
-  content: "";
-  position: fixed;
-  inset: -35%;
-  z-index: -1;
-  pointer-events: none;
-  background:
-    radial-gradient(26% 30% at 62% 34%, var(--fx-aurora-cyan) 0%, transparent 68%),
-    radial-gradient(22% 26% at 26% 74%, var(--fx-aurora-violet) 0%, transparent 66%);
-  opacity: 0.75;
-  animation: aurora-pool 41s var(--ease-out-expo) infinite alternate;
-}
-
-@keyframes aurora-field {
-  from {
-    transform: translate3d(-3%, -2%, 0) rotate(-1.5deg) scale(1);
-  }
-  to {
-    transform: translate3d(4%, 3%, 0) rotate(1.5deg) scale(1.12);
-  }
-}
-
-@keyframes aurora-pool {
-  from {
-    transform: translate3d(4%, 3%, 0) scale(1.08);
-  }
-  to {
-    transform: translate3d(-4%, -3%, 0) scale(1);
-  }
 }
 
 a {

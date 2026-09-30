@@ -1,21 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { api, subscribeRealtime, type CatalogProduct } from "../../lib/api";
-import { formatNumber, formatRupiah } from "../../lib/format";
 
 /**
- * The landing page's one copy of the catalogue.
+ * The price page's one copy of the catalogue.
  *
- * It used to be two. The hero fetched `catalogAll()` for its deck of three
- * products, and the catalogue below fetched it again, each into its own
- * `useState`, with nothing shared between them -- so the two could disagree,
- * and every visitor paid for the same `GET /public/catalog?includeEmpty=1`
- * twice. Only the catalogue below listened for the `db-change` SSE event, so
- * the hero's numbers went stale the moment anything was sold and nobody
- * noticed, because the hero's numbers were decoration.
+ * It used to be two, both on the landing page. The hero fetched `catalogAll()`
+ * for its deck of three products, and the catalogue below fetched it again,
+ * each into its own `useState`, with nothing shared between them -- so the two
+ * could disagree, and every visitor paid for the same
+ * `GET /public/catalog?includeEmpty=1` twice. Only the catalogue below listened
+ * for the `db-change` SSE event, so the hero's numbers went stale the moment
+ * anything was sold and nobody noticed, because the hero's numbers were
+ * decoration.
  *
- * One hook, one fetch, one subscription. The hero no longer needs the data at
- * all -- it is four words and a background -- so the strip of real numbers
- * below the fold is now the only other consumer.
+ * One hook, one fetch, one subscription, one consumer: the price list is now
+ * the only surface that shows a figure, so it is also the only one that has to
+ * stay current.
  */
 export type Catalog = {
   products: CatalogProduct[];
