@@ -16,13 +16,26 @@ function minPrice(product: CatalogProduct) {
 }
 
 const resellerCatalogLoginPath = "/login?next=/reseller-v2/catalog";
-const catalogGridVariants = { hidden: {}, visible: { transition: { staggerChildren: 0.07 } } };
-const productCardVariants = {
-  hidden: { opacity: 0, y: 14 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.22, 1, 0.36, 1] as const } },
-};
 
-function SpotlightProductCard({ children }: { children: ReactNode }) {
+/*
+ * How long each card waits before its own entrance starts.
+ *
+ * This was `staggerChildren` on the grid, which is the idiomatic way to do it
+ * -- and it did not work. The grid animated `initial="hidden"` to
+ * `animate="visible"` and every card sat at `opacity: 0; translateY(14px)`
+ * indefinitely: the parent handed the initial state down, the target never
+ * arrived. Nothing threw, and the stats strip on the same page (which drives
+ * itself with `whileInView`) animated fine, so the page looked healthy to
+ * every check that was not a screenshot of the catalogue itself.
+ *
+ * A card is not the load-bearing element of this section, so it is not worth
+ * depending on an implicit hand-off to say when it appears. The delay is
+ * computed from the card's index instead: each card states its own entrance,
+ * and the sequence is the same one the stagger produced.
+ */
+const CARD_STAGGER_SECONDS = 0.07;
+
+function SpotlightProductCard({ index, children }: { index: number; children: ReactNode }) {
   const reduceMotion = useReducedMotion();
   const x = useMotionValue(-300);
   const y = useMotionValue(-300);
@@ -39,7 +52,13 @@ function SpotlightProductCard({ children }: { children: ReactNode }) {
 
   return (
     <motion.article
-      variants={productCardVariants}
+      initial={reduceMotion ? false : { opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={
+        reduceMotion
+          ? { duration: 0 }
+          : { duration: 0.45, delay: index * CARD_STAGGER_SECONDS, ease: [0.22, 1, 0.36, 1] }
+      }
       onPointerMove={onPointerMove}
       onPointerLeave={() => opacity.set(0)}
       whileHover={reduceMotion ? undefined : { y: -4 }}
@@ -102,14 +121,14 @@ export default function ProductCatalog({ catalog }: { catalog: Catalog }) {
             <button type="button" onClick={reload} className="price-cta min-h-11 shrink-0 text-sm">Coba Lagi</button>
           </div>
         ) : readyProducts.length ? (
-          <motion.div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4" variants={catalogGridVariants} initial={reduceMotion ? false : "hidden"} animate="visible">
-            {readyProducts.map((product) => {
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {readyProducts.map((product, index) => {
               const asset = productBrandAsset(product);
               const logo = productLogoUrl(product);
               const price = minPrice(product);
               const isReady = product.stockCount > 0;
               return (
-                <SpotlightProductCard key={product.id}>
+                <SpotlightProductCard key={product.id} index={index}>
                    <div className="relative flex aspect-[16/8.5] items-center justify-center overflow-hidden border-b border-[var(--border)] bg-[var(--bg-raised)]">
                     <div className="absolute left-[18%] top-[14%] h-24 w-24 rounded-full bg-[var(--accent-violet)]/10 blur-3xl" aria-hidden="true" />
                     <div className="absolute bottom-[10%] right-[12%] h-24 w-24 rounded-full bg-[var(--accent-cyan)]/10 blur-3xl" aria-hidden="true" />
@@ -127,7 +146,7 @@ export default function ProductCatalog({ catalog }: { catalog: Catalog }) {
                 </SpotlightProductCard>
               );
             })}
-          </motion.div>
+          </div>
         ) : (
           <div className="flex max-w-2xl items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-5"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-raised)] text-[var(--text-secondary)]"><Archive size={18} aria-hidden="true" /></span><div><h3 className="font-extrabold">Belum ada produk aktif</h3><p className="mt-1 text-sm leading-5 text-[var(--text-secondary)]">Produk akan muncul setelah diaktifkan dari dashboard.</p></div></div>
         )}

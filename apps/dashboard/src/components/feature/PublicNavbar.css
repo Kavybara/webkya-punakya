@@ -1,0 +1,200 @@
+/*
+ * The public navbar.
+ *
+ * This is a stylesheet of its own, and it has to be one. `PublicNavbar` is
+ * rendered by `/` and by `/harga`, but these rules used to live in
+ * `pages/home/home.css` -- and Vite splits CSS per lazy route chunk, so the
+ * rules landed in the *home page's* chunk. `/harga` never loads that chunk, so
+ * the navbar rendered there with no styles at all: no positioning, no pill
+ * buttons, no mobile sheet. Nothing failed, nothing warned; the markup was
+ * simply a plain unstyled `<nav>`.
+ *
+ * The rule the bug teaches: a component that is not page-owned owns its
+ * styles. Anything a shared component renders must be styled by a file the
+ * component itself imports, so the chunk that contains the component also
+ * contains its CSS.
+ *
+ * Plain text on the background. It was a floating glass pill until the hero
+ * stopped being something to float over: on a flat, still background a
+ * `backdrop-filter` has nothing to sample, so all that survived of the glass
+ * was the cost and the silhouette.
+ */
+
+.home-nav {
+  position: fixed;
+  inset-inline: 0;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  justify-content: center;
+  padding: 18px 16px;
+}
+
+.home-nav-inner {
+  display: flex;
+  width: 100%;
+  max-width: 1180px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.home-nav-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-primary);
+}
+
+.home-nav-mark {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--accent-cyan);
+}
+
+.home-nav-links {
+  display: none;
+  align-items: center;
+  gap: 4px;
+}
+
+.home-nav-link {
+  padding: 9px 12px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: var(--tracking-wide);
+  transition: color var(--duration-fast) var(--ease-out-expo);
+}
+
+.home-nav-link:hover {
+  color: var(--text-primary);
+}
+
+.home-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.home-nav-login {
+  display: none;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+  border-radius: var(--radius-pill);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: var(--tracking-wide);
+  transition: background var(--duration-fast) var(--ease-out-expo);
+}
+
+.home-nav-login:hover {
+  background: var(--surface);
+}
+
+.home-nav-signup {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 18px;
+  border-radius: var(--radius-pill);
+  background: var(--text-primary);
+  color: var(--bg-canvas);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  transition: opacity var(--duration-fast) var(--ease-out-expo);
+}
+
+.home-nav-signup:hover {
+  opacity: 0.86;
+}
+
+/* `<details>` rather than a stateful sheet: the platform already implements a
+   disclosure widget, so the keyboard and the screen-reader announcement come
+   free and there is no effect to leak. Escape does not -- that is handled in
+   `onMenuKeyDown`, and a `<details>` will not do it on its own. */
+.home-nav-details {
+  position: relative;
+}
+
+.home-nav-toggle {
+  display: inline-flex;
+  width: 42px;
+  height: 42px;
+  cursor: pointer;
+  list-style: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--text-primary);
+}
+
+.home-nav-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.home-nav-sheet {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  display: flex;
+  width: 200px;
+  flex-direction: column;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-glass-strong);
+  box-shadow: var(--shadow-float);
+  backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
+}
+
+.home-nav-sheet-link {
+  padding: 11px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.home-nav-sheet-link:hover {
+  background: var(--surface);
+  color: var(--text-primary);
+}
+
+.home-nav-link:focus-visible,
+.home-nav-brand:focus-visible,
+.home-nav-login:focus-visible,
+.home-nav-signup:focus-visible,
+.home-nav-toggle:focus-visible,
+.home-nav-sheet-link:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 3px;
+}
+
+@media (min-width: 640px) {
+  .home-nav-login {
+    display: inline-flex;
+  }
+}
+
+@media (min-width: 900px) {
+  .home-nav-links {
+    display: flex;
+  }
+
+  .home-nav-details {
+    display: none;
+  }
+}
