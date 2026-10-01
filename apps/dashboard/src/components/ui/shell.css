@@ -84,9 +84,26 @@
 .ui-shell.ui-shell,
 .ui-shell.ui-shell *,
 .ui-shell.ui-shell *::before,
-.ui-shell.ui-shell *::after {
+.ui-shell.ui-shell *::after,
+.auth-shell.auth-shell,
+.auth-shell.auth-shell *,
+.auth-shell.auth-shell *::before,
+.auth-shell.auth-shell *::after {
   backdrop-filter: none !important;
 }
+
+/* `.auth-shell` is here for the same reason, and it is worth being precise
+   about why it was missing while the sign-in screens still felt heavy: the
+   three auth routes play the farm video behind them, which is a *worse*
+   backdrop for `backdrop-filter` than anything inside the console, and
+   `auth.css` had five of them -- one per input field, 28px on the card, and a
+   `filter: blur(28px)` on an animation that never ended. The rule above was
+   scoped `.ui-shell` only, and `.auth-shell` is a sibling root rather than a
+   descendant of it, so none of it reached the sign-in screens.
+ *
+ * There are no exceptions below for `.auth-shell` and there never should be: the
+ * auth screen has no transient modal to separate, and nothing on it needs to
+ * blur anything. `auth.css` carries the reasoning at length. */
 
 /* The two sticky bars are NOT in this list. They used to be, blurred at 28px,
    and dropping that blur took `/owner-v2/orders` from p95 79ms to p95 21ms

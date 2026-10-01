@@ -1,44 +1,84 @@
 /*
- * The two sign-in surfaces, as one screen: a brand column that does the
- * talking and a form column that does the work.
+ * The three sign-in surfaces, as one screen: a masthead column that says what
+ * Kavya is, and a working column that does the typing.
  *
- * The ground -- the aurora -- is painted once on the shell's pseudo-element
- * in ui.css, the same place it is painted for the signed-in consoles. That
- * matters here more than anywhere else, because this screen used to be the
- * one place the reader arrived *before* they had seen anything else: it sets
- * the first impression of the product, and a first impression made of a hard
- * #08080a and a white engraved letterform is a first impression of a
- * template.
+ * -----------------------------------------------------------------------
+ * WHY THERE IS NOT A SINGLE `backdrop-filter` IN THIS FILE
+ * -----------------------------------------------------------------------
  *
- * So the brand column is glass over the same aurora the consoles sit on, the
- * form sits on a single card rather than a stack of bordered boxes, and the
- * inputs are lit from behind rather than outlined. Nothing here is a solid
- * colour that is not a token.
+ * There were five, and they were the reason the sign-in screen felt heavy.
+ *
+ * The sign-in routes are in the router's PUBLIC_PREFIXES, so all three of them
+ * play `media/capybara-farm.mp4` behind them. A `backdrop-filter` is not a
+ * decoration -- it is an instruction to re-read and re-blur everything painted
+ * behind that element, every time any of it changes. Over a static gradient it
+ * runs once and the result is cached. Over a *playing video* it runs again on
+ * every frame, 30 to 60 times a second, and the region being re-blurred is the
+ * union of every filtered box on screen.
+ *
+ * Which, here, was nearly all of them:
+ *
+ *   .auth-brand          blur(6px) over a full-viewport-height column
+ *   .auth-form-panel     blur(28px) over the card
+ *   .auth-input          blur(18px) -- PER FIELD, six on the register form,
+ *                        and six more boxes on the OTP step
+ *   .auth-notice         blur(18px)
+ *   .auth-button.is-secondary   blur(18px)
+ *
+ * and on top of those, `.auth-brand-glow` was `filter: blur(28px)` on an
+ * `animation: auth-glow 8s infinite alternate` that never stopped and never
+ * ended. A blurred element that scales has to be re-blurred every frame on its
+ * own account, so that one cost the same forever, for a colour wash behind a
+ * letterform.
+ *
+ * This is the same bug the signed-in consoles had. It was fixed there by
+ * painting the sticky bars opaque instead of blurred, which took
+ * `/owner-v2/orders` from p95 276ms to p95 17.9ms. That fix shipped with a
+ * `.ui-shell.ui-shell *` kill-switch -- and the sign-in shell is `.auth-shell`,
+ * a sibling of `.ui-shell` rather than a descendant, so none of it applied
+ * here. The heavy blur was still running on all three auth pages after the
+ * console was already fast.
+ *
+ * So there is no blur here at all, and legibility does not depend on any. The
+ * surfaces are translucent because the palette intends them to be: a 0.86
+ * white sheet is opaque enough to carry dark-green ink at 14px over a moving
+ * field without smearing a single pixel of it, which is what the 28px blur was
+ * being blamed for in the first place. The brand column keeps its copy off the
+ * busiest part of the frame with a plate rather than by defocusing the footage.
+ *
+ * `auth-no-blur.test.mjs` holds this line. So does the `.auth-shell` arm of the
+ * kill-switch in `components/ui/shell.css`, which means a stylesheet that adds
+ * one back loses the effect at runtime whether or not the test is run.
  */
 
 /* The sign-in shell.
  *
- * `background: transparent`, and this is the change that made the farm appear
- * behind the sign-in screen at all. It was `--bg-canvas`, an opaque pale
- * green, which is correct on its own terms -- but the shell is the full
- * viewport, so an opaque fill here is an opaque fill over the whole video. The
- * canvas is painted by `body`, and this is a transparent sheet on top of it.
+ * `background: transparent`, so the canvas painted by `body` and the video
+ * mounted by the router both show through. The old value here was
+ * `--bg-canvas`, an opaque pale green -- correct on its own terms, but the
+ * shell is the full viewport, so an opaque fill is an opaque fill over the
+ * whole video. `farm-backdrop.test.mjs` pins this.
  *
- * `color-scheme: dark` went with it. It told the browser to render *native*
- * widgets -- the date picker, the autofill dropdown, the scrollbar, the
- * checkbox on the "remember me" box -- in the dark palette. None of those are
- * styled by this codebase, so on a daylight screen they were the only dark
- * things left, and the checkbox and scrollbar in particular read as a bug
- * rather than as a browser default. */
+ * `color-scheme: light` tells the browser to paint *native* widgets -- the
+ * checkbox, the scrollbar, the autofill dropdown -- in the daylight palette.
+ * None of those are styled by this codebase, so on a dark screen they were the
+ * only dark things left and read as a bug rather than as a browser default. */
 .auth-shell {
   min-height: 100svh;
   display: grid;
-  grid-template-columns: minmax(360px, 0.92fr) minmax(520px, 1.08fr);
+  grid-template-columns: minmax(300px, 0.78fr) minmax(500px, 1.22fr);
   overflow-x: hidden;
   background: transparent;
   color: var(--text-primary);
   color-scheme: light;
 }
+
+/* ------------------------------------------------------------------ *
+ * The masthead column
+ *
+ * No glass sheet, no letterform, no glow. The farm is the artwork on this
+ * screen and the cheapest way to show it is to stop covering it.
+ * ------------------------------------------------------------------ */
 
 .auth-brand {
   position: relative;
@@ -47,153 +87,196 @@
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  padding: clamp(32px, 4vw, 64px);
+  gap: 40px;
+  padding: clamp(32px, 3.4vw, 60px);
   border-right: 1px solid var(--border);
-  /* Translucent on purpose: this column is the largest single area on the
-     screen, and a solid fill here would cover half the farm and split the
-     background into two unrelated halves.
-
-     The blur is 6px, not `--glass-blur`. The 18px figure is right for a panel
-     sitting on a smooth gradient, where the point of the blur is to hide the
-     gradient's own banding. Over 1600x900 pixel art it is far too much: at
-     18px the cottage, the trees and the fence stop being shapes and become
-     coloured smudges, and the column reads as a rendering fault rather than
-     as glass. 6px is the largest radius that still leaves the 2x2 blocks
-     legible, which is all the blur has to do here -- the 60% white sheet
-     above it is doing the work of separating the text from the scene. */
-  background: var(--surface-glass);
-  backdrop-filter: blur(6px) saturate(140%);
+  background: transparent;
 }
 
+/* The wordmark is the largest text on the screen. In a split masthead layout
+   that is correct -- the reader should be able to answer "am I in the right
+   place" before reading anything else, and a 14px wordmark over a moving video
+   is not an answer. */
 .auth-brand-name,
 .auth-mobile-brand a {
   position: relative;
-  z-index: 2;
   width: fit-content;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 24px;
-  font-weight: 600;
-  letter-spacing: 0;
-}
-
-.auth-brand-visual {
-  position: absolute;
-  inset: 50% auto auto 50%;
-  width: clamp(210px, 24vw, 360px);
-  aspect-ratio: 1;
-  transform: translate(-50%, -54%);
-  display: grid;
-  place-items: center;
-}
-
-.auth-brand-visual > span {
-  position: relative;
-  z-index: 1;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: clamp(150px, 18vw, 260px);
+  font-size: var(--text-display);
+  font-weight: 800;
+  letter-spacing: var(--tracking-tight);
   line-height: 1;
-  color: var(--text-primary);
-  /* Cut into the surface rather than printed on it: a bright edge above and a
-     deep one below is the whole trick, and both halves are tokens now rather
-     than a hardcoded white and a hardcoded black.
-
-     The polarity flipped with the theme. On the dark console this was a light
-     letter with a bright top-left edge and a black bottom-right one, which
-     reads as an engraved K. In daylight the trick inverts -- a pale edge above
-     and a deep one below engraves it into a light surface instead of standing
-     proud of it. Keeping the old pair would have made the mark a dark shape
-     with a black shadow on top of a light shape, which reads as a smudge. */
-  text-shadow: -1px -1px var(--surface-glass-strong), 1px 1px var(--border-strong);
 }
 
-/* The mark's own pool of colour. A real `filter: blur()` here is worth its
-   cost, unlike the aurora behind the canvas: this is one small element with
-   nothing painted on top of it, and the mark has to read as *behind glass*
-   rather than as a flat wash. */
-.auth-brand-glow {
-  position: absolute;
-  inset: -45%;
-  opacity: 0.62;
-  background:
-    radial-gradient(circle at 31% 57%, color-mix(in srgb, var(--accent-magenta) 20%, transparent), transparent 28%),
-    radial-gradient(circle at 52% 31%, color-mix(in srgb, var(--accent-violet) 23%, transparent), transparent 31%),
-    radial-gradient(circle at 68% 67%, color-mix(in srgb, var(--accent-cyan) 16%, transparent), transparent 28%),
-    radial-gradient(circle at 50% 65%, var(--fx-aurora-ink), transparent 17%);
-  filter: blur(28px);
-  animation: auth-glow 8s var(--ease-out-expo) infinite alternate;
+.auth-brand-copy { max-width: 360px; }
+
+.auth-brand-lede {
+  margin: 0;
+  font-size: var(--text-title);
+  font-weight: 600;
+  line-height: 1.22;
+  letter-spacing: var(--tracking-normal);
 }
 
-.auth-brand-copy { position: relative; z-index: 2; max-width: 390px; }
-.auth-brand-copy p { margin: 0 0 10px; font-size: clamp(24px, 2.2vw, 38px); line-height: 1.08; letter-spacing: 0; }
-.auth-brand-home { min-height: 44px; display: inline-flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 14px; }
+/* Three checkable claims, set as a colophon: a hairline above each row, the
+   icon hanging in the left margin. Hairlines rather than cards, because three
+   cards in a vertical list is a template and three rules is a list. */
+.auth-brand-facts {
+  display: grid;
+  margin: 26px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.auth-brand-facts li {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  padding: 13px 0;
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: var(--text-small);
+  line-height: 1.5;
+}
+
+.auth-brand-facts svg { margin-top: 2px; color: var(--accent-cyan); }
+
+.auth-brand-home {
+  width: fit-content;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-small);
+  font-weight: 550;
+}
+
 .auth-brand-home:hover { color: var(--text-primary); }
 
 /* ------------------------------------------------------------------ *
- * The form column
- *
- * One card, not a stack of boxes. The old screen outlined every input, the
- * notice, the step marker and the destination line individually, which is
- * what made a three-field form look like a form inside a form inside a
- * panel. Now the panel is the only edge; the fields inside it are lit.
+ * The working column
  * ------------------------------------------------------------------ */
 
 .auth-form-side {
   min-width: 0;
   display: grid;
   place-items: center;
-  padding: 48px clamp(32px, 6vw, 96px);
+  padding: 48px clamp(32px, 5vw, 80px);
   background: transparent;
 }
 
+.auth-mobile-brand { display: none; }
+
+/* One plate, no border. The old card was a bordered, 28px-blurred box with a
+   48px floating shadow, which described itself as a floating box and then
+   blurred the field behind it. At 0.86 white over the daylight field this
+   reads as the same object with none of that cost: the fill separates it from
+   the footage, and the shadow only has to say the edges lift. */
 .auth-form-panel {
-  width: min(100%, 460px);
-  padding: clamp(26px, 3.2vw, 40px);
-  border: 1px solid var(--border);
+  width: min(100%, 452px);
+  padding: clamp(26px, 3vw, 38px);
+  border: 0;
   border-radius: var(--radius-xl);
-  background: var(--surface-glass);
-  backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
-  box-shadow: var(--shadow-float);
+  background: var(--surface-glass-strong);
+  box-shadow: var(--shadow-lift);
 }
 
-.auth-form-header { margin-bottom: 32px; }
-.auth-form-header h1 { margin: 0; font-size: clamp(28px, 2.5vw, 38px); line-height: 1.1; font-weight: 550; letter-spacing: 0; }
-.auth-form-header p { margin: 12px 0 0; max-width: 470px; color: var(--text-secondary); font-size: 15px; line-height: 1.6; }
-.auth-mobile-brand { display: none; }
-.auth-form { display: grid; gap: 20px; }
-.auth-field { position: relative; display: grid; gap: 8px; }
-.auth-field label,
-.auth-otp-field legend { color: var(--text-primary); font-size: 14px; font-weight: 550; }
+.auth-form-header { margin-bottom: 28px; }
+.auth-form-header h1 {
+  margin: 0;
+  font-size: var(--text-title);
+  font-weight: 650;
+  line-height: 1.15;
+  letter-spacing: var(--tracking-normal);
+}
+.auth-form-header p {
+  margin: 10px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-small);
+  line-height: 1.6;
+}
 
+.auth-form { display: grid; gap: 18px; }
+.auth-field { position: relative; display: grid; gap: 7px; }
+.auth-field label,
+.auth-otp-field legend {
+  color: var(--text-primary);
+  font-size: var(--text-small);
+  font-weight: 600;
+}
+
+/* Near-opaque, and that is the whole trick now that the blur is gone: an
+   input is the one control whose contents have to stay legible while the video
+   passes under it, and `--surface-hover` at 0.88 gets there without asking the
+   GPU to re-blur the frame behind every keystroke. */
 .auth-input,
 .auth-otp-row input {
   width: 100%;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
   outline: none;
-  background: var(--surface);
-  backdrop-filter: blur(var(--glass-blur));
+  background: var(--surface-hover);
   color: var(--text-primary);
-  transition: border-color var(--duration-normal) var(--ease-out-expo), background var(--duration-normal) var(--ease-out-expo), box-shadow var(--duration-normal) var(--ease-out-expo);
+  transition: border-color var(--duration-fast) var(--ease-out-expo), box-shadow var(--duration-fast) var(--ease-out-expo), background var(--duration-fast) var(--ease-out-expo);
 }
+
 .auth-input { height: 50px; padding: 0 14px; font-size: 16px; }
 .auth-input::placeholder { color: var(--text-muted); opacity: 1; }
-.auth-input:hover { border-color: var(--border-strong); background: var(--surface-hover); }
+.auth-input:hover { border-color: color-mix(in srgb, var(--accent-cyan) 42%, var(--border-strong)); }
 .auth-input:focus,
-.auth-otp-row input:focus { border-color: color-mix(in srgb, var(--accent-violet) 70%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-violet) 15%, transparent); }
+.auth-otp-row input:focus {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-cyan) 18%, transparent);
+}
 .auth-input.is-invalid,
 .auth-otp-row input[aria-invalid="true"] { border-color: color-mix(in srgb, var(--status-danger) 72%, transparent); }
-.auth-field small { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.auth-field small { color: var(--text-muted); font-size: var(--text-label); line-height: 1.5; }
+
 .auth-password-wrap { position: relative; }
 .auth-password-wrap .auth-input { padding-right: 48px; }
-.auth-password-toggle { position: absolute; right: 8px; top: 33px; width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); cursor: pointer; transition: background 200ms var(--ease-out-expo), color 200ms var(--ease-out-expo); }
-.auth-password-toggle:hover { background: var(--surface-hover); color: var(--text-primary); }
-.auth-error { margin: 0; color: var(--status-danger); font-size: 13px; line-height: 1.45; }
-.auth-notice { margin: 0; padding: 13px 15px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-raised); backdrop-filter: blur(var(--glass-blur)); color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
-.auth-notice.is-success { border-color: color-mix(in srgb, var(--status-success) 25%, transparent); color: color-mix(in srgb, var(--status-success) 42%, var(--text-primary)); }
-.auth-general-error { margin-bottom: 18px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--status-danger) 32%, transparent); border-radius: var(--radius-md); background: color-mix(in srgb, var(--status-danger) 7%, transparent); }
+.auth-password-toggle {
+  position: absolute;
+  right: 8px;
+  top: 31px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out-expo), color var(--duration-fast) var(--ease-out-expo);
+}
+.auth-password-toggle:hover { background: var(--bg-raised); color: var(--text-primary); }
 
-/* The one bright object on the screen. A lift, because it is the thing the
-   reader came here to press. */
+.auth-error { margin: 0; color: var(--status-danger); font-size: var(--text-small); line-height: 1.45; }
+
+.auth-notice {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  font-size: var(--text-small);
+  line-height: 1.55;
+}
+.auth-notice.is-success { border-color: color-mix(in srgb, var(--status-success) 30%, transparent); color: var(--text-primary); }
+
+.auth-general-error {
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--status-danger) 32%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--status-danger) 7%, transparent);
+}
+
+/* The one bright object on the screen, and the reason the field green is the
+   primary rather than the pond blue: it is what the reader came here to press. */
 .auth-button {
   min-height: 50px;
   display: inline-flex;
@@ -205,111 +288,160 @@
   padding: 0 24px;
   background: var(--status-success);
   color: var(--text-inverse);
-  font-size: 14px;
+  font-size: var(--text-small);
   font-weight: 650;
   cursor: pointer;
-  transition: transform var(--duration-normal) var(--ease-out-expo), background-color var(--duration-normal) var(--ease-out-expo), border-color var(--duration-normal) var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo);
+  transition: transform var(--duration-fast) var(--ease-out-expo), background-color var(--duration-fast) var(--ease-out-expo), box-shadow var(--duration-fast) var(--ease-out-expo);
 }
-.auth-button:hover { background: color-mix(in srgb, var(--status-success) 84%, black); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.auth-button:hover { background: color-mix(in srgb, var(--status-success) 86%, black); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
 .auth-button:active { transform: translateY(0); }
 .auth-button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
-.auth-button.is-secondary { border-color: var(--border); background: var(--surface); backdrop-filter: blur(var(--glass-blur)); color: var(--text-primary); }
-.auth-button.is-secondary:hover { border-color: var(--border-strong); background: var(--surface-hover); box-shadow: var(--shadow-lift); }
+.auth-button.is-secondary { border-color: var(--border-strong); background: var(--bg-raised); color: var(--text-primary); }
+.auth-button.is-secondary:hover { border-color: color-mix(in srgb, var(--accent-cyan) 42%, var(--border-strong)); background: var(--surface-hover); transform: none; }
 .auth-button.is-full { width: 100%; }
+
 .auth-inline-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .auth-inline-row a,
 .auth-text-link,
-.auth-home-link { color: var(--text-secondary); font-size: 13px; font-weight: 550; }
+.auth-home-link { color: var(--text-secondary); font-size: var(--text-small); font-weight: 550; }
 .auth-inline-row a:hover,
 .auth-text-link:hover,
 .auth-home-link:hover { color: var(--text-primary); }
-.auth-checkbox { display: inline-flex; align-items: center; gap: 9px; color: var(--text-secondary); font-size: 13px; }
-/* The "Ingat saya" box.
- *
- * `accent-color` is what makes a native checkbox part of the design rather
- * than a browser artefact, and the value has to be the one the button uses.
- * It was `--accent-violet`, which is a blue that appears nowhere else on the
- * sign-in screen -- the primary action beside it is the field green -- so the
- * one control on this form that the browser paints itself was the one control
- * that did not match. */
+
+.auth-checkbox { display: inline-flex; align-items: center; gap: 9px; color: var(--text-secondary); font-size: var(--text-small); }
+/* `accent-color` is what makes a native checkbox part of the design rather than
+   a browser artefact, and the value has to be the one the primary button uses.
+   It was `--accent-violet`, a blue that appears nowhere else on this screen, so
+   the only control the browser paints itself was the one that did not match. */
 .auth-checkbox input { width: 16px; height: 16px; accent-color: var(--status-success); }
-.auth-footer-copy { margin: 22px 0 0; color: var(--text-muted); text-align: center; font-size: 13px; }
+
+.auth-footer-copy { margin: 22px 0 0; color: var(--text-muted); text-align: center; font-size: var(--text-small); }
 .auth-footer-copy a { color: var(--text-primary); font-weight: 600; }
-.auth-form-note { margin: 14px 0 0; color: var(--text-muted); text-align: center; font-size: 12px; line-height: 1.5; }
-.auth-home-link { width: fit-content; min-height: 44px; margin: 20px auto 0; display: flex; align-items: center; gap: 7px; }
-.auth-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; padding: 0; margin: 0 0 32px; list-style: none; }
-.auth-steps li { position: relative; display: grid; justify-items: center; gap: 8px; color: var(--text-muted); font-size: 11px; text-align: center; }
-.auth-steps li:not(:last-child)::after { content: ""; position: absolute; z-index: 0; top: 14px; left: calc(50% + 18px); width: calc(100% - 36px); height: 1px; background: var(--border); }
-.auth-steps li.is-complete:not(:last-child)::after { background: color-mix(in srgb, var(--accent-violet) 55%, transparent); }
-.auth-steps li > span { position: relative; z-index: 1; width: 29px; height: 29px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 50%; background: var(--bg-raised); font-size: 11px; }
-.auth-steps li strong { font-weight: 550; }
-.auth-steps li.is-active { color: var(--text-primary); }
-.auth-steps li.is-active > span { border-color: color-mix(in srgb, var(--accent-cyan) 68%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-cyan) 10%, transparent); }
+.auth-form-note { margin: 14px 0 0; color: var(--text-muted); text-align: center; font-size: var(--text-label); line-height: 1.5; }
+.auth-home-link { width: fit-content; min-height: 44px; margin: 18px auto 0; display: flex; align-items: center; gap: 7px; }
+
+/* The step rail.
+ *
+ * Three numbered circles joined by connector lines, which is what this was, and
+ * which spends a `::after` on every item to compute the gap between them. A
+ * segmented track above the labels says the same thing, costs no pseudo-element
+ * arithmetic, and does not shrink to nothing when the panel gets narrow -- which
+ * is the register form's six-field width on a laptop. */
+.auth-steps {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 0 0 28px;
+  list-style: none;
+}
+.auth-steps li {
+  position: relative;
+  padding-top: 11px;
+  color: var(--text-muted);
+  font-size: var(--text-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+.auth-steps li::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
+}
+.auth-steps li > span { margin-right: 6px; font-weight: 700; }
+.auth-steps li strong { font-weight: 650; letter-spacing: var(--tracking-label); }
 .auth-steps li.is-complete { color: var(--text-secondary); }
-.auth-steps li.is-complete > span { border-color: color-mix(in srgb, var(--accent-violet) 58%, transparent); color: color-mix(in srgb, var(--accent-violet) 34%, var(--text-primary)); }
+.auth-steps li.is-complete::before { background: var(--accent-cyan); }
+.auth-steps li.is-active { color: var(--text-primary); }
+.auth-steps li.is-active::before { background: var(--status-success); }
+
 .auth-otp-field { min-width: 0; margin: 0; padding: 0; border: 0; }
 .auth-otp-row { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
 .auth-otp-row input { min-width: 0; height: 56px; padding: 0; text-align: center; font-size: 21px; font-weight: 650; }
 .auth-otp-field .auth-error { margin-top: 8px; }
-.auth-destination { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 15px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
-.auth-destination span { color: var(--text-muted); font-size: 12px; }
-.auth-destination strong { font-size: 13px; }
+
+.auth-destination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+}
+.auth-destination span { color: var(--text-muted); font-size: var(--text-label); }
+.auth-destination strong { font-size: var(--text-small); }
+
 .auth-form-actions { display: flex; gap: 10px; }
 .auth-form-actions > * { flex: 1; }
-.auth-resend { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-muted); font-size: 12px; }
-.auth-resend button { min-height: 40px; border: 0; background: transparent; color: var(--text-primary); font-size: 13px; cursor: pointer; }
+
+.auth-resend { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-muted); font-size: var(--text-label); }
+.auth-resend button { min-height: 40px; border: 0; background: transparent; color: var(--text-primary); font-size: var(--text-small); font-weight: 550; cursor: pointer; }
 .auth-resend button:disabled { color: var(--text-muted); cursor: not-allowed; }
-.auth-requirements { display: flex; flex-wrap: wrap; gap: 8px 14px; color: var(--text-muted); font-size: 12px; }
+
+.auth-requirements { display: flex; flex-wrap: wrap; gap: 8px 14px; color: var(--text-muted); font-size: var(--text-label); }
 .auth-requirements span.is-valid { color: var(--status-success); }
-.auth-caps { margin: -8px 0 0; color: var(--status-warning); font-size: 12px; }
-.auth-match { margin: -8px 0 0; color: var(--text-muted); font-size: 12px; }
+.auth-caps { margin: -6px 0 0; color: var(--status-warning); font-size: var(--text-label); }
+.auth-match { margin: -6px 0 0; color: var(--text-muted); font-size: var(--text-label); }
 .auth-match.is-match { color: var(--status-success); }
 .auth-match.is-mismatch { color: var(--status-danger); }
-.auth-success { display: grid; justify-items: center; padding: 28px 0 8px; text-align: center; }
-.auth-success > span { width: 52px; height: 52px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--status-success) 30%, transparent); border-radius: 50%; background: color-mix(in srgb, var(--status-success) 8%, transparent); box-shadow: 0 0 44px -12px color-mix(in srgb, var(--status-success) 60%, transparent); color: var(--status-success); }
-.auth-success h2 { margin: 20px 0 8px; font-size: 22px; font-weight: 600; }
-.auth-success p { margin: 0 0 24px; color: var(--text-secondary); font-size: 14px; line-height: 1.6; }
+
+.auth-success { display: grid; justify-items: center; padding: 24px 0 4px; text-align: center; }
+.auth-success > span {
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--status-success) 12%, transparent);
+  color: var(--status-success);
+}
+.auth-success h2 { margin: 18px 0 8px; font-size: var(--text-lede); font-weight: 650; }
+.auth-success p { margin: 0 0 24px; color: var(--text-secondary); font-size: var(--text-small); line-height: 1.6; }
 
 button:focus-visible,
 a:focus-visible,
 .auth-input:focus-visible,
 .auth-otp-row input:focus-visible { outline: 2px solid var(--accent-cyan); outline-offset: 3px; }
 
-@keyframes auth-glow { from { transform: scale(0.97); opacity: 0.5; } to { transform: scale(1.03); opacity: 0.7; } }
 @keyframes auth-spin { to { transform: rotate(360deg); } }
 .auth-spinner { animation: auth-spin 0.8s linear infinite; }
 
-@media (max-width: 900px) {
-  .auth-shell { grid-template-columns: minmax(300px, 0.75fr) minmax(460px, 1.25fr); }
-  .auth-brand { padding: 32px; }
-  .auth-brand-copy p { font-size: 25px; }
+@media (max-width: 980px) {
+  .auth-shell { grid-template-columns: minmax(260px, 0.68fr) minmax(440px, 1.32fr); }
+  .auth-brand { padding: 30px; }
+  .auth-brand-copy { max-width: 280px; }
 }
 
 @media (max-width: 767px) {
   .auth-shell { display: block; min-height: 100svh; overflow-x: hidden; background: transparent; }
   .auth-brand { display: none; }
   .auth-form-side { min-height: 100svh; display: block; padding: max(24px, env(safe-area-inset-top)) 20px max(28px, env(safe-area-inset-bottom)); }
-  .auth-mobile-brand { display: block; margin-bottom: 34px; }
-  .auth-mobile-brand a { display: inline-flex; align-items: center; gap: 10px; font-size: 21px; }
-  .auth-mobile-brand span { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); font-size: 19px; }
-  /* The card comes back on a phone, thinner than the desktop one but not gone.
-     It was dropped entirely -- `background: transparent`, padding 0 -- on the
-     argument that a panel inset 20px from both edges turns a three-field form
-     into a scroll. That was true for the fields and not for the rest of the
-     column: the four rows under the button (the redirect note, both links, and
-     "Kembali ke Beranda") were left sitting straight on the video, over the
-     sunlit meadow, which is the highest-contrast patch in the frame. 13px
-     secondary text with no backing over that is unreadable, and it was
-     unreadable rather than ugly.
-
-     So the sheet returns, without the border and with a lighter fill: 20px of
-     padding costs one field of scroll on the tallest form here, and buys a
-     surface for the whole column. The farm still shows at the top and bottom
-     of the screen, which is where a phone actually has room for it. */
-  .auth-form-panel { width: 100%; max-width: 520px; margin: 0 auto; padding: 22px 20px 26px; border: 0; border-radius: var(--radius-xl); background: var(--surface-glass); backdrop-filter: blur(6px) saturate(140%); box-shadow: var(--shadow-lift); }
-  .auth-form-header { margin-bottom: 24px; }
-  .auth-form-header h1 { font-size: 29px; }
-  .auth-form-header p { font-size: 14px; }
+  .auth-mobile-brand { display: block; margin-bottom: 28px; }
+  .auth-mobile-brand a { display: inline-flex; align-items: center; gap: 10px; font-size: 26px; }
+  .auth-mobile-brand span {
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    border-radius: var(--radius-md);
+    background: var(--status-success);
+    color: var(--text-inverse);
+    font-size: 19px;
+  }
+  /* The plate stays on a phone. Dropped to `background: transparent` at one
+     point on the argument that a panel inset 20px from both edges turns a
+     three-field form into a scroll -- true for the fields, not for the four
+     rows under the button, which then sat straight on the sunlit meadow at 13px
+     secondary. That was unreadable rather than ugly. */
+  .auth-form-panel { width: 100%; max-width: 520px; margin: 0 auto; padding: 24px 20px 28px; }
+  .auth-form-header { margin-bottom: 22px; }
+  .auth-form-header h1 { font-size: 27px; }
   .auth-otp-row { gap: 7px; }
   .auth-otp-row input { height: 50px; font-size: 19px; }
   .auth-form-actions { flex-direction: column-reverse; }
@@ -323,6 +455,5 @@ a:focus-visible,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .auth-brand-glow { animation: none; }
   .auth-shell *, .auth-shell *::before, .auth-shell *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
 }
