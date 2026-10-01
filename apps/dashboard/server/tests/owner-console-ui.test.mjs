@@ -383,3 +383,102 @@ test("fulfillment repair gives up instead of retrying a broken order forever", a
   // fix a bad product config, so a stopped order must reach the attention queue.
   assert.match(scope, /deliveryStatus = "abandoned"/);
 });
+
+test("stock anomalies say who has to fix them", async () => {
+  const server = await readFile(new URL("../../server/index.js", import.meta.url), "utf8");
+  const api = await source("lib/api.ts");
+  const operations = await source("pages/owner-v2/operations/page.tsx");
+  const analytics = await source("pages/owner-v2/overview/analytics.ts");
+
+  // The stock queue mixes two different things under one number. A malformed
+  // row or an impossible date is something the owner typed into Sheets and can
+  // go fix right now. A stale reservation, a duplicated managed account, or a
+  // sold order with no trace is the system disagreeing with itself -- no action
+  // in Sheets resolves it, and telling the owner to check Sheets sends them
+  // looking for a mistake they did not make. The finding carries who owns it.
+  assert.match(api, /ownerFixable\??:\s*boolean/, "OperationIssue does not say who fixes it");
+  assert.match(operations, /ownerFixable/);
+
+  // Both numbers are then available where the owner decides what to do: the
+  // stock queue summary, and the attention-queue row itself. Asserted on the
+  // filter-then-count shape actually used, not on a particular spelling.
+  assert.match(operations, /ownerFixable\)\s*\)\.length|\.length;\s*\n\s*const systemSide/);
+  assert.match(analytics, /highOwnerFixable/);
+
+  // And the row must not read as one undifferentiated alarm. "Data Sheets kamu
+  // yang salah" and "sistem tidak cocok" are different sentences to act on.
+  assert.match(analytics, /Data Sheets|Sistem tidak cocok/);
+});
+
+test("every stock and Sheets finding says who has to fix it", async () => {
+  const server = await readFile(new URL("../../server/index.js", import.meta.url), "utf8");
+  const lines = server.split("\n");
+
+  const startOf = (name) => lines.findIndex((line) => line.startsWith(`function ${name}(`));
+  const endOf = (from) => {
+    for (let i = from + 1; i < lines.length; i += 1) if (/^function \w+\(/.test(lines[i])) return i;
+    return lines.length;
+  };
+
+  // This exists because the first version of the split was wrong. It labelled
+  // the thirteen findings in buildReconcileReport by hand and shipped five
+  // others with no flag at all -- the two "metadata Sheets belum lengkap"
+  // rows, the two "kehilangan asal" rows, and every buildSheetsRowAudit
+  // finding. An unlabelled finding renders as "Sistem", so those five told the
+  // owner to go fix something in the system that was already correct, and hid
+  // the Sheet rows that were genuinely hers. Enumerating by hand does not
+  // scale and does not catch the next one, so the invariant is asserted here
+  // instead: a finding that does not say who fixes it is a bug.
+  const unlabelled = [];
+  for (const name of ["buildReconcileReport", "buildSheetsRowAudit"]) {
+    const from = startOf(name);
+    const to = endOf(from);
+    for (let i = from; i < to; i += 1) {
+      if (!/issues\.push\(\{/.test(lines[i])) continue;
+      const indent = lines[i].match(/^\s*/)[0];
+      let body = lines[i];
+      for (let j = i + 1; j < to && lines[j] !== `${indent}});`; j += 1) body += `\n${lines[j]}`;
+      if (!/ownerFixable:/.test(body)) {
+        unlabelled.push(`${name}: ${body.match(/id: `([^`$]*)/)?.[1] || lines[i].trim()}`);
+      }
+    }
+  }
+  assert.deepEqual(unlabelled, [], `finding tanpa label ownerFixable: ${unlabelled.join(", ")}`);
+
+  // The Sheets audit emits through one helper, so the decision lives in one
+  // place rather than being repeated at ten call sites. `invalid`, `ambiguous`
+  // and `condition` describe cells the owner typed; `mismatch` and `duplicate`
+  // describe our own bookkeeping, which no Sheet edit resolves.
+  assert.match(server, /OWNER_FIXABLE_SHEET_CODES\s*=\s*new Set\(\[[^\]]*\]/);
+  assert.match(server, /ownerFixable: OWNER_FIXABLE_SHEET_CODES\.has\(code\)/);
+
+  // Both summaries the owner reads have to expose the split, or the column
+  // below is the only place it appears.
+  assert.match(server, /highOwnerFixable: sorted\.filter/);
+  assert.match(server, /highSystemSide: sorted\.filter/);
+});
+
+test("the malformed-row finding survives the boot that hides it", async () => {
+  const server = await readFile(new URL("../../server/index.js", import.meta.url), "utf8");
+
+  // This one was a live bug, found only by running the report against data that
+  // could reach it. archiveMalformedManagedAccounts runs on every boot and hides
+  // malformed Sheet rows so they cannot be sold (index.js:3213). The reconcile
+  // loop used to skip hidden accounts the way its sibling loops do -- so the one
+  // finding that says "this Sheet row is yours to fix" was reported by code that
+  // could never execute, and the owner-fixable count was always zero. The report
+  // ran green the entire time because it never had a failing assertion.
+  const loop = server.slice(server.indexOf("// Deliberately does NOT skip hidden/returned accounts"));
+  assert.match(loop, /if \(!isMalformedManagedAccount\(account\)\) continue;/);
+  assert.match(loop, /sheetMalformedArchivedAt/, "malformed rows hidden by the archive must still be reported");
+  assert.doesNotMatch(
+    loop.slice(0, loop.indexOf("issues.push")),
+    /if \(account\.hidden \|\| account\.returnedToStockAt\) continue;\s*\n\s*if \(!isMalformed/,
+    "a bare hidden/returned skip makes the finding unreachable",
+  );
+
+  // And the archive is what sets that marker, so the exemption is anchored to
+  // something real rather than to a flag any code path could set.
+  const archive = server.slice(server.indexOf("function archiveMalformedManagedAccounts"));
+  assert.match(archive.slice(0, 900), /account\.sheetMalformedArchivedAt = archivedAt;/);
+});

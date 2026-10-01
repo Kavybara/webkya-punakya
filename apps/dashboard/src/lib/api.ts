@@ -239,6 +239,19 @@ export type OperationIssue = {
   kind: string;
   title: string;
   detail: string;
+  /**
+   * Whether the owner can resolve this by correcting something they control --
+   * almost always a row in Google Sheets -- as opposed to the system
+   * disagreeing with itself.
+   *
+   * The distinction matters because the queues mix both under one count. A
+   * malformed account row is a typo the owner can fix in a minute. A stale
+   * reservation or a duplicated managed account is an internal inconsistency
+   * that no edit to Sheets resolves, and pointing the owner at Sheets for one
+   * sends them hunting for a mistake they did not make. Absent means "not the
+   * owner's to fix".
+   */
+  ownerFixable?: boolean;
   createdAt?: string;
   href?: string;
   orderId?: string;
@@ -363,7 +376,7 @@ export type OperationsCenterResult = {
     items: OperationIssue[];
   };
   reconcile: {
-    summary: { total: number; high: number; medium: number; low: number; managedDuplicates: number };
+    summary: { total: number; high: number; medium: number; low: number; managedDuplicates: number; highOwnerFixable?: number; highSystemSide?: number };
     issues: OperationIssue[];
   };
   expiry: {

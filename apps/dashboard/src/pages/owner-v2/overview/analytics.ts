@@ -526,7 +526,16 @@ export function buildAttentionQueue(orders: ApiOrder[], operations: OperationsCe
       id: "stock-anomaly",
       label: "Anomali stok",
       count: count(reconcile?.high, delivery?.missingAccounts),
-      hint: "Temuan tinggi pada rekonsiliasi stok.",
+      // Split by who can act, because "anomali stok" was one number for two
+      // unrelated things. Most of what reconciliation finds is the system
+      // disagreeing with itself -- a stale reservation, a duplicated account
+      // record, a sale with no trace -- and no edit to Sheets resolves any of
+      // those. A minority are rows the owner typed wrong and can fix in a
+      // minute. Presenting both as one alarm sent them to the wrong place and
+      // taught them the queue was not actionable.
+      hint: reconcile?.highOwnerFixable
+        ? `${reconcile.highOwnerFixable} baris Data Sheets salah, ${reconcile.highSystemSide || 0} masalah sistem.`
+        : "Tidak ada baris Sheets yang salah. Sisanya masalah sistem.",
       tone: "warning",
       path: "/owner-v2/operations?focus=stock",
     },

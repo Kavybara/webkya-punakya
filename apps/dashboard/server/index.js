@@ -6658,6 +6658,10 @@ function buildReconcileReport(db) {
         kind: "stock",
         title: "Stok available tapi masih dipakai akun aktif",
         detail: `${stock.email || stock.id} masih tertaut ke ${activeLinked.length} akun aktif.`,
+        // Not owner-fixable: the Sheets row says the account is unsold and
+        // local state says an active account is using it. Both readings come
+        // from correct data; the disagreement is ours.
+        ownerFixable: false,
         createdAt: stock.soldAt || stock.createdAt || "",
         stockId: stock.id,
         href: operationLink({ stockId: stock.id }),
@@ -6678,6 +6682,9 @@ function buildReconcileReport(db) {
           kind: "stock",
           title: "Reservasi stok stale",
           detail: `${stock.email || stock.id} masih reserved untuk ${stock.reservedFor || "order tidak dikenal"}.`,
+          // The reservation is ours and the order it waited on is gone. No Sheet
+          // edit clears this -- the release button on this row does.
+          ownerFixable: false,
           createdAt: stock.reservedAt || stock.createdAt || "",
           stockId: stock.id,
           orderId: stock.reservedFor || "",
@@ -6693,6 +6700,9 @@ function buildReconcileReport(db) {
         kind: "stock",
         title: "Stok sold tanpa jejak akun",
         detail: `${stock.email || stock.id} sudah sold tapi tidak ada managed account yang tertaut.`,
+        // The sale is correctly recorded; the account record it should have
+        // created is absent. Nothing to correct in the Sheet.
+        ownerFixable: false,
         createdAt: stock.soldAt || stock.createdAt || "",
         stockId: stock.id,
         href: operationLink({ stockId: stock.id }),
@@ -6706,6 +6716,9 @@ function buildReconcileReport(db) {
         kind: "sheet",
         title: "Metadata Sheets stok belum lengkap",
         detail: `${stock.email || stock.id} belum punya sheetName/sheetRow yang lengkap.`,
+        // sheetName/sheetRow are recorded by the sync, not typed by the owner.
+        // There is no cell she can fill to make this go away.
+        ownerFixable: false,
         createdAt: stock.createdAt || "",
         stockId: stock.id,
         href: operationLink({ stockId: stock.id }),
@@ -6719,6 +6732,9 @@ function buildReconcileReport(db) {
         kind: "stock",
         title: "Riwayat stok bentrok ke banyak order",
         detail: `${stock.email || stock.id} / ${stock.profile || "-"} pernah tertaut ke ${stock.historyConflictOrderIds.length} order. Auto-backfill diblok agar slot ini tidak hidup lagi ke reseller lain.`,
+        // One account reaching several orders is a fulfilment-side conflict.
+        // The Sheet row is a single correct row.
+        ownerFixable: false,
         createdAt: stock.soldAt || stock.historyConflictDetectedAt || stock.createdAt || "",
         stockId: stock.id,
         href: operationLink({ stockId: stock.id }),
@@ -6733,6 +6749,9 @@ function buildReconcileReport(db) {
       severity: "high",
       kind: "account",
       title: "Managed account aktif dobel untuk stok/order yang sama",
+        // Two live records for one account. The owner did not create the second
+        // one, so there is nothing in Sheets to correct.
+        ownerFixable: false,
       detail: `${duplicateAccounts.length} record aktif menunjuk identitas ${key}. Ini rawan bikin panel dobel dan salah baca stok.`,
       createdAt: keeper?.startedAt || keeper?.snapshotAt || "",
       accountId: keeper?.id || "",
@@ -6743,14 +6762,27 @@ function buildReconcileReport(db) {
   }
 
   for (const account of accounts) {
-    if (account.hidden || account.returnedToStockAt) continue;
+    // Deliberately does NOT skip hidden/returned accounts the way the loops above
+    // do. archiveMalformedManagedAccounts runs on every boot and hides exactly
+    // these rows to keep them out of the reseller panel (index.js:3213), so by
+    // the time this report runs the account it needs to warn about has already
+    // been hidden by the thing that detected it. Skipping hidden rows here made
+    // this finding unreachable: it could never fire, and the "kamu yang perbaiki"
+    // count was structurally always zero. Hiding the row stops it being sold;
+    // it does not stop the owner from needing to know it is broken.
     if (!isMalformedManagedAccount(account)) continue;
+    // A genuinely returned or deliberately archived row is not this report's
+    // business. Only the ones the malformed-archive itself touched count.
+    if ((account.hidden || account.returnedToStockAt) && !account.sheetMalformedArchivedAt) continue;
     issues.push({
       id: `managed-malformed-${account.id}`,
       severity: "high",
       kind: "account",
       title: "Managed account malformed dari Google Sheets",
       detail: `${account.id} punya data akun tidak valid (${account.email || "-"} / password kosong). Row ini disembunyikan dari panel reseller sampai Sheet dibetulkan.`,
+      // Whichever cell is empty, the owner typed the Sheet. Filling it resolves
+      // the finding outright.
+      ownerFixable: true,
       createdAt: account.startedAt || account.snapshotAt || "",
       accountId: account.id,
       stockId: account.stockId || "",
@@ -6772,6 +6804,9 @@ function buildReconcileReport(db) {
         kind: "account",
         title: "Managed account kehilangan stock asal",
         detail: `${account.email || account.id} tertaut ke stock ${account.stockId}, tapi stock itu tidak ada di database.`,
+        // A dangling reference in our own records. The Sheet row it came from
+        // may well be perfectly correct.
+        ownerFixable: false,
         createdAt: account.startedAt || account.createdAt || "",
         accountId: account.id,
         stockId: account.stockId,
@@ -6786,6 +6821,7 @@ function buildReconcileReport(db) {
         kind: "account",
         title: "Managed account kehilangan order asal",
         detail: `${account.email || account.id} masih mengarah ke order ${relatedOrderId}, tapi order itu tidak ditemukan.`,
+        ownerFixable: false,
         createdAt: account.startedAt || account.createdAt || "",
         accountId: account.id,
         orderId: relatedOrderId,
@@ -6800,6 +6836,9 @@ function buildReconcileReport(db) {
         kind: "account",
         title: "Tanggal akun tidak valid",
         detail: `${account.email || account.id} punya expiry <= start (${account.startedAt || "-"} -> ${account.expiresAt || "-"})`,
+        // TANGGAL or DURASI in the Sheet is wrong -- an expiry at or before the
+        // start date. Only the owner can say which of the two is right.
+        ownerFixable: true,
         createdAt: account.startedAt || account.createdAt || "",
         accountId: account.id,
         href: operationLink({ accountId: account.id }),
@@ -6813,6 +6852,9 @@ function buildReconcileReport(db) {
         kind: "expiry",
         title: "Akun sudah expired tapi belum dibersihkan",
         detail: `${account.email || account.id} masih visible walau sudah expired.`,
+        // The Sheet is fine -- the account really did expire. The cleanup job is
+        // supposed to have retired it and did not, so this is ours.
+        ownerFixable: false,
         createdAt: account.expiresAt || account.startedAt || "",
         accountId: account.id,
         href: operationLink({ accountId: account.id }),
@@ -6826,6 +6868,7 @@ function buildReconcileReport(db) {
         kind: "sheet",
         title: "Metadata Sheets akun belum lengkap",
         detail: `${account.email || account.id} belum punya sheetName/sheetRow yang lengkap.`,
+        ownerFixable: false,
         createdAt: account.startedAt || account.createdAt || "",
         accountId: account.id,
         href: operationLink({ accountId: account.id }),
@@ -6848,6 +6891,9 @@ function buildReconcileReport(db) {
         kind: "order",
         title: "Order selesai tanpa jejak akun",
         detail: `${order.id} sudah ${order.deliveryStatus || order.orderStatus} tapi belum punya akun tertaut.`,
+        // The customer received something we cannot account for. That is our
+        // record-keeping gap, not a Sheet the owner left half-finished.
+        ownerFixable: false,
         createdAt: order.fulfillmentSentAt || order.paidAt || order.createdAt || "",
         orderId: order.id,
         href: operationLink({ orderId: order.id }),
@@ -6862,6 +6908,12 @@ function buildReconcileReport(db) {
       high: sorted.filter((item) => item.severity === "high").length,
       medium: sorted.filter((item) => item.severity === "medium").length,
       low: sorted.filter((item) => item.severity === "low").length,
+      // Split by who can act. Most of what this report finds is the system
+      // disagreeing with itself, and the owner cannot fix that by editing a
+      // Sheet -- so a single "3 stock anomalies" number sent them to the wrong
+      // place. The high-severity split is the one that decides the next action.
+      highOwnerFixable: sorted.filter((item) => item.severity === "high" && item.ownerFixable).length,
+      highSystemSide: sorted.filter((item) => item.severity === "high" && !item.ownerFixable).length,
       managedDuplicates: sorted.filter((item) => item.id.startsWith("managed-duplicate-identity-")).length,
     },
     issues: sorted.slice(0, 40),
@@ -6886,6 +6938,19 @@ function buildSheetsRowAudit(db) {
     }
   }
 
+  // Which of these codes are the owner's to fix in the Sheet, and which are the
+  // system disagreeing with itself.
+  //
+  // `invalid`, `ambiguous` and `condition` all describe cells the owner typed:
+  // a blank identity, a SELLER that names nobody, a KONDISI AKUN value we do not
+  // recognise or that says the account is broken. Editing that cell resolves the
+  // finding outright. `mismatch` and `duplicate` describe our own bookkeeping --
+  // a sold row with no managed account, two accounts on one Stock ID, web data
+  // that drifted from the Sheet. No Sheet edit fixes those; we have to reconcile
+  // our records, and telling the owner to go edit a correct Sheet wastes the one
+  // thing she is good at doing quickly.
+  const OWNER_FIXABLE_SHEET_CODES = new Set(["invalid", "ambiguous", "condition"]);
+
   const addIssue = (stock, severity, code, title, detail) => {
     const stockId = String(stock?.id || "").trim();
     if (stockId) affectedStockIds.add(stockId);
@@ -6896,6 +6961,7 @@ function buildSheetsRowAudit(db) {
       code,
       title,
       detail,
+      ownerFixable: OWNER_FIXABLE_SHEET_CODES.has(code),
       stockId,
       sheetName: stock?.sheetName || "",
       sheetRow: Number(stock?.sheetRow || 0),
