@@ -294,6 +294,34 @@ function LinkValue({ label, value }: { label: string; value: string }) {
   );
 }
 
+/**
+ * A household link is a trigger, not a result.
+ *
+ * Netflix's household mail does not carry the code. It carries a `travel/verify`
+ * link, and the code only exists after someone opens it -- either on the page
+ * that opens, or in a second email. The panel used to label it "Link household"
+ * and stop there, which reads as a finished answer. A reseller who treats it as
+ * one sends the customer a link and calls the ticket closed, and the code never
+ * arrives for either of them.
+ *
+ * The server never opens this link. It cannot be probed for "still valid"
+ * without spending it -- a spent link degrades to an inactive page rather than
+ * failing, so there is no way to ask without consuming. So the wording has to
+ * do the work the server cannot.
+ */
+function HouseholdLinkValue({ value }: { value: string }) {
+  return (
+    <>
+      <LinkValue label="Link household" value={value} />
+      <p className="reseller-v2-access-next-step">
+        Link ini belum berisi kode. Pelanggan harus membukanya lebih dulu; setelah
+        itu kode households-nya muncul di halaman tersebut atau di email lanjutan.
+        Tekan Cari Akun lagi untuk mengambilnya.
+      </p>
+    </>
+  );
+}
+
 export default function ResellerV2AccessPage() {
   const [accounts, setAccounts] = useState<ManagedAccount[]>([]);
   const [reseller, setReseller] = useState<ApiReseller | null>(null);
@@ -495,7 +523,11 @@ export default function ResellerV2AccessPage() {
           {value ? (
             <div className="reseller-v2-access-result-body">
               {lookupResult.result.kind === "link" && isUrl(value) ? (
-                <LinkValue label={lookupResult.result.label || valueLabel(lookupResult.type)} value={value} />
+                lookupResult.type === "household" ? (
+                  <HouseholdLinkValue value={value} />
+                ) : (
+                  <LinkValue label={lookupResult.result.label || valueLabel(lookupResult.type)} value={value} />
+                )
               ) : (
                 <CodeValue label={lookupResult.result.label || valueLabel(lookupResult.type)} value={value} />
               )}

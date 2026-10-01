@@ -257,6 +257,24 @@
   line-height: 1.5;
 }
 .reseller-v2-access-result-body > p.reseller-v2-access-result-date { margin-top: 4px; color: var(--text-muted); }
+
+/*
+ * The household warning.
+ *
+ * It sits directly under the link and reads as a continuation of it, not as a
+ * footnote: the reseller's next action depends on it, and a note they skim past
+ * is the same as no note. Warning tone rather than muted, because the failure it
+ * prevents -- forwarding the link and closing the ticket -- is silent from the
+ * outside. Nothing goes wrong until the customer reports there was no code.
+ */
+.reseller-v2-access-result-body > p.reseller-v2-access-next-step {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--status-warning);
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--status-warning) 8%, transparent);
+  color: var(--text-primary);
+}
 .reseller-v2-access-meta { margin-top: 12px; }
 
 /*

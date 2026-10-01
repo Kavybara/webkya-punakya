@@ -109,6 +109,59 @@ test("verification remains six digits and household exposes links only", async (
   assert.doesNotMatch(server, /Kode akses household/);
 });
 
+/**
+ * A household link is a trigger, not a result.
+ *
+ * Netflix's household mail does not carry the code -- it carries a
+ * `travel/verify` link, and the code appears only after someone opens it. The
+ * panel used to label it "Link household" and stop, which reads as a finished
+ * answer: the reseller forwards it to the customer and closes the ticket, and
+ * the code never arrives for either of them.
+ *
+ * The server cannot fix this by probing the link. A spent `nftoken` degrades to
+ * an inactive page rather than erroring, so there is no way to ask "is this
+ * still good?" without spending it. That is asserted below: nothing in the
+ * server may fetch a Netflix URL.
+ */
+test("the household link says it is a trigger and not the code", async () => {
+  const access = await source("src/pages/reseller-v2/access/page.tsx");
+
+  assert.match(access, /function HouseholdLinkValue/);
+  assert.match(access, /Link ini belum berisi kode/);
+  assert.match(access, /membukanya lebih dulu/);
+  assert.match(access, /Tekan Cari Akun lagi/);
+  // Household is the one link that gets the warning; reset is a finished answer.
+  assert.match(access, /lookupResult\.type === "household" \? \(\s*<HouseholdLinkValue/);
+  assert.match(access, /reseller-v2-access-next-step/);
+});
+
+/**
+ * Household had no validator; `reset` has had one all along.
+ *
+ * It was called through `pickAccessLink(..., allowFallback = true)`, which
+ * returns the longest URL left in the message when nothing matches the keywords
+ * -- a Netflix footer link, labelled "Link household" and handed to a customer.
+ * A link that is not the household link is now simply not found.
+ */
+test("a household lookup only accepts a Netflix travel/verify link with a token", async () => {
+  const server = await source("server/index.js");
+
+  assert.match(server, /function isNetflixHouseholdUrl/);
+  assert.match(server, /nftoken=/);
+  assert.ok(server.includes("account/travel"), "the travel/verify path is the one Netflix sends");
+  assert.match(server, /function pickHouseholdLink/);
+
+  // The fallback is what made this unsafe. It is gone, and with it the only
+  // caller that used it. Comments are stripped first -- the note explaining the
+  // removal quotes the old signature, and a test that fails on its own
+  // explanation is one somebody deletes rather than satisfies.
+  const code = (text) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+  assert.doesNotMatch(code(server), /function pickAccessLink/);
+  assert.doesNotMatch(code(server), /allowFallback/);
+  assert.doesNotMatch(code(server), /"updatehousehold", "verify", "travel"/);
+});
+
 test("account access rows preserve readable dark hover and keyboard focus", async () => {
   const [access, styles] = await Promise.all([
     source("src/pages/reseller-v2/access/page.tsx"),

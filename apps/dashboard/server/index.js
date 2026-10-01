@@ -5037,13 +5037,6 @@ function accessLinksFromMessage(html = "", combined = "") {
   return Array.from(new Set([...priorityLinks, ...hrefs, ...textUrls])).filter((url) => /^https?:\/\//i.test(url));
 }
 
-function pickAccessLink(links, keywords, allowFallback = false) {
-  const ignored = /helpcenter|help\.netflix|privacy|terms|unsubscribe|notification|preference|support/i;
-  const cleanLinks = links.filter((url) => !ignored.test(url));
-  const matched = strongestAccessUrl(cleanLinks, (url) => keywords.some((keyword) => url.toLowerCase().includes(keyword)));
-  return matched || (allowFallback ? strongestAccessUrl(cleanLinks) : "") || "";
-}
-
 function isNetflixResetPasswordUrl(url = "") {
   const value = String(url || "").trim();
   try {
@@ -5055,6 +5048,45 @@ function isNetflixResetPasswordUrl(url = "") {
   } catch {
     return /^https?:\/\/(?:www\.)?netflix\.com\/password\b/i.test(value) && /[?&]nftoken=/i.test(value);
   }
+}
+
+/* Is this a Netflix household/travel verification link, the one that carries
+ * the `nftoken` a customer has to open before their code appears?
+ *
+ * Household had no validator at all. `pickAccessLink` was called with the
+ * keyword list `["household", "updatehousehold", "verify", "travel", ...]`
+ * matched against the *URL*, and with `allowFallback = true` -- so when nothing
+ * matched it returned the longest URL left in the message. A Netflix footer
+ * link. The reseller was handed it, and the panel labelled it "Link household".
+ * `reset` has had this check the whole time (`isNetflixResetPasswordUrl`), which
+ * is why it never had the same problem.
+ *
+ * The shape is the one Netflix actually sends:
+ *   https://www.netflix.com/account/travel/verify?nftoken=...&messageGuid=...
+ *
+ * Being strict here is the point. A link that is not this is not a household
+ * link, and saying "not found" is a far smaller failure than handing someone a
+ * footer URL to send to a customer. */
+function isNetflixHouseholdUrl(url = "") {
+  const value = String(url || "").trim();
+  const tokenOk = /[?&]nftoken=/i.test(value);
+  if (!tokenOk) return false;
+  try {
+    const parsed = new URL(value);
+    const hostOk = /(?:^|\.)netflix\.com$/i.test(parsed.hostname);
+    const pathOk = /^\/(?:account\/travel|travel|simplesetup|household)\b/i.test(parsed.pathname);
+    return hostOk && pathOk;
+  } catch {
+    return /^https?:\/\/(?:www\.)?netflix\.com\/(?:account\/travel|travel|simplesetup|household)\b/i.test(value);
+  }
+}
+
+/** The household link, or nothing. There is deliberately no "longest link" fallback. */
+function pickHouseholdLink(html = "", combined = "") {
+  const links = accessLinksFromMessage(html, combined)
+    .map((url) => decodeAccessUrl(url))
+    .filter((url) => isNetflixHouseholdUrl(url));
+  return strongestAccessUrl(links, isNetflixHouseholdUrl);
 }
 
 function pickResetPasswordLink(html = "", combined = "") {
@@ -5241,11 +5273,10 @@ async function extractAccessValue(type, message, account = {}) {
     return preferred ? { kind: "link", value: preferred, label: "Link reset password", score: 20 } : null;
   }
   if (type === "household") {
-    const preferred = pickAccessLink(
-      accessLinksFromMessage(html, extractionVisible).concat(accessLinksFromMessage(html, extractionText)),
-      ["household", "updatehousehold", "verify", "travel", "temporary", "simplesetup", "getcode"],
-      true,
-    );
+    const preferred =
+      pickHouseholdLink(html, extractionVisible) ||
+      pickHouseholdLink(html, extractionText) ||
+      pickHouseholdLink(html, combined);
     return preferred ? { kind: "link", value: preferred, label: "Link household", score: 80 } : null;
   }
   if (type === "verification") {
