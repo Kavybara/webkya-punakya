@@ -23,7 +23,13 @@ export default function OwnerConsoleActivitiesPage() {
     { id: "action", header: "Aksi", value: () => "", cell: (row) => row.orderId ? <Link className="console-row-action" to={`/owner-v2/orders?order=${encodeURIComponent(row.orderId)}`} aria-label={`Buka order ${row.orderId}`}><ArrowUpRight size={15} /></Link> : <span /> },
   ], []);
   const filters = useMemo<Array<DataFilter<ApiActivity>>>(() => [{ id: "type", label: "Kategori", options: ["order", "stock", "reseller", "whatsapp", "account", "security"].map((value) => ({ label: value, value })), value: (row) => row.type }], []);
-  return <ConsoleShell title="Activity Log" description="Telusuri perubahan operasional dan aktivitas owner." lastUpdated={updated} refreshing={loading} systemState={error ? "unknown" : "healthy"} onRefresh={load}>
+  // No attention props, on purpose -- this page is in
+  // `PAGES_WITHOUT_ATTENTION`. Every row here is a record of something that
+  // already happened and was already handled; the newest entry is not
+  // "next" anything. Counting the security rows would turn a log into a
+  // to-do list and teach the owner to dismiss an amber pill.
+  // A load failure still surfaces: as the Notice below it.
+  return <ConsoleShell title="Activity Log" description="Telusuri perubahan operasional dan aktivitas owner." lastUpdated={updated} refreshing={loading} onRefresh={load}>
     <MetricRow items={[{ label: "Total aktivitas", value: rows.length }, { label: "Order", value: rows.filter((row) => row.type === "order").length }, { label: "Akun", value: rows.filter((row) => row.type === "account").length }, { label: "Security", value: rows.filter((row) => row.type === "security").length, tone: "warning" }]} />
     <section className="console-panel"><div className="console-panel-header"><div><span>Sistem</span><h2>Riwayat aktivitas</h2></div><Activity size={18} /></div><DataTable rows={rows} columns={columns} filters={filters} rowKey={(row) => row.id} loading={loading} error={error} initialPageSize={10} /></section>
   </ConsoleShell>;

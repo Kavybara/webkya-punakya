@@ -4,6 +4,10 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, subscribeRealtime } from "../../lib/api";
 import { formatRupiah } from "../../lib/format";
 import { AppShell } from "../ui";
+// The same two pieces the owner console uses, for the same reason: the pill is
+// drawn by the shared frame and its wording is shared, so a reseller cannot
+// end up with a differently-worded version of the same three states.
+import { systemStateLabel, type SystemState } from "../attention/attention";
 import { ResellerSearch } from "./ResellerSearch";
 import { TopUpDialog } from "./TopUpDialog";
 import {
@@ -41,6 +45,8 @@ export function ResellerShell({
   balance,
   lastUpdated,
   loading,
+  attentionCount,
+  systemState,
   onRefresh,
   children,
 }: {
@@ -49,6 +55,8 @@ export function ResellerShell({
   balance?: string;
   lastUpdated?: string;
   loading?: boolean;
+  attentionCount?: number;
+  systemState?: SystemState;
   onRefresh?: () => void;
   children: ReactNode | ((actions: ResellerShellActions) => ReactNode);
 }) {
@@ -118,6 +126,32 @@ export function ResellerShell({
       refreshing={loading}
       onRefresh={onRefresh}
       searchPlaceholder="Cari produk, pesanan, akun..."
+      topbarLeading={
+        /* Rendered only when the page says what its attention is.
+
+           The alternative -- defaulting to "healthy" the way a prop default
+           would -- is the exact failure this whole refactor exists to remove.
+           A green pill on a page that never computed anything is a claim the
+           page cannot support, and it is indistinguishable from a page that
+           checked and found nothing wrong. Silence is at least honest, and
+           `attention-invariant.test.mjs` fails on any page that renders a
+           shell without one of the two props rather than letting the default
+           paper over it. */
+        systemState ? (
+          <div className="ui-shell-status-pill" title="Status berasal dari respons API terbaru halaman ini">
+            <span
+              className={
+                systemState === "healthy"
+                  ? "is-online"
+                  : systemState === "warning"
+                    ? "is-warning"
+                    : "is-unknown"
+              }
+            />
+            <span>{systemStateLabel(systemState, attentionCount ?? 0)}</span>
+          </div>
+        ) : null
+      }
       sidebarTop={
         <div className="reseller-v2-side-balance">
           <span>

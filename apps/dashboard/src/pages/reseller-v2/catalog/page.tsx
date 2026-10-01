@@ -14,6 +14,7 @@ import {
   WalletCards,
 } from "lucide-react";
 import { ResellerShell } from "../../../components/reseller-v2/ResellerShell";
+import { systemStateFor } from "../../../components/attention";
 import {
   Badge,
   EmptyState,
@@ -114,6 +115,14 @@ export default function ResellerV2CatalogPage() {
       .filter((product) => !keyword || [product.name, product.category, product.code, product.description].join(" ").toLowerCase().includes(keyword))
       .sort((a, b) => b.stockCount - a.stockCount);
   }, [products, query]);
+  /* The two ways this page can be a dead end, both checked against `products`
+     rather than `rows`: `rows` is what the current search matches, so a search
+     with no hits would light the pill up every time somebody typed. A catalog
+     nobody can afford and a catalog with nothing in it are not the same
+     failure, but they are the same page being useless, which is what the
+     count is for. */
+  const noBalance = reseller && Number(reseller.deposit || 0) <= 0 ? 1 : 0;
+  const catalogAttention = noBalance + (products.length ? 0 : 1);
   const totalStock = useMemo(() => rows.reduce((sum, product) => sum + Number(product.stockCount || 0), 0), [rows]);
   const totalVariants = useMemo(() => rows.reduce((sum, product) => sum + Number(product.variants.length || 0), 0), [rows]);
 
@@ -189,6 +198,8 @@ export default function ResellerV2CatalogPage() {
       description="Pilih produk ready, pilih varian dan durasi, lalu lanjut ke halaman checkout."
       loading={loading}
       balance={reseller ? formatRupiah(Number(reseller.deposit || 0)) : ""}
+      attentionCount={catalogAttention}
+      systemState={systemStateFor(catalogAttention, { error: Boolean(error), loading })}
     >
       {error ? <ErrorState message={error} onRetry={() => loadCatalog().catch(console.error)} /> : null}
       {notice ? <Notice tone="success">{notice}</Notice> : null}

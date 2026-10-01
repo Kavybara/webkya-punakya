@@ -16,6 +16,7 @@ import { api, subscribeRealtime, type ApiOrder } from "../../../lib/api";
 import { formatRupiah } from "../../../lib/format";
 import { formatDateTimeFull } from "../../../lib/format";
 import type { Tone } from "../../../components/ui";
+import { systemStateFor } from "../../../components/attention";
 
 type ActionKind = "mark-paid" | "approve-manual" | "retry-delivery" | "repair-sheets" | "rerender-template";
 type PendingAction = { kind: ActionKind; order: ApiOrder } | null;
@@ -230,7 +231,7 @@ export default function OwnerConsoleOrdersPage() {
       lastUpdated={lastUpdated}
       refreshing={refreshing}
       attentionCount={attentionCount}
-      systemState={loading ? "loading" : error ? "unknown" : attentionCount ? "warning" : "healthy"}
+      systemState={systemStateFor(attentionCount, { error: Boolean(error), loading })}
       onRefresh={() => loadOrders(true)}
     >
       <MetricRow

@@ -5,6 +5,7 @@ import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import { api, type AccountAuditResult, type ApiAccount, type ApiReseller } from "../../../lib/api";
 import { formatDate } from "../../../lib/format";
 import { Badge, Dialog, DialogActions, Field, MetricRow, Notice } from "../../../components/ui";
+import { systemStateFor } from "../../../components/attention";
 
 type AccountForm = { stockId: string; product: string; variant: string; email: string; buyer: string; resellerId: string; reseller: string; whatsapp: string; profile: string; device: string; startedAt: string; expiresAt: string; duration: string; status: ApiAccount["status"] };
 type AccountAction = { type: "delete"; account: ApiAccount } | null;
@@ -38,7 +39,12 @@ export default function OwnerConsoleAccountsPage() {
     { id: "actions", header: "Aksi", value: () => "", cell: (row) => <div className="console-row-actions"><button type="button" onClick={() => openAudit(row)} aria-label={`Audit ${row.id}`}><ClipboardList size={14} /></button><button type="button" onClick={() => openEdit(row)} aria-label={`Edit ${row.id}`}><Edit3 size={14} /></button><button type="button" onClick={() => setAction({ type: "delete", account: row })} aria-label={`Hapus ${row.id}`}><Trash2 size={14} /></button></div> },
   ], []);
   const filters = useMemo<Array<DataFilter<ApiAccount>>>(() => [{ id: "status", label: "Status", options: ["active", "expiring", "expired", "replaced", "disabled"].map((value) => ({ label: value, value })), value: (row) => row.status }, { id: "source", label: "Source", options: ["web_order", "manual_input", "assign_daily"].map((value) => ({ label: value, value })), value: (row) => row.source || "" }], []);
-  return <ConsoleShell title="Manajemen Akun" description="Pantau ownership, durasi, expiry, dan riwayat akun pelanggan." refreshing={loading} attentionCount={accounts.filter((row) => row.status === "expired").length} systemState={error ? "unknown" : accounts.some((row) => row.status === "expired") ? "warning" : "healthy"} onRefresh={load}>
+  // One number, used for both the count and the colour. The two used to be
+  // written out separately -- the count as a filter, the colour as a
+  // `.some()` -- which is the shape that let the two disagree on the two
+  // pages where they did.
+  const expiredCount = accounts.filter((row) => row.status === "expired").length;
+  return <ConsoleShell title="Manajemen Akun" description="Pantau ownership, durasi, expiry, dan riwayat akun pelanggan." refreshing={loading} attentionCount={expiredCount} systemState={systemStateFor(expiredCount, { error: Boolean(error), loading })} onRefresh={load}>
     <MetricRow items={[{ label: "Aktif", value: accounts.filter((row) => row.status === "active").length, tone: "success" }, { label: "Expiring", value: accounts.filter((row) => row.status === "expiring").length, tone: "warning" }, { label: "Expired", value: accounts.filter((row) => row.status === "expired").length, tone: "danger" }, { label: "Tanpa reseller", value: accounts.filter((row) => !row.resellerId && !row.reseller).length, tone: "warning" }]} />
     {error ? <Notice tone="danger">{error}</Notice> : null}{message ? <Notice>{message}</Notice> : null}
     <section className="console-panel"><div className="console-panel-header"><div><span>Pelanggan</span><h2>Managed accounts</h2></div><div className="console-panel-toolbar-actions"><button type="button" onClick={openCreate}><Plus size={15} /> Tambah manual</button></div></div><DataTable rows={accounts} columns={columns} filters={filters} rowKey={(row) => row.id} loading={loading} error={error} initialPageSize={10} /></section>

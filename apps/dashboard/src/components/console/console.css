@@ -16,11 +16,6 @@
 
 .console-nav-link.is-active { border-color: color-mix(in srgb, var(--accent-violet) 25%, transparent); background: color-mix(in srgb, var(--accent-violet) 10%, transparent); color: color-mix(in srgb, var(--accent-violet) 28%, var(--text-primary)); }
 .console-nav-link.is-active svg { color: var(--accent-violet); }
-.console-status-pill { display: inline-flex; min-height: 34px; align-items: center; gap: 7px; padding: 0 11px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); backdrop-filter: blur(var(--glass-blur)); color: var(--text-secondary); font-size: 11px; white-space: nowrap; }
-.console-status-pill > span:first-child { width: 7px; height: 7px; border-radius: 50%; }
-.console-status-pill .is-online { background: var(--status-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-success) 10%, transparent); }
-.console-status-pill .is-warning { background: var(--status-warning); box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-warning) 10%, transparent); }
-.console-status-pill .is-unknown { background: var(--text-muted); box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-muted) 14%, transparent); }
 .console-notification-count { position: absolute; top: -5px; right: -5px; display: grid; min-width: 17px; height: 17px; place-items: center; padding: 0 4px; border: 2px solid var(--bg-canvas); border-radius: 999px; background: var(--status-danger); color: var(--text-inverse); font-size: 9px; font-weight: 800; }
 .console-notification-wrap { position: relative; }
 .console-notification-menu { position: absolute; top: 46px; right: 0; z-index: 70; width: min(390px, calc(100vw - 28px)); overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-glass); backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%); box-shadow: var(--shadow-float); animation: ui-toast-in 200ms var(--ease-out-expo) both; }
@@ -84,9 +79,14 @@
 /* The panels that hold a scrollable list rather than a fixed block. Each one
    is a direct child of a bento cell, which is a flex column, so `flex: 1` is
    what lets the list take the cell's leftover height and scroll inside it
-   instead of pushing the cell taller than the row it was assigned. */
+   instead of pushing the cell taller than the row it was assigned.
+
+   `.console-attention-list` is absent because the attention queue is no longer
+   the owner console's alone -- it now renders in the reseller console too, and
+   carries its own `.attention-cell` rule in `components/attention/` so it
+   scrolls wherever it lands. A selector here scoped to `.console-cell` would
+   have quietly stopped applying the moment the queue crossed over. */
 .console-cell > .console-system-list,
-.console-cell > .console-attention-list,
 .console-cell > .console-balance-list,
 .console-cell > .console-top-products {
   flex: 1 1 auto;
@@ -188,12 +188,6 @@
 /* Queue framing. A queue whose total is shown above the rows tells the reader
    whether they are looking at a crisis or a clean day before they read a single
    label, which is the only question they open this panel with. */
-.console-attention-summary { flex: 0 0 auto; padding: 12px 18px 0; }
-.console-attention-summary p { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--text-muted); font-size: 10px; }
-.console-attention-summary strong { color: var(--status-warning); font-size: 15px; font-weight: 650; }
-.console-attention-summary p.is-clear { color: var(--status-success); }
-.console-queue-empty { margin: 0; padding: 20px 22px; color: var(--text-muted); font-size: 10px; line-height: 1.55; }
-.console-queue-error { margin: 0; padding: 20px 22px; color: var(--status-danger); font-size: 10px; line-height: 1.55; }
 .console-list-more { flex: 0 0 auto; margin: 0; padding: 10px 18px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 10px; }
 
 /* Service rows are links now, so each one opens the page that fixes whatever
@@ -220,27 +214,12 @@
    instead of sitting in a five-across strip. It is the tallest list on the
    page and it is beside the chart for that reason: an owner reads the trend
    and the exceptions side by side, not in sequence. */
-.console-attention-list { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; }
 /* These are the five things worth looking at. They are links, so they lift. */
-.console-attention-list > a { display: grid; min-width: 0; min-height: 66px; grid-template-columns: 30px minmax(0, 1fr) auto auto; align-items: center; gap: 9px; padding: 12px 18px; border-bottom: 1px solid var(--border); color: inherit; text-decoration: none; transition: background 200ms var(--ease-out-expo); }
-.console-attention-list > a:last-child { border-bottom: 0; }
-.console-attention-list > a:hover { background: var(--surface-hover); }
-.console-attention-list > a > svg { color: var(--text-muted); }
-.console-attention-dot { display: grid; width: 30px; height: 30px; place-items: center; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--status-success) 8%, transparent); color: var(--status-success); }
-.console-attention-dot.is-warning { background: color-mix(in srgb, var(--status-warning) 8%, transparent); color: var(--status-warning); }
-.console-attention-dot.is-danger { background: color-mix(in srgb, var(--status-danger) 8%, transparent); color: var(--status-danger); }
-.console-attention-list strong, .console-attention-list small { display: block; }
-.console-attention-list strong { color: var(--text-secondary); font-size: 11px; font-weight: 620; }
-.console-attention-list small { margin-top: 4px; color: var(--text-muted); font-size: 9px; line-height: 1.35; }
 /* The concrete cause, in the server's own words. It sits below the hint
    because it is the answer to "why", and it is allowed to wrap to two lines
    and clip beyond that: a queue row is a fixed height, and a reason that
    pushes every other row down costs more than a reason that is slightly
    truncated. The full text is one click away on the order itself. */
-.console-attention-reason { display: -webkit-box; overflow: hidden; margin-top: 3px; color: var(--status-warning); font-size: 9px; font-style: normal; line-height: 1.3; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.console-attention-list > a:not(.has-issue) .console-attention-reason { color: var(--text-muted); }
-.console-attention-list b { color: var(--text-primary); font-size: 17px; font-weight: 650; }
-.console-attention-list .has-issue b { color: var(--status-warning); }
 
 .console-orders-heading > a { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 11px; font-weight: 600; text-decoration: none; }
 .console-orders-heading > a:hover { color: var(--text-primary); }
@@ -419,10 +398,6 @@
 .console-list-history-card > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .console-list-history-card small { color: var(--text-muted); font-size: 10px; line-height: 1.5; }
 
-@media (max-width: 1180px) {
-  .console-status-pill { display: none; }
-}
-
 @media (max-width: 1023px) {
   .console-settings-grid { grid-template-columns: 1fr; }
   .console-integration-config-grid { grid-template-columns: 1fr; }
@@ -444,7 +419,6 @@
   .console-top-product-bar { grid-column: 1 / -1; order: 3; }
   .console-focus-tabs { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
   .console-focus-tabs button { flex: 0 0 auto; }
-  .console-attention-list > a { min-height: 72px; }
   .console-panel-header { min-height: 0; align-items: flex-start; flex-direction: column; padding: 16px; }
   .console-panel-toolbar-actions { width: 100%; overflow-x: auto; flex-wrap: nowrap; padding-bottom: 2px; }
   .console-panel-toolbar-actions :is(button, a) { min-height: 44px; flex: 0 0 auto; }

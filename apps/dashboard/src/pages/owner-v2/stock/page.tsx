@@ -4,6 +4,7 @@ import { DataTable, type DataColumn, type DataFilter } from "../../../components
 import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import { api, type ApiProduct, type ApiReseller, type ApiStockItem, type GoogleSheetsPreview, type GoogleSheetsStatus, type MaintenanceState } from "../../../lib/api";
 import { Badge, Dialog, DialogActions, Field, MetricRow, Notice } from "../../../components/ui";
+import { systemStateFor } from "../../../components/attention";
 
 type StockForm = { productId: string; variantId: string; email: string; loginPhone: string; otpEmail: string; password: string; profile: string; pin: string; status: ApiStockItem["status"]; sheetName: string; sheetRow: string };
 type DailyForm = { resellerId: string; variantId: string; startedAt: string; durationDays: string; buyer: string; device: string };
@@ -87,7 +88,22 @@ export default function OwnerConsoleStockPage() {
     { id: "product", label: "Produk", options: products.map((product) => ({ label: product.name, value: product.id })), value: (row) => row.productId },
   ], [products]);
   const variants = products.find((product) => product.id === form.productId)?.variants || [];
-  return <ConsoleShell title="Stok Akun" description="Kelola inventory dan sinkronisasi Google Sheets." refreshing={loading} attentionCount={stock.filter((row) => row.status === "reserved").length} systemState={error ? "unknown" : maintenance?.enabled ? "warning" : "healthy"} onRefresh={load}>
+  /* This page carried the second count/state mismatch. The count was
+     reserved stock rows and the colour was `maintenance.enabled` -- two
+     unrelated things, so the topbar read "4 perlu perhatian" next to a
+     green dot, or "0 perlu perhatian" next to an amber one. Both numbers
+     were defensible on their own; together they said two things at once.
+     One set now feeds both, and it is the set of things that are
+     genuinely unresolved rather than merely in flight:
+       - stock the owner cannot sell because Sheets flagged the account
+       - a maintenance window that is still open
+       - a configured Sheets that is failing to sync
+     Reserved rows are deliberately not in it. A reservation is a
+     purchase in progress; it is the page working, not failing. */
+  const blockedCount = stock.filter((row) => row.status === "blocked").length;
+  const sheetsFault = sheets?.configured && !sheets.healthy ? 1 : 0;
+  const stockAttention = blockedCount + (maintenance?.enabled ? 1 : 0) + sheetsFault;
+  return <ConsoleShell title="Stok Akun" description="Kelola inventory dan sinkronisasi Google Sheets." refreshing={loading} attentionCount={stockAttention} systemState={systemStateFor(stockAttention, { error: Boolean(error), loading })} onRefresh={load}>
     <MetricRow items={[{ label: "Tersedia", value: stock.filter((row) => row.status === "available").length, tone: "success" }, { label: "Direservasi", value: stock.filter((row) => row.status === "reserved").length, tone: "warning" }, { label: "Terjual", value: stock.filter((row) => row.status === "sold").length }, { label: "Diblokir", value: stock.filter((row) => row.status === "blocked").length, tone: "warning" }, { label: "Sheets", value: sheets?.configured ? "Terhubung" : "Periksa", tone: sheets?.configured ? "success" : "warning", hint: sheets?.lastSyncAt || "Belum sync" }, { label: "Maintenance", value: maintenance?.enabled ? "Aktif" : "Nonaktif", tone: maintenance?.enabled ? "warning" : "success" }]} />
     {error ? <Notice tone="danger">{error}</Notice> : null}{message ? <Notice>{message}</Notice> : null}
     <section className="console-panel"><div className="console-panel-header"><div><span>Katalog</span><h2>Inventory stok</h2></div><div className="console-panel-toolbar-actions"><button type="button" onClick={previewSheets} disabled={previewLoading} aria-busy={previewLoading}><ScanSearch size={15} /> {previewLoading ? "Membaca Sheets..." : "Preview Sheets"}</button><button type="button" onClick={() => setAction({ type: "sync" })}><RefreshCw size={15} /> Sync Sheets</button><button type="button" onClick={() => setAction({ type: "maintenance" })}><DatabaseZap size={15} /> {maintenance?.enabled ? "Matikan maintenance" : "Maintenance"}</button><button type="button" onClick={openCreate}><Plus size={15} /> Tambah stok</button></div></div><DataTable rows={stock} columns={columns} filters={filters} rowKey={(row) => row.id} loading={loading} error={error} initialPageSize={10} /></section>

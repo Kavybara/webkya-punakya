@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import { api, type SystemStatus } from "../../../lib/api";
 import { Badge, MetricRow, Notice } from "../../../components/ui";
+import { systemStateFor } from "../../../components/attention";
 
 export default function OwnerConsoleIntegrationsPage() {
   const [system, setSystem] = useState<SystemStatus | null>(null);
@@ -23,8 +24,14 @@ export default function OwnerConsoleIntegrationsPage() {
     { key: "cloudflare", label: "Cloudflare Tunnel", icon: Cloud, state: system?.integrations?.cloudflare.running ? "connected" : "disconnected", detail: system?.integrations?.cloudflare.publicDomain || "Domain belum terpasang" },
   ];
   const connected = integrationRows.filter((item) => item.state === "connected").length;
-  return <ConsoleShell title="Status Integrasi" description="Pantau koneksi layanan eksternal tanpa mengekspos secret." lastUpdated={updated} refreshing={loading} systemState={error ? "unknown" : connected === integrationRows.length ? "healthy" : "warning"} attentionCount={integrationRows.length - connected} onRefresh={load}>
-    <MetricRow items={[{ label: "Terhubung", value: connected, tone: "success" }, { label: "Perlu diperiksa", value: integrationRows.length - connected, tone: connected === integrationRows.length ? "success" : "warning" }, { label: "WhatsApp", value: system?.whatsapp.connected ? "Aktif" : "Periksa" }, { label: "Sheets", value: system?.integrations?.googleSheets.healthy ? "Sehat" : system?.integrations?.googleSheets.configured ? "Gangguan" : "Belum" }]} />
+  // `system ? ... : 0` rather than the bare difference: before the first
+  // response every row reads "disconnected", so the unguarded version
+  // flashed "5 perlu perhatian" on every page load and then corrected
+  // itself. `systemStateFor` already reports `loading` while this is null,
+  // and a count of zero is the only value consistent with "not measured".
+  const disconnected = system ? integrationRows.length - connected : 0;
+  return <ConsoleShell title="Status Integrasi" description="Pantau koneksi layanan eksternal tanpa mengekspos secret." lastUpdated={updated} refreshing={loading} attentionCount={disconnected} systemState={systemStateFor(disconnected, { error: Boolean(error), loading })} onRefresh={load}>
+    <MetricRow items={[{ label: "Terhubung", value: connected, tone: "success" }, { label: "Perlu diperiksa", value: disconnected, tone: connected === integrationRows.length ? "success" : "warning" }, { label: "WhatsApp", value: system?.whatsapp.connected ? "Aktif" : "Periksa" }, { label: "Sheets", value: system?.integrations?.googleSheets.healthy ? "Sehat" : system?.integrations?.googleSheets.configured ? "Gangguan" : "Belum" }]} />
     {error ? <Notice tone="danger">{error}</Notice> : null}{message ? <Notice>{message}</Notice> : null}
     <section className="console-panel"><div className="console-panel-header"><div><span>Sistem</span><h2>Koneksi layanan</h2></div><div className="console-panel-toolbar-actions"><button type="button" disabled={Boolean(busy)} onClick={() => run("sheets", () => api.syncGoogleSheets(), "Google Sheets berhasil disinkronkan.")}><RefreshCw size={15} className={busy === "sheets" ? "ui-spin" : ""} /> Sync Sheets</button><Link to="/owner-v2/integrations/configure">Konfigurasi <ExternalLink size={14} /></Link><Link to="/owner-v2/settings">Pengaturan owner</Link></div></div>
       <div className="console-integration-list">{integrationRows.map(({ key, label, icon: Icon, state, detail }) => <article key={key}><span className="console-system-icon"><Icon size={17} /></span><div><strong>{label}</strong><small>{detail}</small></div><Badge tone={state === "connected" ? "success" : state === "needs_oauth" || state === "degraded" ? "warning" : "danger"}>{state === "connected" ? "Terhubung" : state === "degraded" ? "Gangguan sync" : state === "needs_oauth" ? "Butuh OAuth" : "Terputus"}</Badge></article>)}</div>

@@ -11,6 +11,12 @@ import { Link } from "react-router-dom";
 import { api } from "../../lib/api";
 import { AppShell, useDismiss } from "../ui";
 import { formatDateTime } from "../../lib/format";
+// `attention/attention` directly, not the barrel. The barrel also re-exports
+// `AttentionQueue`, which is the module that pulls in `attention.css` -- and a
+// shell has no business loading the queue's stylesheet on a page that never
+// renders a queue. The label lives here because the shell is what draws the
+// pill, and it should not have to duplicate the words.
+import { systemStateLabel, type SystemState } from "../attention/attention";
 import { ConsoleSearch } from "./ConsoleSearch";
 import { consoleBottomNavigation, consoleNavigation } from "./navigation";
 import { buildOwnerNotifications, type OwnerNotification } from "./ownerNotifications";
@@ -56,8 +62,8 @@ export function ConsoleShell({
   description,
   lastUpdated,
   refreshing,
-  attentionCount = 0,
-  systemState = "healthy",
+  attentionCount,
+  systemState,
   onRefresh,
   children,
 }: {
@@ -66,7 +72,7 @@ export function ConsoleShell({
   lastUpdated?: string;
   refreshing?: boolean;
   attentionCount?: number;
-  systemState?: "loading" | "healthy" | "warning" | "unknown";
+  systemState?: SystemState;
   onRefresh?: () => void;
   children: ReactNode;
 }) {
@@ -147,26 +153,26 @@ export function ConsoleShell({
       onRefresh={onRefresh}
       searchPlaceholder="Cari pesanan, pelanggan, produk..."
       topbarLeading={
-        <div className="console-status-pill" title="Status berasal dari respons API Overview terbaru">
-          <span
-            className={
-              systemState === "healthy"
-                ? "is-online"
-                : systemState === "warning"
-                  ? "is-warning"
-                  : "is-unknown"
-            }
-          />
-          <span>
-            {systemState === "loading"
-              ? "Memeriksa sistem"
-              : systemState === "unknown"
-                ? "Status belum tersedia"
-                : systemState === "warning"
-                  ? `${attentionCount} perlu perhatian`
-                  : "Operasional normal"}
-          </span>
-        </div>
+        /* No default `systemState`. Fourteen pages used to pass
+           `systemState="healthy"` while computing nothing at all, which is
+           indistinguishable in the topbar from a page that checked and found
+           nothing wrong. Rendering nothing when the page has not said is the
+           honest half; `attention-invariant.test.mjs` is the half that stops
+           it from being an excuse. */
+        systemState ? (
+          <div className="ui-shell-status-pill" title="Status berasal dari respons API terbaru halaman ini">
+            <span
+              className={
+                systemState === "healthy"
+                  ? "is-online"
+                  : systemState === "warning"
+                    ? "is-warning"
+                    : "is-unknown"
+              }
+            />
+            <span>{systemStateLabel(systemState, attentionCount ?? 0)}</span>
+          </div>
+        ) : null
       }
       topbarActions={({ closePopovers }) => (
         <div className="console-notification-wrap" ref={notificationsRef}>

@@ -283,6 +283,9 @@ export default function ResellerV2SettingsPage() {
       title="Pengaturan"
       description="Kelola identitas panel reseller, keamanan login, dan sesi aktif."
       loading={loading}
+      // No attention props -- listed in `PAGES_WITHOUT_ATTENTION`. A form has
+      // nothing queued, blocked, or overdue; the one thing worth surfacing is a
+      // failed save, and that is already the MetricRow and Notice below.
       onRefresh={() => load().catch(() => undefined)}
     >
       <MetricRow

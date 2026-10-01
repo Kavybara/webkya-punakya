@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Clipboard, KeyRound, Link2, Mail, RefreshCw, Search, ShieldCheck, Smartphone } from "lucide-react";
 import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import { Badge, Button, MetricRow, Notice } from "../../../components/ui";
+import { systemStateFor } from "../../../components/attention";
 import {
   api,
   type AccountAccessLookupResult,
@@ -157,6 +158,12 @@ export default function OwnerConsoleAccountAccessPage() {
   };
 
   const activeCount = accounts.filter((account) => statusTone(account) === "success").length;
+  /* `statusTone` already encodes the judgement: expired, replaced or
+     disabled is a problem, and anything expiring inside a week is a
+     problem that is about to become one. So the attention count is the
+     complement of the active count -- one filter, two answers, which is
+     what stops them drifting apart. */
+  const accessAttention = accounts.length - activeCount;
   const resultValue = String(result?.result.value || "");
   const selectedTool = tools.find((item) => item.id === tool) || tools[0];
 
@@ -166,7 +173,8 @@ export default function OwnerConsoleAccountAccessPage() {
       description="Ambil kode dan link akses akun melalui Gmail Owner."
       lastUpdated={updatedAt}
       refreshing={accountsLoading || lookupLoading}
-      systemState={accountsError ? "warning" : "healthy"}
+      attentionCount={accessAttention}
+      systemState={systemStateFor(accessAttention, { error: Boolean(accountsError), loading: accountsLoading })}
       onRefresh={() => loadAccounts(provider)}
     >
       <MetricRow items={[

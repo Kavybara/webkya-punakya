@@ -1,0 +1,122 @@
+/*
+ * The attention queue, for whichever console is showing it.
+ *
+ * These rules used to be `.console-attention-*` inside `console.css`, which is
+ * the owner console's own vocabulary. That was fine while only the owner
+ * console had a queue, and it became a lie the moment the reseller console
+ * needed one: a `.console-` class rendering inside `/reseller-v2/*` tells the
+ * next reader the queue belongs to the other half of the product, and the day
+ * somebody moves a rule between the two stylesheets it takes the wrong one.
+ *
+ * So the naming is shared, the import is shared, and the rows stay
+ * console-agnostic by carrying their own destinations. There is no owner or
+ * reseller branch anywhere below; the only difference between the two queues
+ * is the strings the page that built it passed in.
+ *
+ * The layout is the owner's original: a 30px dot, a flexible label column, the
+ * count, an arrow. The one addition is `.attention-side`, the "kamu vs sistem"
+ * tag, which sits between the label and the number so the two read as a
+ * caption on the row rather than as another figure to add up.
+ */
+
+.attention-summary { flex: 0 0 auto; padding: 12px 18px 0; }
+.attention-summary p { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--text-muted); font-size: 10px; }
+.attention-summary strong { color: var(--status-warning); font-size: 15px; font-weight: 650; }
+.attention-summary p.is-clear { color: var(--status-success); }
+
+.attention-queue-empty { margin: 0; padding: 20px 22px; color: var(--text-muted); font-size: 10px; line-height: 1.55; }
+.attention-queue-error { margin: 0; padding: 20px 22px; color: var(--status-danger); font-size: 10px; line-height: 1.55; }
+
+.attention-list { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; }
+
+.attention-list > a {
+  display: grid;
+  min-width: 0;
+  min-height: 66px;
+  /* dot | label | side tag | count | arrow. The side tag is fixed-width so the
+     counts of every row line up in a single column, which is the whole point
+     of having a column of numbers. */
+  grid-template-columns: 30px minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border);
+  color: inherit;
+  text-decoration: none;
+  transition: background 200ms var(--ease-out-expo);
+}
+.attention-list > a:last-child { border-bottom: 0; }
+.attention-list > a:hover { background: var(--surface-hover); }
+.attention-list > a > svg { color: var(--text-muted); }
+
+.attention-dot {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--status-success) 8%, transparent);
+  color: var(--status-success);
+}
+.attention-dot.is-warning { background: color-mix(in srgb, var(--status-warning) 8%, transparent); color: var(--status-warning); }
+.attention-dot.is-danger { background: color-mix(in srgb, var(--status-danger) 8%, transparent); color: var(--status-danger); }
+
+.attention-list strong,
+.attention-list small { display: block; }
+.attention-list strong { color: var(--text-secondary); font-size: 11px; font-weight: 620; }
+.attention-list small { margin-top: 4px; color: var(--text-muted); font-size: 9px; line-height: 1.35; }
+
+/* A tag, not a badge. It has no dot and no fill, because the dot on the left
+   already carries the tone -- giving this a second coloured indicator would
+   say the same thing twice in two different visual languages. What it has to
+   be is legible at a glance, so it is a small caps label in the secondary
+   ink, tinted only enough to separate "yours" from "not yours". */
+.attention-side {
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.attention-side.is-you { border-color: color-mix(in srgb, var(--accent-cyan) 34%, transparent); color: var(--accent-cyan); }
+
+.attention-reason {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--status-warning);
+  font-size: 9px;
+  font-style: normal;
+  line-height: 1.3;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.attention-list > a:not(.has-issue) .attention-reason { color: var(--text-muted); }
+
+.attention-list b { color: var(--text-primary); font-size: 17px; font-weight: 650; }
+.attention-list .has-issue b { color: var(--status-warning); }
+
+/* A bento cell that holds a queue has to scroll inside itself rather than
+   stretch the row it was assigned, or one long queue re-heights the whole
+   grid. This rule used to be scoped to `.console-cell`, which is the owner
+   console's cell class -- so the reseller console's cells, which are
+   `.reseller-v2-cell`, silently lost it when the queue moved across. */
+.attention-cell > .attention-list,
+.attention-cell > .attention-summary {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+@media (max-width: 1180px) {
+  /* The side tag is the first thing to go when the row runs out of width. It
+     is the least load-bearing of the five columns -- the count and the dot
+     both still say the row matters -- and a wrapped tag costs the row a line
+     of height, which costs the cell a row of visible queue. */
+  .attention-side { display: none; }
+  .attention-list > a { grid-template-columns: 30px minmax(0, 1fr) auto auto; }
+}

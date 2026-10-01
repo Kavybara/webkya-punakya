@@ -11,6 +11,7 @@ import {
 } from "../../../lib/api";
 import { formatDateTimeFull } from "../../../lib/format";
 import { Badge, Dialog, DialogActions, Field, MetricRow, Notice, Toast } from "../../../components/ui";
+import { systemStateFor } from "../../../components/attention";
 
 const editableStatuses: WarrantyClaimStatus[] = ["reviewing", "resolved", "rejected"];
 const terminalStatuses = new Set<WarrantyClaimStatus>(["resolved", "rejected"]);
@@ -433,7 +434,17 @@ export default function OwnerConsoleWarrantyPage() {
     || claim.stockReviewSyncStatus === "failed"
   )), [activeClaims]);
 
-  return <ConsoleShell title="Garansi" description="Periksa klaim, pilih stok satu pool, dan simpan riwayat penggantian akun." refreshing={loading} attentionCount={activeClaims.length} systemState={error ? "unknown" : activeFailures.length ? "warning" : "healthy"} onRefresh={load}>
+  /* The count was `activeClaims.length` and the colour was
+     `activeFailures.length` -- the first is every open claim, the second
+     is the open claims that are stuck. Four claims moving normally gave
+     "4 perlu perhatian" beside a green dot. The count moves to
+     `activeFailures`: a claim in review is the page working, and a claim
+     whose notification or sync failed is the page not working. `MetricRow`
+     below still reports both numbers separately, so nothing is hidden --
+     the open-claim count just stops competing with the pill for the word
+     "attention". */
+  const warrantyAttention = activeFailures.length;
+  return <ConsoleShell title="Garansi" description="Periksa klaim, pilih stok satu pool, dan simpan riwayat penggantian akun." refreshing={loading} attentionCount={warrantyAttention} systemState={systemStateFor(warrantyAttention, { error: Boolean(error), loading })} onRefresh={load}>
     <MetricRow items={[
       { label: "Klaim baru", value: claims.filter((row) => row.status === "submitted").length, tone: "warning" },
       { label: "Sedang diperiksa", value: claims.filter((row) => ["reviewing", "waiting_evidence"].includes(row.status)).length, tone: "info" },

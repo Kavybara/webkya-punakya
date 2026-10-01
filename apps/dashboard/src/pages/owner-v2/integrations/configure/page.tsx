@@ -3,6 +3,7 @@ import { Cloud, ExternalLink, Mail, MessageCircle, Save, Sheet, WalletCards } fr
 import { ConsoleShell } from "../../../../components/console/ConsoleShell";
 import { api, type OwnerSettings } from "../../../../lib/api";
 import { Button, Dialog, DialogActions, Field, Notice } from "../../../../components/ui";
+import { systemStateFor } from "../../../../components/attention";
 
 type IntegrationSection = "pakasir" | "bailey" | "gmail" | "googleSheets" | "cloudflare";
 
@@ -130,7 +131,10 @@ export default function OwnerConsoleIntegrationConfigurePage() {
         title="Konfigurasi Integrasi"
         description="Atur koneksi owner melalui endpoint yang sudah ada."
         refreshing={loading}
-        systemState={error ? "unknown" : "healthy"}
+        // The skeleton branch passes no attention on purpose. Nothing has been
+        // fetched yet, so there is no count and no state -- and the old
+        // `error ? "unknown" : "healthy"` here rendered "Operasional normal"
+        // above five empty password forms for as long as they were empty.
         onRefresh={load}
       >
         {error
@@ -139,6 +143,24 @@ export default function OwnerConsoleIntegrationConfigurePage() {
       </ConsoleShell>
     );
   }
+
+  /* How many of the five integrations still have no credentials on this
+     account. This is the page where that is fixable -- it is five password
+     forms and nothing else -- so "kamu" is the only side that applies, and a
+     non-zero count is one line of work per integration.
+
+     Read off the fields the form itself edits rather than off
+     `settings.status`, which is what the sibling Status Integrasi page
+     renders. Two pages reading two different structures to answer one
+     question is how they come to disagree, and this page has the more direct
+     answer in front of it: a field the owner can see is empty. */
+  const unconfigured = [
+    settings.pakasir.merchantId && settings.pakasir.apiKey,
+    settings.bailey.botNumber,
+    settings.gmail.inboxEmail,
+    settings.googleSheets.spreadsheetId && settings.googleSheets.serviceAccountEmail,
+    settings.cloudflare.publicDomain && settings.cloudflare.tunnelToken,
+  ].filter((ready) => !ready).length;
 
   const saveButton = (section: IntegrationSection, label: string) => (
     <Button weight="primary" className="console-config-save" disabled={Boolean(busy)} onClick={() => void save(section)}>
@@ -151,7 +173,8 @@ export default function OwnerConsoleIntegrationConfigurePage() {
       title="Konfigurasi Integrasi"
       description="Secret dimasking dan nilai lama dipertahankan bila tidak diganti."
       refreshing={loading}
-      systemState={error ? "unknown" : "healthy"}
+      attentionCount={unconfigured}
+      systemState={systemStateFor(unconfigured, { error: Boolean(error) })}
       onRefresh={load}
     >
       {error ? <Notice tone="danger">{error}</Notice> : null}

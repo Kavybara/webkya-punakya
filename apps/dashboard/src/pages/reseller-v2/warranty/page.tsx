@@ -19,6 +19,7 @@ import {
 import { api, subscribeRealtime, type WarrantyClaim } from "../../../lib/api";
 import type { ManagedAccount } from "../../../lib/types";
 import { ResellerShell } from "../../../components/reseller-v2/ResellerShell";
+import { systemStateFor } from "../../../components/attention";
 import {
   normalizeResellerAccountStatus,
   resellerAccountStatusLabel,
@@ -408,6 +409,13 @@ export default function ResellerV2WarrantyPage() {
       }).length,
     [accounts],
   );
+  /* Only two sets: warranties about to lapse, and claims where the owner has
+     asked for evidence and is waiting on the reseller. A claim the reseller
+     just submitted is not outstanding -- it is with the owner now, and
+     counting it would put the amber pill up the instant someone does the
+     thing the page exists to let them do. */
+  const awaitingEvidence = claims.filter((claim) => claim.status === "waiting_evidence").length;
+  const warrantyAttention = expiringWarrantyCount + awaitingEvidence;
   const selectedDetailFields = useMemo(() => {
     if (!selectedAccount) return [];
     const warranty = warrantyInfo(selectedAccount);
@@ -491,6 +499,8 @@ export default function ResellerV2WarrantyPage() {
       title="Garansi"
       description="Pilih akun, jelaskan kendala, dan lampirkan bukti untuk diperiksa Owner."
       loading={loading}
+      attentionCount={warrantyAttention}
+      systemState={systemStateFor(warrantyAttention, { error: Boolean(error), loading })}
       onRefresh={() => {
         loadData().catch(() => undefined);
       }}

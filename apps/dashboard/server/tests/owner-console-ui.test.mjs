@@ -341,7 +341,7 @@ test("attention queue stops counting cancelled orders as paid awaiting delivery"
 
 test("attention queue surfaces the per-order delivery reason instead of a bare count", async () => {
   const analytics = await source("pages/owner-v2/overview/analytics.ts");
-  const queue = await source("pages/owner-v2/overview/AttentionQueue.tsx");
+  const queue = await source("components/attention/AttentionQueue.tsx");
   // The server already persists the reason on `order.deliveryError` and the
   // order drawer already renders it. It was absent from the queue row itself,
   // so the owner had to open orders one by one to learn why four deliveries

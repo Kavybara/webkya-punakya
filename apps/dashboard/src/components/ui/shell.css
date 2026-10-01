@@ -400,6 +400,25 @@
 
 .ui-shell-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; }
 
+/* The status pill, in the frame rather than in either console's stylesheet.
+ *
+ * It was `.console-status-pill`, in `console.css`, and only the owner console
+ * could render it -- so all seven reseller pages showed no system state at
+ * all, not because anyone decided a reseller did not need one but because the
+ * rule that draws it was in the other half of the product. The pill sits in
+ * `topbarLeading`, which is a slot the frame already reserves for exactly
+ * this, so it belongs to the frame.
+ *
+ * `background: var(--surface)` and no `backdrop-filter`. The bar it sits in is
+ * one of the sticky surfaces the kill-switch in this same file neutralises, so
+ * a blur here would be doing per-frame work over a scrolling page for a pill
+ * that is never more than a few words wide. */
+.ui-shell-status-pill { display: inline-flex; min-height: 34px; align-items: center; gap: 7px; padding: 0 11px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); color: var(--text-secondary); font-size: 11px; white-space: nowrap; }
+.ui-shell-status-pill > span:first-child { width: 7px; height: 7px; border-radius: 50%; }
+.ui-shell-status-pill .is-online { background: var(--status-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-success) 10%, transparent); }
+.ui-shell-status-pill .is-warning { background: var(--status-warning); box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-warning) 10%, transparent); }
+.ui-shell-status-pill .is-unknown { background: var(--text-muted); box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-muted) 14%, transparent); }
+
 .ui-shell-profile { position: relative; }
 .ui-shell-profile-button {
   display: inline-flex;
@@ -541,6 +560,18 @@
 /* Visibility flips at one breakpoint, and both sides of the flip are stated
    here so a reader of this file never has to guess which is the default. */
 .ui-shell .is-desktop-only { display: none; }
+
+@media (max-width: 1180px) {
+  /* The pill is the first thing to go when the topbar runs out of width. It is
+     a summary, not an action, and the page below it carries the same count in
+     full -- so hiding it costs the reader a glance, not a fact.
+
+     1180px is the breakpoint the owner console shipped with, kept verbatim.
+     Folding it into the 1023 block would start showing the pill in the
+     1024-1180 band that has always hidden it, on a topbar that has not
+     gained any room. */
+  .ui-shell-status-pill { display: none; }
+}
 
 @media (max-width: 1023px) {
   .ui-shell-sidebar.is-desktop,

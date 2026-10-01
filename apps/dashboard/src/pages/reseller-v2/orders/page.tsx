@@ -18,6 +18,7 @@ import {
   orderStatus,
 } from "../../../lib/orders";
 import { ResellerShell } from "../../../components/reseller-v2/ResellerShell";
+import { systemStateFor } from "../../../components/attention";
 import {
   Badge,
   Button,
@@ -166,6 +167,16 @@ export default function ResellerV2OrdersPage() {
     () => paidOrders.reduce((sum, order) => sum + Number(order.total || 0), 0),
     [paidOrders],
   );
+  /* Two sets, and both are the reseller's to fix rather than the owner's:
+     orders whose payment never completed (the QRIS can still be reopened from
+     this page) and orders that were paid for but whose credentials never went
+     out. The second is the expensive mistake to miss, which is why it is
+     counted here instead of being left to the owner's Operations Center. */
+  const paidNotDelivered = useMemo(
+    () => orders.filter((order) => orderPaid(order) && !deliveryIsComplete(order)).length,
+    [orders],
+  );
+  const ordersAttention = pendingOrders.length + paidNotDelivered;
 
   const columns: Array<DataColumn<ApiOrder>> = [
     {
@@ -271,6 +282,8 @@ export default function ResellerV2OrdersPage() {
       description="Semua transaksi pembelian akun Anda, beserta detail pengiriman dan QRIS yang masih bisa dibuka."
       onRefresh={() => loadOrders().catch(() => undefined)}
       loading={requestState === "loading"}
+      attentionCount={ordersAttention}
+      systemState={systemStateFor(ordersAttention, { error: Boolean(ordersError), loading: requestState === "loading" })}
     >
       <div className="reseller-v2-orders">
         <MetricRow

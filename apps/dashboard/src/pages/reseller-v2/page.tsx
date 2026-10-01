@@ -20,6 +20,7 @@ import {
   type ApiReseller,
 } from "../../lib/api";
 import { ResellerShell } from "../../components/reseller-v2/ResellerShell";
+import { systemStateFor } from "../../components/attention";
 import {
   normalizeResellerAccountStatus,
   summarizeResellerAccounts,
@@ -109,6 +110,13 @@ export default function ResellerV2OverviewPage() {
     () => data.orders.filter(isActiveOrder).slice(0, 3),
     [data.orders],
   );
+  /* The count is over the untruncated filter, not over `activeOrders`,
+     which is `.slice(0, 3)` for the card. Counting the slice would cap the
+     pill at 3 forever and make a backlog look identical to a short one. */
+  const openOrderCount = useMemo(
+    () => data.orders.filter(isActiveOrder).length,
+    [data.orders],
+  );
   const accountSummary = useMemo(
     () => summarizeResellerAccounts(data.accounts),
     [data.accounts],
@@ -139,6 +147,16 @@ export default function ResellerV2OverviewPage() {
     )),
     [data.accounts],
   );
+  /* Four sets, all of them things the reseller is waiting on rather than
+     things they did: orders that have not completed, accounts running out,
+     and delivered credentials whose template they have not opened yet. The
+     last one is here because the shell already badges unread deliveries on
+     the nav rail -- two answers to one question, from two files, is how they
+     drift. */
+  const summaryAttention = openOrderCount
+    + accountSummary.expiring
+    + accountSummary.expired
+    + unreadDeliveryAccounts.length;
   const balance = formatRupiah(Number(data.reseller?.deposit || 0));
   const greeting = data.reseller?.name || data.reseller?.username || "Reseller";
 
@@ -149,6 +167,8 @@ export default function ResellerV2OverviewPage() {
       balance={loading ? undefined : balance}
       lastUpdated={updatedAt}
       loading={loading}
+      attentionCount={summaryAttention}
+      systemState={systemStateFor(summaryAttention, { error: Boolean(error), loading })}
       onRefresh={load}
     >
       {({ openTopUp }) => (

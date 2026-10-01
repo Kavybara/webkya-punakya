@@ -5,6 +5,7 @@ import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import { api, type ApiProduct } from "../../../lib/api";
 import { formatRupiah } from "../../../lib/format";
 import { Badge, Dialog, DialogActions, Field, MetricRow, Notice } from "../../../components/ui";
+import { systemStateFor } from "../../../components/attention";
 
 type ProductForm = { name: string; code: string; category: string; description: string; isActive: boolean; resellerOnly: boolean; needsProfile: boolean; needsPin: boolean; variantName: string; variantCode: string; price: string };
 type ProductVariant = ApiProduct["variants"][number];
@@ -155,7 +156,14 @@ export default function OwnerConsoleProductsPage() {
     { id: "actions", header: "Aksi", value: () => "", cell: (row) => <div className="console-row-actions"><button type="button" onClick={() => openEdit(row)} aria-label={`Edit ${row.name}`}><Edit3 size={14} /></button><button type="button" onClick={() => { setAction({ type: "lock", product: row }); setReason(row.orderLock?.reason || ""); }} aria-label={`${row.orderLock?.enabled ? "Buka" : "Kunci"} ${row.name}`}>{row.orderLock?.enabled ? <UnlockKeyhole size={14} /> : <LockKeyhole size={14} />}</button><button type="button" onClick={() => setAction({ type: "archive", product: row })} aria-label={`Archive ${row.name}`}><Archive size={14} /></button><button type="button" onClick={() => setAction({ type: "delete", product: row })} aria-label={`Hapus ${row.name}`}><Trash2 size={14} /></button></div> },
   ], []);
   const filters = useMemo<Array<DataFilter<ApiProduct>>>(() => [{ id: "category", label: "Kategori", options: [...new Set(products.map((row) => row.category))].map((value) => ({ label: value, value })), value: (row) => row.category }], [products]);
-  return <ConsoleShell title="Produk" description="Kelola katalog, variant, dan safe mode pemesanan." refreshing={loading} systemState={error ? "unknown" : "healthy"} onRefresh={load}>
+  /* Order lock is the owner's own decision, so unlike a reserved account
+     or an open claim it is genuinely outstanding work: the owner froze
+     this product and it is still frozen. Archived and inactive products
+     are excluded -- freezing those is deliberate housekeeping, not an
+     oversight, and counting them would train the owner to ignore the
+     number. */
+  const frozenCount = products.filter((row) => row.orderLock?.enabled && row.isActive && !row.isArchived).length;
+  return <ConsoleShell title="Produk" description="Kelola katalog, variant, dan safe mode pemesanan." refreshing={loading} attentionCount={frozenCount} systemState={systemStateFor(frozenCount, { error: Boolean(error), loading })} onRefresh={load}>
     <MetricRow items={[{ label: "Total produk", value: products.length }, { label: "Aktif", value: products.filter((row) => row.isActive && !row.isArchived).length, tone: "success" }, { label: "Archived", value: products.filter((row) => row.isArchived).length }, { label: "Order frozen", value: products.filter((row) => row.orderLock?.enabled).length, tone: "warning" }]} />
     {error ? <Notice tone="danger">{error}</Notice> : null}{message ? <Notice>{message}</Notice> : null}
     <section className="console-panel"><div className="console-panel-header"><div><span>Katalog</span><h2>Daftar produk</h2></div><div className="console-panel-toolbar-actions"><button type="button" onClick={openCreate}><PackagePlus size={15} /> Tambah produk</button></div></div><DataTable rows={products} columns={columns} filters={filters} rowKey={(row) => row.id} loading={loading} error={error} initialPageSize={10} /></section>

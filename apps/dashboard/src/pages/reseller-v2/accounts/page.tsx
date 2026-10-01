@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { api, type AccountDeliveryDetail, type ApiAccount } from "../../../lib/api";
 import { ResellerShell } from "../../../components/reseller-v2/ResellerShell";
+import { systemStateFor } from "../../../components/attention";
 import {
   normalizeResellerAccountStatus,
   resellerAccountStatusLabel,
@@ -223,6 +224,11 @@ export default function ResellerV2AccountsPage() {
     () => summarizeResellerAccounts(accounts),
     [accounts],
   );
+  /* `summarizeResellerAccounts` already partitions the list by status, so both
+     halves of the answer come from one pass. Expiring and expired are in;
+     `inactive` is not -- an inactive account was switched off deliberately,
+     and counting it would put a permanently amber pill on a healthy panel. */
+  const accountsAttention = accountSummary.expiring + accountSummary.expired;
   const selectedCondition = selected ? accountConditionBadge(selected) : null;
   useEffect(() => {
     const accountId = searchParams.get("account") || "";
@@ -238,6 +244,8 @@ export default function ResellerV2AccountsPage() {
       title="Akun Saya"
       description="Lihat akun yang Anda miliki dan buka credential saat diperlukan."
       loading={loading}
+      attentionCount={accountsAttention}
+      systemState={systemStateFor(accountsAttention, { error: Boolean(error), loading })}
       onRefresh={() => load({ refreshSheets: true })}
     >
       {error ? <ErrorState message={error} onRetry={load} /> : null}

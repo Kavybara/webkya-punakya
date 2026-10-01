@@ -5,6 +5,7 @@ import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import { api, type WhatsappListHistory, type WhatsappRental, type WhatsappStatus } from "../../../lib/api";
 import { formatCalendarDate, formatDateTime } from "../../../lib/format";
 import { Badge, Dialog, DialogActions, Field, MetricRow, Notice } from "../../../components/ui";
+import { systemStateFor } from "../../../components/attention";
 
 type RentalForm = {
   linkGrub: string;
@@ -215,6 +216,11 @@ export default function OwnerConsoleWhatsappPage() {
     { id: "status", header: "Status", value: (row) => row.status, sortable: true, cell: (row) => <Badge tone={row.status === "active" ? "success" : row.status === "expired" ? "danger" : "warning"}>{row.status}</Badge> },
     { id: "actions", header: "Aksi", value: () => "", cell: (row) => <div className="console-row-actions"><button type="button" disabled={busy === row.id} onClick={() => openListHistory(row).catch(() => undefined)} aria-label={`Riwayat list ${row.name}`}><History size={14} /></button><button type="button" onClick={() => openEdit(row)} aria-label={`Edit ${row.name}`}><Edit3 size={14} /></button><button type="button" onClick={() => { setAdjusting(row); setAdjustForm(emptyAdjustment()); }} aria-label={`Tambah durasi ${row.name}`}><CalendarPlus size={14} /></button>{row.linkGrub ? <a href={row.linkGrub} target="_blank" rel="noreferrer" aria-label={`Buka grup ${row.name}`}><Link2 size={14} /></a> : null}</div> },
   ], [busy]);
+  // The bot is either connected or it is not, so the count is 0 or 1 -- but
+  // only once a response has arrived. Before that `status` is null and the
+  // honest answer is "not measured", which `systemStateFor` renders as a
+  // loading state rather than as one disconnection.
+  const connectionIssues = status ? (status.connected ? 0 : 1) : 0;
   const filters = useMemo<Array<DataFilter<WhatsappRental>>>(() => [{ id: "status", label: "Status", options: ["active", "paused", "expired"].map((value) => ({ label: value, value })), value: (row) => row.status }], []);
   const pairingCode = status?.pairingCode?.trim() || "";
   const showConnectionPanel = !status?.connected && !loading;
@@ -226,7 +232,7 @@ export default function OwnerConsoleWhatsappPage() {
   const modalDelta = adjustmentDays(adjustForm);
   const modalPreviewEndsAt = adjusting && modalDelta ? addDays(adjusting.endsAt, modalDelta) : "";
 
-  return <ConsoleShell title="WhatsApp" description="Kelola koneksi bot dan rental grup aktif." refreshing={loading} systemState={error ? "unknown" : status?.connected ? "healthy" : "warning"} attentionCount={status?.connected ? 0 : 1} onRefresh={load}>
+  return <ConsoleShell title="WhatsApp" description="Kelola koneksi bot dan rental grup aktif." refreshing={loading} attentionCount={connectionIssues} systemState={systemStateFor(connectionIssues, { error: Boolean(error), loading })} onRefresh={load}>
     <MetricRow items={[{ label: "Koneksi", value: status?.connected ? "Connected" : "Periksa", tone: status?.connected ? "success" : "warning" }, { label: "Rental aktif", value: groups.filter((row) => row.status === "active").length }, { label: "Expired", value: groups.filter((row) => row.status === "expired").length, tone: "danger" }, { label: "Total list", value: groups.reduce((sum, row) => sum + Number(row.listCount || 0), 0) }]} />
     {error ? <Notice tone="danger">{error}</Notice> : null}{message ? <Notice>{message}</Notice> : null}
     {showConnectionPanel ? <section className="console-panel console-whatsapp-pairing-panel"><div className="console-panel-header"><div><span>Koneksi bot</span><h2>{pairingCode ? "Pairing code tersedia" : status?.qrAvailable ? "QR WhatsApp tersedia" : "Pairing code belum terbaca"}</h2></div><Badge tone="warning">{status?.state || "periksa"}</Badge></div><div className="console-whatsapp-pairing-body"><KeyRound size={20} /><div><p>{pairingCode ? "Masukkan kode ini di WhatsApp: Perangkat tertaut -> Tautkan dengan nomor telepon." : status?.qrAvailable ? "Buka halaman pairing WhatsApp untuk melihat QR terbaru dari bot." : `Status bot: ${connectionDetail}. Hapus folder bailey auth lalu restart untuk meminta kode baru.`}</p>{pairingCode ? <strong className="console-whatsapp-pairing-code">{pairingCode}</strong> : null}</div><div className="console-whatsapp-pairing-actions">{pairingCode ? <button type="button" onClick={() => copyPairingCode().catch(() => undefined)}><span>{copiedPairing ? <Check size={15} /> : <Copy size={15} />}</span>{copiedPairing ? "Tersalin" : "Salin kode"}</button> : null}{status?.publicQrUrl ? <a href={status.publicQrUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /> Buka pairing</a> : null}<button type="button" onClick={() => load().catch(() => undefined)}><RefreshCw size={15} /> Refresh</button></div></div></section> : null}

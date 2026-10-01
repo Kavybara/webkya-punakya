@@ -4,6 +4,7 @@ import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import { api, type HealthResult, type SystemStatus } from "../../../lib/api";
 import { formatDateTime } from "../../../lib/format";
 import { Badge, MetricRow, Notice } from "../../../components/ui";
+import { systemStateFor } from "../../../components/attention";
 
 function formatBytes(value = 0) {
   const bytes = Math.max(0, Number(value || 0));
@@ -94,7 +95,7 @@ export default function OwnerConsoleHealthPage() {
 
   const attention = checks.filter((item) => !item.ok).length + (health?.maintenance?.enabled ? 1 : 0);
 
-  return <ConsoleShell title="Health Center" description="Pantau kesehatan teknis web, bot, pembayaran, tunnel, Sheets, database, dan backup." refreshing={loading} attentionCount={attention} systemState={error ? "unknown" : attention ? "warning" : "healthy"} lastUpdated={formatDateTime(system?.checkedAt || "")} onRefresh={load}>
+  return <ConsoleShell title="Health Center" description="Pantau kesehatan teknis web, bot, pembayaran, tunnel, Sheets, database, dan backup." refreshing={loading} attentionCount={attention} systemState={systemStateFor(attention, { error: Boolean(error), loading })} lastUpdated={formatDateTime(system?.checkedAt || "")} onRefresh={load}>
     <MetricRow items={[{ label: "WhatsApp", value: system?.whatsapp?.connected ? "Connected" : "Periksa", tone: statusTone(Boolean(system?.whatsapp?.connected), true) }, { label: "Pakasir", value: health?.pakasirConfigured ? "Configured" : "Kosong", tone: statusTone(Boolean(health?.pakasirConfigured), true) }, { label: "Cloudflare", value: system?.tunnel?.running || system?.integrations?.cloudflare?.running ? "Running" : "Offline", tone: statusTone(Boolean(system?.tunnel?.running || system?.integrations?.cloudflare?.running), true) }, { label: "Memory", value: `${system?.memory?.percent ?? 0}%`, tone: Number(system?.memory?.percent || 0) > 85 ? "warning" : "success" }]} />
     {error ? <Notice tone="danger">{error}</Notice> : null}
     {health?.maintenance?.enabled ? <Notice tone="warning">{health.maintenance.reason || "Maintenance order sedang aktif."}</Notice> : null}

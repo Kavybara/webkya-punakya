@@ -113,6 +113,10 @@ export default function ResellerV2GuidesPage() {
     <ResellerShell
       title="Panduan"
       description="Pelajari alur utama Kavya melalui video singkat dan langkah yang mudah diikuti."
+      // No attention props -- listed in `PAGES_WITHOUT_ATTENTION`. A help page
+      // has no collection behind it, so there is nothing to count, and passing
+      // zero would be the exact thing that list exists to prevent: a green pill
+      // asserting a health nobody checked.
     >
       <section className="reseller-guide-intro" aria-labelledby="guide-intro-title">
         <div className="reseller-guide-intro-icon" aria-hidden="true">

@@ -8,14 +8,13 @@ import { api, subscribeRealtime, type ApiOrder, type ApiReseller, type ApiStockI
 import type { Product } from "../../lib/types";
 import { formatRupiah } from "../../lib/format";
 import { formatDateTime } from "../../lib/format";
-import { AttentionQueue } from "./overview/AttentionQueue";
+import { AttentionQueue, attentionTotal, systemStateFor } from "../../components/attention";
 import { ResellerBalances } from "./overview/ResellerBalances";
 import { RevenueChart } from "./overview/RevenueChart";
 import { ServiceHealth } from "./overview/ServiceHealth";
 import { StockCover } from "./overview/StockCover";
 import { TopProducts } from "./overview/TopProducts";
 import {
-  attentionTotal,
   buildAttentionQueue,
   buildRevenueSeries,
   fulfillmentLabel,
@@ -158,7 +157,7 @@ export default function OwnerConsoleOverviewPage() {
       lastUpdated={lastUpdated}
       refreshing={refreshing}
       attentionCount={attentionCount}
-      systemState={loading ? "loading" : errors.operations || errors.system ? "unknown" : attentionCount ? "warning" : "healthy"}
+      systemState={systemStateFor(attentionCount, { error: Boolean(errors.operations || errors.system), loading })}
       onRefresh={retry}
     >
       {/* One grid.

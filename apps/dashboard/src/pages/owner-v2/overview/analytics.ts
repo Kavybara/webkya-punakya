@@ -372,37 +372,20 @@ export function summariseWallet(operations: OperationsCenterResult | null): Wall
 
 /* ------------------------------------------------------------------ *
  * The attention queue
+ *
+ * The type, the total and the state arithmetic now live in
+ * `components/attention/`, because the reseller console needs the same three
+ * and could not reach them from here. What stays in this file is the part that
+ * is genuinely the overview's: reading five collections at once and deciding
+ * which nine questions that raises.
  * ------------------------------------------------------------------ */
 
-export type AttentionTone = "danger" | "warning" | "info";
-export type AttentionItem = {
-  id: string;
-  label: string;
-  count: number;
-  hint: string;
-  /**
-   * The concrete reason behind the count, in the owner's terms, or "" when the
-   * queue cannot name one.
-   *
-   * `hint` says what the row *is*. `detail` says *why this one is happening
-   * right now* -- usually the thing only the owner can fix, like a product
-   * missing a customer email or a reseller that no longer exists. Without it a
-   * count is a number the owner cannot act on, and the only way to learn the
-   * cause was to open each row one by one.
-   */
-  detail?: string;
-  tone: AttentionTone;
-  /**
-   * Where clicking goes, carrying enough state to land on the thing that
-   * needs fixing.
-   *
-   * Three of the five used to point at the bare operations queue, which is a
-   * list of everything -- so the owner clicked "4 stock anomalies", landed on
-   * a page of 40 unrelated rows, and had to find them again. Every path here
-   * narrows the destination.
-   */
-  path: string;
-};
+// Re-exported so anything that used to import the queue's shape from here
+// still works, but imported as well -- `export type { X } from` publishes the
+// name without binding it locally, and `buildAttentionQueue` below annotates
+// its return type with it.
+import type { AttentionItem } from "../../../components/attention";
+export type { AttentionItem, AttentionSide, AttentionTone } from "../../../components/attention";
 
 /**
  * Ordered by what breaks money first, not by how alarming it looks. A failed
@@ -488,6 +471,7 @@ export function buildAttentionQueue(orders: ApiOrder[], operations: OperationsCe
       hint: "Sudah dibayar tapi fulfillment gagal. Sudah dicoba ulang otomatis.",
       detail: deliveryDetail,
       tone: "danger",
+      side: "system",
       // The orders page has a real `delivery-failed` filter whose predicate is
       // the same delivery states counted here, so this lands on exactly the rows
       // the number refers to, and each one opens an order you can act on.
@@ -504,6 +488,7 @@ export function buildAttentionQueue(orders: ApiOrder[], operations: OperationsCe
       // only matters once it stops shrinking, which the hint now says.
       hint: "Uang masuk, akun belum sampai. Sistem mencoba ulang tiap 45 detik.",
       tone: "warning",
+      side: "system",
       // This pointed at `?focus=delivery`, which renders `deliveryAudit.items`.
       // That builder only emits rows for orders that are ALREADY finished --
       // sent-but-no-account, fewer-accounts-than-qty, needs_redelivery,
@@ -520,6 +505,7 @@ export function buildAttentionQueue(orders: ApiOrder[], operations: OperationsCe
       count: count(expiry?.expiredActive),
       hint: "Akun lewat masa aktif belum kembali ke stok.",
       tone: "danger",
+      side: "you",
       path: "/owner-v2/operations?focus=expiry",
     },
     {
@@ -537,6 +523,14 @@ export function buildAttentionQueue(orders: ApiOrder[], operations: OperationsCe
         ? `${reconcile.highOwnerFixable} baris Data Sheets salah, ${reconcile.highSystemSide || 0} masalah sistem.`
         : "Tidak ada baris Sheets yang salah. Sisanya masalah sistem.",
       tone: "warning",
+      // This is the one row that is genuinely two rows wearing a coat, so the
+      // tag is derived from which half is larger rather than asserted. Calling
+      // it "kamu" when 12 of 14 findings are the system disagreeing with
+      // itself would send the owner to Sheets to look for a typo that is not
+      // there -- the exact failure the split exists to prevent, reintroduced
+      // one level up. The hint below already carries both numbers, so the tag
+      // and the sentence cannot disagree.
+      side: Number(reconcile?.highOwnerFixable || 0) >= Number(reconcile?.highSystemSide || 0) ? "you" : "system",
       path: "/owner-v2/operations?focus=stock",
     },
     {
@@ -545,6 +539,7 @@ export function buildAttentionQueue(orders: ApiOrder[], operations: OperationsCe
       count: count(sheet?.invalid, sheet?.mismatch, sheet?.duplicateStock),
       hint: "Baris invalid, tidak cocok, atau duplikat.",
       tone: "warning",
+      side: "you",
       path: "/owner-v2/operations?focus=sheets",
     },
     {
@@ -553,6 +548,7 @@ export function buildAttentionQueue(orders: ApiOrder[], operations: OperationsCe
       count: count(expiry?.expiringSoon),
       hint: "Akun habis masa aktif dalam 5 hari.",
       tone: "warning",
+      side: "you",
       path: "/owner-v2/operations?focus=expiry",
     },
     {
@@ -561,6 +557,7 @@ export function buildAttentionQueue(orders: ApiOrder[], operations: OperationsCe
       count: count(manual?.pendingDeposits, operations?.wallet?.summary?.pendingRequests),
       hint: "Permintaan isi saldo belum diproses.",
       tone: "warning",
+      side: "you",
       // No query parameter: the reseller page already renders the pending
       // deposit table below the reseller list, so a bare path lands on the
       // queue. A `?tab=` that nothing reads would be a link that looks
@@ -573,6 +570,7 @@ export function buildAttentionQueue(orders: ApiOrder[], operations: OperationsCe
       count: pendingOverdue.length,
       hint: "QRIS sudah kedaluwarsa tapi masih menggantung.",
       tone: "info",
+      side: "you",
       path: "/owner-v2/orders?status=pending",
     },
     {
@@ -581,15 +579,14 @@ export function buildAttentionQueue(orders: ApiOrder[], operations: OperationsCe
       count: pendingFresh.length,
       hint: "QRIS aktif, masih dalam masa bayar.",
       tone: "info",
+      side: "system",
       path: "/owner-v2/orders?status=pending",
     },
   ];
 }
 
 /** Only the rows that need a decision. A queue showing a row of zeroes is noise. */
-export function attentionTotal(items: AttentionItem[]) {
-  return items.filter((item) => item.tone !== "info").reduce((sum, item) => sum + item.count, 0);
-}
+export { attentionTotal } from "../../../components/attention";
 
 /* ------------------------------------------------------------------ *
  * System

@@ -91,7 +91,10 @@ export default function OwnerConsoleSettingsPage() {
       title="Pengaturan Owner"
       description="Kelola profil dan keamanan akun owner."
       refreshing={loading}
-      systemState={error ? "unknown" : "healthy"}
+      // No attention props -- named in `PAGES_WITHOUT_ATTENTION`. This is a
+      // form: nothing on it is queued, blocked or overdue. The one thing
+      // worth surfacing is a failed save, and that is already the Notice
+      // directly below.
       onRefresh={load}
     >
       {error ? <Notice tone="danger">{error}</Notice> : null}

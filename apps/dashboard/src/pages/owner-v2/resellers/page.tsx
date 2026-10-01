@@ -5,6 +5,7 @@ import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import { api, type AccountAccessLookupType, type ApiDepositRequest, type ApiReseller } from "../../../lib/api";
 import { formatRupiah } from "../../../lib/format";
 import { Badge, Dialog, DialogActions, Field, MetricRow, Notice, Toast } from "../../../components/ui";
+import { systemStateFor } from "../../../components/attention";
 
 type ResellerForm = { name: string; username: string; password: string; email: string; whatsapp: string; deposit: string; isActive: boolean; allowedAccessTools: AccountAccessLookupType[] };
 type ResellerAction = { type: "delete"; reseller: ApiReseller } | { type: "approve" | "reject"; request: ApiDepositRequest } | null;
@@ -47,7 +48,8 @@ export default function OwnerConsoleResellersPage() {
     { id: "actions", header: "Aksi", value: () => "", cell: (row) => row.status === "pending" || !row.status ? <div className="console-row-actions"><button type="button" onClick={() => setAction({ type: "approve", request: row })} aria-label={`Approve ${row.id}`}><Check size={14} /></button><button type="button" onClick={() => setAction({ type: "reject", request: row })} aria-label={`Reject ${row.id}`}><X size={14} /></button></div> : <span /> },
   ], []);
   const pending = requests.filter((row) => !row.status || row.status === "pending");
-  return <ConsoleShell title="Reseller" description="Kelola akses, saldo, status, dan permintaan deposit reseller." refreshing={loading} attentionCount={pending.length} systemState={error ? "unknown" : pending.length ? "warning" : "healthy"} onRefresh={load}>
+  const pendingCount = pending.length;
+  return <ConsoleShell title="Reseller" description="Kelola akses, saldo, status, dan permintaan deposit reseller." refreshing={loading} attentionCount={pendingCount} systemState={systemStateFor(pendingCount, { error: Boolean(error), loading })} onRefresh={load}>
     <MetricRow items={[{ label: "Reseller aktif", value: resellers.filter((row) => row.isActive).length, tone: "success" }, { label: "Nonaktif", value: resellers.filter((row) => !row.isActive).length }, { label: "Total saldo", value: formatRupiah(resellers.reduce((sum, row) => sum + Number(row.deposit || 0), 0)) }, { label: "Deposit pending", value: pending.length, tone: pending.length ? "warning" : "success" }]} />
     {error ? <Notice tone="danger">{error}</Notice> : null}<Toast message={message} onClose={clearMessage} />
     <section className="console-panel"><div className="console-panel-header"><div><span>Pelanggan</span><h2>Data reseller</h2></div><div className="console-panel-toolbar-actions"><button type="button" disabled={busy} onClick={syncResellerSheets}><RefreshCw size={15} /> Sinkronkan Data Reseller</button><button type="button" onClick={openCreate}><Plus size={15} /> Tambah reseller</button></div></div><DataTable rows={resellers} columns={columns} filters={filters} rowKey={(row) => row.id} loading={loading} error={error} initialPageSize={10} /></section>

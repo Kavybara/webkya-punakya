@@ -37,6 +37,7 @@ import {
   resellerAccountStatusLabel,
 } from "../../../lib/resellerAccounts";
 import { ResellerShell } from "../../../components/reseller-v2/ResellerShell";
+import { systemStateFor } from "../../../components/attention";
 import {
   Badge,
   CopyButton,
@@ -325,6 +326,11 @@ export default function ResellerV2AccessPage() {
 
   const activeCount = currentGroups.filter((group) => !isExpiredAccount(group.primary)).length;
   const inactiveCount = Math.max(0, currentGroups.length - activeCount);
+  /* Counted over `accounts`, not over `currentGroups`. `currentGroups` is the
+     Netflix tab or the Disney tab, so counting it would make the pill mean
+     something different depending on which tab the reseller last opened -- the
+     same number changing because a different filter is applied. */
+  const accessAttention = accounts.filter((account) => isExpiredAccount(account)).length;
   const lookupToolLabel = currentTools.find((tool) => tool.id === activeTool)?.label || "Lookup";
 
   const runLookup = useCallback(async (payload: { target: string; type: AccessTool }, options: { silent?: boolean } = {}) => {
@@ -491,6 +497,8 @@ export default function ResellerV2AccessPage() {
     <ResellerShell
       title="Akses & Kode"
       description="Ambil kode masuk, kode verifikasi, reset password, household, dan OTP Disney dari label Gmail owner tanpa membuka email owner."
+      attentionCount={accessAttention}
+      systemState={systemStateFor(accessAttention, { error: accountsState === "error", loading: accountsState === "loading" })}
     >
       <MetricRow
         label="Ringkasan akses"
