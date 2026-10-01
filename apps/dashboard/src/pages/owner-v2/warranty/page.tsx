@@ -100,7 +100,11 @@ async function prepareEvidence(file: File): Promise<PreparedEvidence> {
 export default function OwnerConsoleWarrantyPage() {
   const [claims, setClaims] = useState<WarrantyClaim[]>([]);
   const [loading, setLoading] = useState(true);
+  // `error` is the claim queue load failure only. Every other failure here is an
+  // action the owner just confirmed, and those used to land in the same string
+  // -- so a refused replacement blanked the queue table underneath the dialog.
   const [error, setError] = useState("");
+  const [actionError, setActionError] = useState("");
   const [message, setMessage] = useState("");
   const [claimView, setClaimView] = useState<"active" | "history">("active");
   const [selected, setSelected] = useState<WarrantyClaim | null>(null);
@@ -124,6 +128,8 @@ export default function OwnerConsoleWarrantyPage() {
   const [manualReplaceForm, setManualReplaceForm] = useState(emptyManualReplacement);
   const manualEvidenceInputRef = useRef<HTMLInputElement>(null);
   const actionLockRef = useRef(false);
+  const claimRequestRef = useRef(0);
+  const [candidateError, setCandidateError] = useState("");
   const clearMessage = useCallback(() => setMessage(""), []);
 
   const load = useCallback(async () => {
@@ -142,12 +148,29 @@ export default function OwnerConsoleWarrantyPage() {
 
   useEffect(() => { load().catch(() => undefined); }, [load]);
 
+  /*
+   * One claim open at a time, even if the fetches disagree about arrival order.
+   *
+   * Opening a claim fetches its replacement candidates. Two claims can be opened
+   * in quick succession, and if the first fetch is slower than the second, its
+   * candidates landed in state that had already been reset for the other claim.
+   * The owner then saw claim B's details next to claim A's candidate list -- and
+   * `executeReplacement` posts `candidateId` against `selected.id`, so pressing
+   * confirm would have replaced the account for B using a candidate chosen from
+   * A. Two unrelated customers, one click.
+   *
+   * The request id is the same one-liner `orders/page.tsx` uses for its detail
+   * fetch, and the same shape `account-access` now uses for its lookup.
+   */
   async function openClaim(claim: WarrantyClaim) {
+    const requestId = claimRequestRef.current + 1;
+    claimRequestRef.current = requestId;
     setSelected(claim);
     setOwnerNote(claim.ownerNote || "");
     setStatus(["submitted", "replaced", "waiting_evidence"].includes(claim.status) ? "reviewing" : claim.status);
     setCandidateId("");
     setCandidates([]);
+    setCandidateError("");
     setConfirmReplace(false);
     setManualReplaceOpen(false);
     setManualReplaceForm(emptyManualReplacement);
@@ -155,12 +178,14 @@ export default function OwnerConsoleWarrantyPage() {
     setCandidateLoading(true);
     try {
       const rows = await api.warrantyReplacementCandidates(claim.id);
+      if (claimRequestRef.current !== requestId) return;
       setCandidates(rows);
       setCandidateId(rows[0]?.id || "");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Kandidat stok pengganti gagal dimuat.");
+      if (claimRequestRef.current !== requestId) return;
+      setCandidateError(cause instanceof Error ? cause.message : "Kandidat stok pengganti gagal dimuat.");
     } finally {
-      setCandidateLoading(false);
+      if (claimRequestRef.current === requestId) setCandidateLoading(false);
     }
   }
 
@@ -253,13 +278,13 @@ export default function OwnerConsoleWarrantyPage() {
   async function saveClaim() {
     if (!selected || selected.status === "replaced") return;
     if (terminalStatuses.has(status) && !ownerNote.trim()) {
-      setError(`Catatan Owner wajib diisi untuk status ${statusLabel(status)}.`);
+      setActionError(`Catatan Owner wajib diisi untuk status ${statusLabel(status)}.`);
       return;
     }
     if (actionLockRef.current) return;
     actionLockRef.current = true;
     setBusy(true);
-    setError("");
+    setActionError("");
     try {
       const updated = await api.updateWarrantyClaim(selected.id, { status, ownerNote });
       setSelected(null);
@@ -268,7 +293,7 @@ export default function OwnerConsoleWarrantyPage() {
         : `Aksi tersimpan. Klaim ${updated.id} berhasil diperbarui dan WhatsApp terkirim.`);
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Status klaim gagal disimpan.");
+      setActionError(cause instanceof Error ? cause.message : "Status klaim gagal disimpan.");
     } finally {
       actionLockRef.current = false;
       setBusy(false);
@@ -279,13 +304,13 @@ export default function OwnerConsoleWarrantyPage() {
     if (!selected || !candidateId) return;
     if (!ownerNote.trim()) {
       setConfirmReplace(false);
-      setError("Catatan Owner wajib diisi sebelum akun diganti.");
+      setActionError("Catatan Owner wajib diisi sebelum akun diganti.");
       return;
     }
     if (actionLockRef.current) return;
     actionLockRef.current = true;
     setBusy(true);
-    setError("");
+    setActionError("");
     try {
       const result = await api.replaceWarrantyAccount(selected.id, { stockId: candidateId, reason: ownerNote.trim() });
       setMessage(result.notifications.recipient.status === "sent"
@@ -296,7 +321,7 @@ export default function OwnerConsoleWarrantyPage() {
       await load();
     } catch (cause) {
       setConfirmReplace(false);
-      setError(cause instanceof Error ? cause.message : "Penggantian akun gagal.");
+      setActionError(cause instanceof Error ? cause.message : "Penggantian akun gagal.");
       const rows = await load();
       const current = rows?.find((claim) => claim.id === selected.id);
       if (current) setSelected(current);
@@ -310,21 +335,21 @@ export default function OwnerConsoleWarrantyPage() {
     if (!selected) return;
     const reason = manualReplaceForm.note.trim() || ownerNote.trim();
     if (!reason) {
-      setError("Catatan Owner wajib diisi sebelum akun diganti manual.");
+      setActionError("Catatan Owner wajib diisi sebelum akun diganti manual.");
       return;
     }
     if (!manualReplaceForm.login.trim()) {
-      setError("Login atau email akun pengganti wajib diisi.");
+      setActionError("Login atau email akun pengganti wajib diisi.");
       return;
     }
     if (!manualReplaceForm.password.trim()) {
-      setError("Password akun pengganti wajib diisi.");
+      setActionError("Password akun pengganti wajib diisi.");
       return;
     }
     if (actionLockRef.current) return;
     actionLockRef.current = true;
     setBusy(true);
-    setError("");
+    setActionError("");
     try {
       const result = await api.replaceWarrantyAccountManual(selected.id, {
         reason,
@@ -345,7 +370,7 @@ export default function OwnerConsoleWarrantyPage() {
       setManualReplaceForm(emptyManualReplacement);
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Penggantian manual gagal.");
+      setActionError(cause instanceof Error ? cause.message : "Penggantian manual gagal.");
       const rows = await load();
       const current = rows?.find((claim) => claim.id === selected.id);
       if (current) setSelected(current);
@@ -355,49 +380,72 @@ export default function OwnerConsoleWarrantyPage() {
     }
   }
 
+  /*
+   * These three took `setBusy` but never took `actionLockRef`.
+   *
+   * `busy` is React state, so it does not change until the component re-renders
+   * -- and a second click in that window still sees `actionLockRef.current ===
+   * false` as well, because it was never set. The sibling handlers two functions
+   * up do take the lock, and `DialogActions` renders `busy` as a disabled button
+   * only after that render lands. So the lock, not the button, is what actually
+   * prevents a double submit.
+   *
+   * For `retryReplacementNotification` that matters most: it posts to the server
+   * endpoint that sends a real WhatsApp message to a real customer, and the
+   * endpoint has no idempotency guard of its own. Two clicks meant two
+   * messages.
+   */
   async function retryReplacementSync() {
     const stockId = selected?.replacement?.newStockId;
     if (!selected || !stockId || !selected.ownerNote?.trim()) return;
+    if (actionLockRef.current) return;
+    actionLockRef.current = true;
     setBusy(true);
-    setError("");
+    setActionError("");
     try {
       const result = await api.replaceWarrantyAccount(selected.id, { stockId, reason: selected.ownerNote.trim() });
       setSelected(result.claim);
       setMessage(`Sinkronisasi penggantian ${selected.id} berhasil.`);
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Sinkronisasi penggantian belum berhasil.");
+      setActionError(cause instanceof Error ? cause.message : "Sinkronisasi penggantian belum berhasil.");
       const rows = await load();
       const current = rows?.find((claim) => claim.id === selected.id);
       if (current) setSelected(current);
     } finally {
+      actionLockRef.current = false;
       setBusy(false);
     }
   }
 
   async function retryStockReviewSync() {
     if (!selected) return;
+    if (actionLockRef.current) return;
+    actionLockRef.current = true;
     setBusy(true);
-    setError("");
+    setActionError("");
     try {
       const updated = await api.retryWarrantyStockReviewSync(selected.id);
       setSelected(updated);
       setMessage(`Kondisi DIPERIKSA untuk ${selected.id} berhasil disinkronkan.`);
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Sinkronisasi kondisi stok belum berhasil.");
+      setActionError(cause instanceof Error ? cause.message : "Sinkronisasi kondisi stok belum berhasil.");
       const rows = await load();
       const current = rows?.find((claim) => claim.id === selected.id);
       if (current) setSelected(current);
     } finally {
+      actionLockRef.current = false;
       setBusy(false);
     }
   }
 
   async function retryReplacementNotification() {
     if (!selected) return;
+    if (actionLockRef.current) return;
+    actionLockRef.current = true;
     setBusy(true);
-    setError("");
+    setActionError("");
     try {
       const result = await api.retryWarrantyNotification(selected.id);
       setSelected(result.claim);
@@ -406,8 +454,9 @@ export default function OwnerConsoleWarrantyPage() {
         : `WhatsApp penggantian ${selected.id} masih gagal: ${result.notifications.recipient.reason || "koneksi bot bermasalah"}.`);
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "WhatsApp penggantian gagal dikirim ulang.");
+      setActionError(cause instanceof Error ? cause.message : "WhatsApp penggantian gagal dikirim ulang.");
     } finally {
+      actionLockRef.current = false;
       setBusy(false);
     }
   }
@@ -452,6 +501,10 @@ export default function OwnerConsoleWarrantyPage() {
       { label: "Kendala aktif", value: activeFailures.length, tone: activeFailures.length ? "danger" : "success" },
     ]} />
     {error ? <Notice tone="danger">{error}</Notice> : null}
+    {/* The three retry buttons live in the table and open no dialog, so their
+        failures have nowhere else to go. When a claim dialog is open that same
+        reason is shown inside it instead, and this one stays quiet. */}
+    {!selected && actionError ? <Notice tone="danger">{actionError}</Notice> : null}
     <Toast message={message} onClose={clearMessage} />
     <section className="console-panel">
       <div className="console-panel-header"><div><span>Warranty Center</span><h2>{claimView === "active" ? "Antrean klaim aktif" : "Riwayat klaim"}</h2></div><div className="console-panel-toolbar-actions"><button type="button" aria-pressed={claimView === "active"} onClick={() => setClaimView("active")}>Antrean Aktif ({activeClaims.length})</button><button type="button" aria-pressed={claimView === "history"} onClick={() => setClaimView("history")}>Riwayat ({historyClaims.length})</button><button type="button" onClick={() => openManualClaim().catch(() => undefined)}><Plus size={15} /> Tambah klaim manual</button><button type="button" onClick={load}><RefreshCw size={15} /> Perbarui</button></div></div>
@@ -511,6 +564,7 @@ export default function OwnerConsoleWarrantyPage() {
     </Dialog> : null}
 
     {selected && !confirmReplace && !manualReplaceOpen ? <Dialog open title={`Klaim ${selected.id}`} eyebrow="Garansi" onClose={() => setSelected(null)} wide>
+      {actionError ? <Notice tone="danger">{actionError}</Notice> : null}
       <div className="grid gap-4 md:grid-cols-2">
         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4"><span className="text-xs uppercase tracking-wider text-[var(--text-muted)]">Produk</span><p className="mt-2 font-semibold text-[var(--text-primary)]">{selected.product} {selected.variant}</p><p className="mt-1 text-sm text-[var(--text-muted)]">Order {selected.orderId || "-"}</p></div>
         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4"><span className="text-xs uppercase tracking-wider text-[var(--text-muted)]">Akun</span><p className="mt-2 font-semibold text-[var(--text-primary)]">{selected.accountIdentity || "Dimasking"}</p><p className="mt-1 text-sm text-[var(--text-muted)]">Profil {selected.profile || "-"}</p></div>
@@ -538,9 +592,10 @@ export default function OwnerConsoleWarrantyPage() {
       {!(["replaced", "resolved", "rejected"].includes(selected.status)) ? <div className="mt-5 border-t border-[var(--border)] pt-5">
         <h3 className="text-sm font-semibold text-[var(--text-primary)]">Penggantian akun</h3>
         <p className="mt-1 text-sm text-[var(--text-muted)]">Hanya stok tersedia dari pool yang sama yang dapat dipilih. Credential tidak ditampilkan di daftar ini.</p>
+        {candidateError ? <Notice tone="danger">Daftar kandidat gagal dimuat: {candidateError}. Ganti akun tidak bisa dilanjutkan sampai daftar ini terbaca.</Notice> : null}
         <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
           <select className="h-11 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-sm text-[var(--text-primary)]" value={candidateId} onChange={(event) => setCandidateId(event.target.value)} disabled={candidateLoading || !candidates.length}>
-            <option value="">{candidateLoading ? "Memuat kandidat..." : candidates.length ? "Pilih stok pengganti" : "Tidak ada stok satu pool"}</option>
+            <option value="">{candidateLoading ? "Memuat kandidat..." : candidateError ? "Kandidat gagal dimuat" : candidates.length ? "Pilih stok pengganti" : "Tidak ada stok satu pool"}</option>
             {candidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.identity} · {candidate.profile || "Tanpa profil"} · {candidate.sheetName || "DB"} row {candidate.sheetRow || "-"}</option>)}
           </select>
           <button type="button" className="h-11 rounded-lg bg-[var(--text-primary)] px-5 text-sm font-semibold text-[var(--text-inverse)] disabled:cursor-not-allowed disabled:opacity-40" disabled={!candidateId || busy || !ownerNote.trim()} onClick={() => setConfirmReplace(true)}>Ganti akun</button>
@@ -556,6 +611,7 @@ export default function OwnerConsoleWarrantyPage() {
     </Dialog> : null}
 
     {selected && manualReplaceOpen ? <Dialog open title="Ganti manual / By Order" eyebrow={selected.id} onClose={() => setManualReplaceOpen(false)} wide footer={<DialogActions onCancel={() => setManualReplaceOpen(false)} onConfirm={() => executeManualReplacement().catch(() => undefined)} confirmLabel="Simpan pengganti" busy={busy} />}>
+      {actionError ? <Notice tone="danger">{actionError}</Notice> : null}
       <Notice>Dipakai saat akun pengganti diambil satuan dari maker dan belum ada di stok website. Akun baru tetap masuk ke Akun Saya reseller, sedangkan password dan PIN tidak dikirim lewat WhatsApp.</Notice>
       <div className="mt-5 grid gap-4 md:grid-cols-2">
         <Field label="Login atau email akun baru"><input value={manualReplaceForm.login} onChange={(event) => setManualReplaceForm((current) => ({ ...current, login: event.target.value }))} placeholder="email/login dari maker" /></Field>
@@ -571,6 +627,7 @@ export default function OwnerConsoleWarrantyPage() {
     </Dialog> : null}
 
     {selected && confirmReplace ? <Dialog open title="Konfirmasi penggantian" eyebrow={selected.id} onClose={() => setConfirmReplace(false)} footer={<DialogActions onCancel={() => setConfirmReplace(false)} onConfirm={executeReplacement} confirmLabel="Ya, ganti akun" busy={busy} danger />}>
+      {actionError ? <Notice tone="danger">{actionError}</Notice> : null}
       <Notice tone="danger">Akun lama akan ditandai REPLACED dan tidak dikembalikan ke stok. Akun baru memakai order, reseller, serta tanggal berakhir yang sama. Tindakan ini tercatat dan tidak dapat memilih stok kedua setelah selesai.</Notice>
     </Dialog> : null}
   </ConsoleShell>;

@@ -17,6 +17,7 @@ export default function OwnerConsoleResellersPage() {
   const [requests, setRequests] = useState<ApiDepositRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [requestsError, setRequestsError] = useState("");
   const [message, setMessage] = useState("");
   const [editing, setEditing] = useState<ApiReseller | null | undefined>(undefined);
   const [form, setForm] = useState<ResellerForm>(emptyForm);
@@ -24,7 +25,29 @@ export default function OwnerConsoleResellersPage() {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const clearMessage = useCallback(() => setMessage(""), []);
-  const load = useCallback(async () => { setLoading(true); setError(""); const results = await Promise.allSettled([api.resellers(), api.depositRequests()]); if (results[0].status === "fulfilled") setResellers(results[0].value); else setError("Data reseller gagal dimuat."); if (results[1].status === "fulfilled") setRequests(results[1].value); setLoading(false); }, []);
+  /*
+   * Each fetch records its own failure.
+   *
+   * The deposit-requests fetch used to have no `else`, so a rejection left
+   * `requests` at its initial `[]` -- which the second table renders as
+   * "Tidak ada permintaan deposit yang perlu diproses." A green answer to a
+   * question about money. The owner was told the queue was clear when it had
+   * never been read.
+   *
+   * Two states, two messages, because they mean opposite things: an empty queue
+   * is good news, and an unread queue is not.
+   */
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    setRequestsError("");
+    const results = await Promise.allSettled([api.resellers(), api.depositRequests()]);
+    if (results[0].status === "fulfilled") setResellers(results[0].value);
+    else setError("Data reseller gagal dimuat.");
+    if (results[1].status === "fulfilled") { setRequests(results[1].value); setRequestsError(""); }
+    else setRequestsError("Permintaan deposit gagal dimuat. Antrean di bawah belum bisa dipercaya.");
+    setLoading(false);
+  }, []);
   useEffect(() => { load().catch(() => setLoading(false)); }, [load]);
   function openCreate() { setEditing(null); setForm(emptyForm()); }
   function openEdit(row: ApiReseller) { setEditing(row); setForm({ name: row.name, username: row.username, password: "", email: row.email || "", whatsapp: row.whatsapp, deposit: String(row.deposit || 0), isActive: row.isActive, allowedAccessTools: (row.allowedAccessTools || ["signin", "verification", "household"]) as AccountAccessLookupType[] }); }
@@ -50,10 +73,10 @@ export default function OwnerConsoleResellersPage() {
   const pending = requests.filter((row) => !row.status || row.status === "pending");
   const pendingCount = pending.length;
   return <ConsoleShell title="Reseller" description="Kelola akses, saldo, status, dan permintaan deposit reseller." refreshing={loading} attentionCount={pendingCount} systemState={systemStateFor(pendingCount, { error: Boolean(error), loading })} onRefresh={load}>
-    <MetricRow items={[{ label: "Reseller aktif", value: resellers.filter((row) => row.isActive).length, tone: "success" }, { label: "Nonaktif", value: resellers.filter((row) => !row.isActive).length }, { label: "Total saldo", value: formatRupiah(resellers.reduce((sum, row) => sum + Number(row.deposit || 0), 0)) }, { label: "Deposit pending", value: pending.length, tone: pending.length ? "warning" : "success" }]} />
+    <MetricRow items={[{ label: "Reseller aktif", value: resellers.filter((row) => row.isActive).length, tone: "success" }, { label: "Nonaktif", value: resellers.filter((row) => !row.isActive).length }, { label: "Total saldo", value: formatRupiah(resellers.reduce((sum, row) => sum + Number(row.deposit || 0), 0)) }, { label: "Deposit pending", value: pending.length, tone: pending.length ? "warning" : "success", error: requestsError ? "Gagal dimuat" : undefined }]} />
     {error ? <Notice tone="danger">{error}</Notice> : null}<Toast message={message} onClose={clearMessage} />
     <section className="console-panel"><div className="console-panel-header"><div><span>Pelanggan</span><h2>Data reseller</h2></div><div className="console-panel-toolbar-actions"><button type="button" disabled={busy} onClick={syncResellerSheets}><RefreshCw size={15} /> Sinkronkan Data Reseller</button><button type="button" onClick={openCreate}><Plus size={15} /> Tambah reseller</button></div></div><DataTable rows={resellers} columns={columns} filters={filters} rowKey={(row) => row.id} loading={loading} error={error} initialPageSize={10} /></section>
-    <section className="console-panel console-orders-panel"><div className="console-panel-header"><div><span>Wallet</span><h2>Permintaan deposit aktif</h2></div><ShieldCheck size={18} /></div><DataTable rows={pending} columns={requestColumns} rowKey={(row) => row.id} loading={loading} emptyText="Tidak ada permintaan deposit yang perlu diproses." initialPageSize={5} /></section>
+    <section className="console-panel console-orders-panel"><div className="console-panel-header"><div><span>Wallet</span><h2>Permintaan deposit aktif</h2></div><ShieldCheck size={18} /></div><DataTable rows={pending} columns={requestColumns} rowKey={(row) => row.id} loading={loading} error={requestsError} emptyText="Tidak ada permintaan deposit yang perlu diproses." initialPageSize={5} /></section>
     {editing !== undefined ? <Dialog open title={editing ? "Edit reseller" : "Tambah reseller"} eyebrow="Pelanggan" onClose={() => setEditing(undefined)} wide footer={<DialogActions onCancel={() => setEditing(undefined)} onConfirm={save} confirmLabel="Simpan reseller" busy={busy} />}><div className="console-resource-form-grid"><Field label="Nama"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field><Field label={editing ? "Username (kunci Sheets)" : "Username"}><input value={form.username} readOnly={Boolean(editing)} onChange={(e) => setForm({ ...form, username: e.target.value })} /></Field><Field label={editing ? "Password baru (opsional)" : "Password"}><input type="password" autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field><Field label="Email"><input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field><Field label="WhatsApp"><input value={form.whatsapp} onChange={(e) => setForm({ ...form, whatsapp: e.target.value })} /></Field><Field label="Saldo"><input type="number" value={form.deposit} onChange={(e) => setForm({ ...form, deposit: e.target.value })} /></Field><Field label="Status"><select value={form.isActive ? "active" : "inactive"} onChange={(e) => setForm({ ...form, isActive: e.target.value === "active" })}><option value="active">Aktif</option><option value="inactive">Nonaktif</option></select></Field><Field label="Permission akses"><div className="ui-checkbox-stack">{tools.map((tool) => <label key={tool.value}><input type="checkbox" checked={form.allowedAccessTools.includes(tool.value)} onChange={(e) => setForm({ ...form, allowedAccessTools: e.target.checked ? [...form.allowedAccessTools, tool.value] : form.allowedAccessTools.filter((value) => value !== tool.value) })} /> {tool.label}</label>)}</div></Field></div></Dialog> : null}
     {action ? <Dialog open title={action.type === "delete" ? "Hapus reseller" : action.type === "approve" ? "Approve deposit" : "Tolak deposit"} eyebrow="Konfirmasi tindakan" onClose={() => setAction(null)} footer={<DialogActions onCancel={() => setAction(null)} onConfirm={executeAction} confirmLabel="Konfirmasi" busy={busy} danger={action.type === "delete" || action.type === "reject"} />}>{action.type === "delete" ? <Notice tone="danger">Reseller akan dihapus melalui endpoint owner. Pastikan tidak ada ownership aktif yang masih bergantung pada akun ini.</Notice> : <Field label="Catatan owner"><textarea value={note} onChange={(e) => setNote(e.target.value)} /></Field>}</Dialog> : null}
   </ConsoleShell>;

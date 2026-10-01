@@ -324,6 +324,15 @@
 .console-variant-locks strong { color: var(--text-primary); font-size: 11px; }
 .console-variant-locks small { margin-top: 2px; color: var(--text-muted); font-size: 9px; }
 .console-variant-locks .console-variant-actions { justify-content: flex-end; flex-wrap: nowrap; min-width: 190px; }
+/* The price row spans the whole card rather than taking a fourth column.
+   Durations are unbounded -- a product can carry 1/3/6/12 month -- so a fixed
+   column would squeeze them, and a card that grows downward reads better than
+   one that grows sideways. Wrapping is the responsive case, not the default. */
+.console-variant-prices { display: flex; flex-wrap: wrap; gap: 8px 12px; grid-column: 1 / -1; padding-top: 2px; }
+.console-variant-prices .ui-field { min-width: 128px; }
+.console-variant-prices input { min-height: 34px; }
+.console-variant-prices input::-webkit-outer-spin-button,
+.console-variant-prices input::-webkit-inner-spin-button { opacity: 1; }
 .console-variant-locks button { display: inline-flex; min-width: 88px; min-height: 34px; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-raised); color: var(--text-secondary); cursor: pointer; white-space: nowrap; }
 .console-preview-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
 .console-preview-summary > span { padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
