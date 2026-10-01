@@ -5394,7 +5394,7 @@ async function lookupImapAccessValue(db, account, type) {
   try {
     await client.connect();
     const availableMailboxes = await client.list().catch(() => []);
-    const mailboxes = accountAccessMailboxPaths(type, availableMailboxes);
+    const { paths: mailboxes, unresolved: unresolvedLabels } = accountAccessMailboxPaths(type, availableMailboxes);
     const hydratedMessages = [];
     const staleMessages = [];
     const nowMs = Date.now();
@@ -5469,6 +5469,24 @@ async function lookupImapAccessValue(db, account, type) {
 
     if (mailboxes.length && mailboxErrors.length === mailboxes.length) {
       return { source: "gmail", mode: "imap", reason: "label_not_found", error: `Label Gmail tidak bisa dibuka: ${mailboxErrors.join("; ")}`, value: "" };
+    }
+    /* The label exists under some other spelling, or not at all.
+     *
+     * A wrong-case label used to throw, and the throw was recorded and then
+     * dropped: the test above only fires when *every* mailbox failed, and All
+     * Mail opens fine, so one bad label among several good ones left nothing
+     * behind but a `not_found` -- the same answer as a customer who never
+     * pressed send, for a code sitting unread in the label. Now the label is
+     * either opened under its real name, or named here, so the reseller learns
+     * the label itself is the problem rather than the customer's email. */
+    if (unresolvedLabels.length) {
+      return {
+        source: "gmail",
+        mode: "imap",
+        reason: "label_unresolved",
+        error: `Label ${unresolvedLabels.join(", ")} tidak ditemukan di Gmail owner. Cek penamaan label di Gmail, atau samakan dengan nama yang terpasang di server.`,
+        value: "",
+      };
     }
     return { source: "gmail", mode: "imap", reason: "not_found", value: "" };
   } finally {

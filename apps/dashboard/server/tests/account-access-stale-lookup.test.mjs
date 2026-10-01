@@ -81,11 +81,34 @@ test("the reseller panel explains an expired code instead of a missing one", () 
   assert.match(accessPage, /function staleNotice/);
   assert.match(accessPage, /if \(!stale\) return null;/);
   assert.match(accessPage, /stale\?\.description \|\| lookupResult\.result\.error/);
-  assert.match(accessPage, /title=\{stale\?\.title \|\| emptyText\(lookupResult\.type\)\}/);
+  assert.match(accessPage, /title=\{stale\?\.title \|\| \(lookupResult\.result\.error/);
 
   // The remedy, stated plainly enough that nobody reads past it.
   assert.match(accessPage, /minta pelanggan mengirim ulang kode/i);
 
   // The old wording must not come back as the stale branch's fallback.
   assert.doesNotMatch(accessPage, /title=\{emptyText\(lookupResult\.type\)\}/, "the stale branch bypasses emptyText entirely");
+  // And stale outranks the error title: an aged-out code is not a failed lookup.
+  assert.match(accessPage, /title=\{stale\?\.title \|\| \(/);
+});
+
+/**
+ * `label_unresolved` is the other new reason, and it is aimed at the owner, not
+ * the reseller.
+ *
+ * Before the paths were resolved against the server's own listing, a label
+ * spelled differently than configured threw, the throw was recorded, and All
+ * Mail opened fine -- so the "every mailbox failed" test never fired and the
+ * cause came back as `not_found`, identical to a customer who never pressed
+ * send. Now it is named, and it needs a title that does not claim there is no
+ * code when the truth is that the code was never looked for.
+ */
+test("an unresolvable label is reported by name rather than as a missing code", () => {
+  assert.match(server, /reason: "label_unresolved"/);
+  assert.match(server, /unresolvedLabels\.join\(", "\)/);
+  assert.match(server, /tidak ditemukan di Gmail owner/);
+
+  // The empty state has to agree with it: "Belum ada sign-in code" on top of
+  // "the label does not exist" is two contradictory claims about one lookup.
+  assert.match(accessPage, /lookupResult\.result\.error \? "Lookup tidak bisa diselesaikan" : emptyText/);
 });

@@ -510,7 +510,10 @@ export default function ResellerV2AccessPage() {
             </div>
           ) : (
             <div className="reseller-v2-access-result-body">
-              <EmptyState title={stale?.title || emptyText(lookupResult.type)} description={detail} />
+              <EmptyState
+                title={stale?.title || (lookupResult.result.error ? "Lookup tidak bisa diselesaikan" : emptyText(lookupResult.type))}
+                description={detail}
+              />
             </div>
           )}
         </section>
