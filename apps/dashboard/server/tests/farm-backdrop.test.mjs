@@ -126,3 +126,40 @@ test("a full-bleed surface does not paint the canvas over the video", async () =
     );
   }
 });
+
+/**
+ * `preload="none"` is not a download policy on its own.
+ *
+ * The attribute said the visitor should not pay 3.8MB for footage they might
+ * scroll past, and the comment said so in as many words -- while the effect
+ * called `video.play()` on mount, which is an explicit request to start
+ * fetching. The browser honoured the request and ignored the attribute, so
+ * every visitor downloaded the video during first paint, which is what made
+ * `/harga` feel heavy: the page was competing with a video decode for the main
+ * thread before the catalogue had rendered.
+ *
+ * Both halves are asserted. Fixing only the effect (dropping `preload`) would
+ * leave the attribute as decoration; fixing only the attribute (removing the
+ * eager play) would leave the same download, just later and uncommented.
+ */
+test("the video is not asked to play until the browser is idle", async () => {
+  const backdrop = await readFile(
+    new URL("../../src/components/feature/FarmVideoBackdrop.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(backdrop, /requestIdleCallback/);
+  assert.match(backdrop, /setTimeout/);
+  assert.match(backdrop, /preload="none"/);
+
+  // The hand-off has to be inside the idle callback, not merely mentioned by
+  // it -- an idle callback that only sets state still plays on mount.
+  const idleBlock = backdrop.match(/requestIdleCallback\(start[^)]*\)/);
+  assert.ok(idleBlock, "the idle callback no longer defers `start`");
+  assert.match(backdrop, /const start = \(\) => \{[\s\S]*?video\.play\(\)/);
+
+  // And the cleanup has to cancel, or navigating away mid-idle plays a video
+  // for a page that is no longer on screen.
+  assert.match(backdrop, /cancelIdleCallback/);
+  assert.match(backdrop, /clearTimeout/);
+});

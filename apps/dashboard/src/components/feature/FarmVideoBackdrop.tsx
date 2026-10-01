@@ -22,12 +22,12 @@ import "./FarmVideoBackdrop.css";
  * `playsInline` iOS Safari takes the video fullscreen, so the visitor loses the
  * navbar and the button on the very first tap.
  *
- * `preload="none"` because the poster is what the visitor sees first. A
- * `preload="auto"` here spends 3.7MB of someone's mobile data before they have
- * read a single word, on the assumption that the video is above the fold on
- * every route -- and on `/harga` it is, but a visitor who never scrolls past
- * the price table should not have paid for it. The video loads when it is told
- * to, below.
+ * `preload="none"` because the poster is what the visitor sees first, and the
+ * fetch is deferred to idle in the effect below so that the attribute has
+ * something to do. On its own `preload` is not a download policy -- one
+ * `play()` call on mount overrides it, which is what this component used to do
+ * and why the first paint on `/harga` was competing with 3.8MB of video. The
+ * attribute and the idle hand-off have to be there together.
  *
  * The scrim is not decoration. This footage is bright and busy: grass at
  * luminance 0.59, sky at 0.56, and a waterfall at the right edge that is nearly
@@ -53,12 +53,55 @@ export function FarmVideoBackdrop() {
     const video = videoRef.current;
     if (!video) return;
 
-    // The poster is what renders if this never fires, so a failure is a still
-    // farm rather than a broken hero -- nothing to report and nothing to retry.
-    video.play().then(
-      () => setIsPlaying(true),
-      () => setCanPlay(false),
-    );
+    let cancelled = false;
+    let idleHandle = 0;
+    let timeoutHandle = 0;
+
+    const start = () => {
+      if (cancelled) return;
+      // The poster is what renders if this never fires, so a failure is a still
+      // farm rather than a broken hero -- nothing to report and nothing to retry.
+      video.play().then(
+        () => setIsPlaying(true),
+        () => setCanPlay(false),
+      );
+    };
+
+    /*
+     * Waiting for idle is the whole fix, and it is a real one.
+     *
+     * `preload="none"` below is real too, and until this call it was doing
+     * nothing: `play()` on mount is an explicit request to start fetching, and
+     * the browser honours it immediately. So every visitor paid 3.8MB -- and
+     * the main thread paid to decode the first frames -- before the wordmark
+     * had finished painting. `preload="none"` was documented here as the thing
+     * that saved the visitor the download, and it never could.
+     *
+     * `requestIdleCallback` is the point at which the browser has nothing more
+     * important to do, which on a page this light is after first paint. The
+     * timeout is the fallback for Safari, which did not ship
+     * `requestIdleCallback` until 18 and is worth a video that arrives late but
+     * certainly rather than never.
+     *
+     * The poster covers the gap either way, so nothing is ever blank.
+     */
+    type IdleWindow = Window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    const idleWindow = window as IdleWindow;
+
+    if (typeof idleWindow.requestIdleCallback === "function") {
+      idleHandle = idleWindow.requestIdleCallback(start, { timeout: 1200 });
+    } else {
+      timeoutHandle = window.setTimeout(start, 300);
+    }
+
+    return () => {
+      cancelled = true;
+      if (idleHandle && idleWindow.cancelIdleCallback) idleWindow.cancelIdleCallback(idleHandle);
+      if (timeoutHandle) window.clearTimeout(timeoutHandle);
+    };
   }, []);
 
   return (

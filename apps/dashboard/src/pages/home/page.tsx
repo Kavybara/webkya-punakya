@@ -1,6 +1,5 @@
-import { Link } from "react-router-dom";
 import PublicNavbar from "../../components/feature/PublicNavbar";
-import { ownerWhatsappLink } from "../../lib/ownerContact";
+import { ownerWhatsappDisplay, ownerWhatsappLink } from "../../lib/ownerContact";
 import { HeroSection } from "./components/HeroSection";
 import "./home.css";
 
@@ -39,17 +38,15 @@ function Footer() {
   return (
     <footer className="mt-auto border-t border-[var(--border)]">
       <div className="mx-auto flex max-w-[1180px] flex-col gap-4 px-4 py-7 text-small text-[var(--text-muted)] sm:flex-row sm:items-center sm:justify-between sm:px-6 md:px-8 lg:px-10">
-        {/* A contact line, not a link farm. Four destinations on one line is
-            the reference's footer and it is enough -- the navbar already
-            carries every one of them. */}
+        {/* A contact line, not a link farm. The navbar already carries every
+            destination, and a "Harga" link here only repeated the page you are
+            standing on. The label is formatted from the constant rather than
+            typed, because the typed copy had drifted from the number the link
+            actually dials. */}
         <p>
           <a href={whatsappUrl} target="_blank" rel="noreferrer" className="hover:text-[var(--text-primary)]">
-            +62 877-7655-549
+            {ownerWhatsappDisplay()}
           </a>
-          <span aria-hidden="true"> · </span>
-          <Link to="/harga" className="hover:text-[var(--text-primary)]">
-            Harga
-          </Link>
         </p>
         <p>© 2026 Kavya.</p>
       </div>

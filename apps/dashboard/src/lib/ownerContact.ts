@@ -17,3 +17,26 @@ export function ownerWhatsappLink(target: string = OWNER_WHATSAPP): string {
   const digits = String(target).replace(/\D/g, "");
   return `https://wa.me/${digits || OWNER_WHATSAPP}`;
 }
+
+/**
+ * The number as a person reads it, for display beside a link.
+ *
+ * This exists because the footer hardcoded "+62 877-7655-549" as the label of a
+ * link built from `OWNER_WHATSAPP`. The two disagreed -- the label digitises to
+ * 628777655549, the link dials 6287777655549. A visitor who read the number off
+ * the screen and typed it into WhatsApp by hand reached somebody else, or
+ * nobody at all if the missing character was not a digit.
+ *
+ * Formatting from the constant is what stops that recurring: the label and the
+ * link are now the same value by construction. `+62` is assumed for a
+ * 62-prefixed number, which is the only shape `OWNER_WHATSAPP` has; anything
+ * else is returned as-is rather than guessed at.
+ */
+export function ownerWhatsappDisplay(target: string = OWNER_WHATSAPP): string {
+  const digits = String(target).replace(/\D/g, "");
+  if (digits.startsWith("62") && digits.length > 10) {
+    const local = digits.slice(2);
+    return `+62 ${local.slice(0, 3)}-${local.slice(3, 6)}-${local.slice(6)}`;
+  }
+  return digits || OWNER_WHATSAPP;
+}
