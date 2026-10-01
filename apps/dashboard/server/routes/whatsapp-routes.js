@@ -6,6 +6,35 @@ import {
 } from "../services/whatsapp-rental-duration-service.js";
 import { buildWhatsappListHistory } from "../services/whatsapp-list-history-service.js";
 
+/*
+ * `syncJoinedGroups` reports a problem by returning `{success: false, reason}`
+ * or `{skipped: true, reason}` instead of throwing. Those reason codes are the
+ * only place a silent sync failure is recorded, so they are translated into
+ * something the owner can act on rather than shown raw.
+ */
+const GROUP_SYNC_FAILURE_MESSAGES = {
+  whatsapp_bot_not_configured: "Token bot WhatsApp belum diatur. Isi di pengaturan integrasi dulu.",
+  whatsapp_bot_timeout: "Bot tidak menjawab dalam batas waktu. Bot mungkin sedang sibuk atau mati.",
+  whatsapp_bot_unavailable: "Bot WhatsApp tidak bisa dihubungi. Pastikan proses bot berjalan.",
+  group_sync_webhook_unconfigured: "URL webhook sinkronisasi grup belum diatur di bot, jadi hasil sync tidak bisa dikirim ke dashboard.",
+  heavy_work_paused: "Sync dilewati karena bot sedang menjalankan pekerjaan berat. Coba lagi nanti.",
+  group_sync_failed: "Sinkronisasi grup gagal di bot.",
+  connection_not_stable: "Koneksi WhatsApp belum stabil, jadi daftar grup tidak diambil.",
+  group_sync_on_connect_disabled: "Sync otomatis saat connect dimatikan di konfigurasi bot.",
+};
+
+function groupSyncFailureMessage(reason) {
+  const key = String(reason || "");
+  return GROUP_SYNC_FAILURE_MESSAGES[key] || `Sinkronisasi grup gagal (${key || "alasan tidak dilaporkan"}).`;
+}
+
+function groupSyncSuccessMessage(result) {
+  if (!result?.skipped) return `Direktori grup disinkronkan. Bot sekarang berada di ${Number(result.group_count || 0)} grup.`;
+  if (result.reason === "group_sync_in_flight") return "Sinkronisasi lain sedang berjalan. Tunggu sebentar lalu cek status terakhir.";
+  if (result.reason === "group_sync_throttled") return "Sinkronisasi baru saja berjalan. Status di bawah sudah paling baru.";
+  return `Sinkronisasi dilewati (${result.reason || "alasan tidak dilaporkan"}).`;
+}
+
 export function registerWhatsAppRoutes(app, deps) {
   const {
     applyWaPriceSync,
@@ -45,6 +74,7 @@ export function registerWhatsAppRoutes(app, deps) {
     resolveRentalGroupJid,
     sendRentalJoinedNotifications,
     syncWhatsappGroups,
+    syncGroupsThroughBot,
     todayText,
     updateDb,
     upsertLegacyRental,
@@ -156,6 +186,23 @@ export function registerWhatsAppRoutes(app, deps) {
     } catch (error) {
       next(error);
     }
+  });
+
+  app.post("/api/whatsapp/groups/sync-now", requireAuth(["owner"]), async (_req, res) => {
+    const result = await syncGroupsThroughBot();
+    if (!result.success) {
+      return res.status(502).json({
+        error: "group_sync_failed",
+        detail: result.error,
+        message: groupSyncFailureMessage(result.error),
+      });
+    }
+    res.json({
+      success: true,
+      skipped: Boolean(result.skipped),
+      groupCount: Number(result.group_count || 0),
+      message: groupSyncSuccessMessage(result),
+    });
   });
 
   app.post("/api/whatsapp/groups/sync", async (req, res, next) => {

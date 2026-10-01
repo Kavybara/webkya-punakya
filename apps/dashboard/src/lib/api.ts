@@ -665,6 +665,14 @@ export type WhatsappListHistory = {
   }>;
 };
 
+export type WhatsappGroupSync = {
+  /* `last_synced_at` is null until the bot has synced at least once, which is a
+     different situation from a sync that failed -- hence `last_error`. */
+  last_synced_at?: string | null;
+  last_error?: string;
+  group_count?: number;
+};
+
 export type WhatsappStatus = {
   connected: boolean;
   state?: string;
@@ -679,6 +687,14 @@ export type WhatsappStatus = {
   ownerWhatsAppNumber?: string;
   inboundWebhookUrl?: string;
   supportedCommands?: string[];
+  group_sync?: WhatsappGroupSync;
+};
+
+export type WhatsappGroupSyncResult = {
+  success: boolean;
+  skipped?: boolean;
+  groupCount?: number;
+  message?: string;
 };
 
 export type PasswordResetRequestResult = {
@@ -1360,6 +1376,9 @@ export const api = {
   },
   whatsappStatus() {
     return request<WhatsappStatus>("/whatsapp/status");
+  },
+  whatsappSyncGroups() {
+    return request<WhatsappGroupSyncResult>("/whatsapp/groups/sync-now", { method: "POST" });
   },
   whatsappRentals() {
     return request<WhatsappRental[]>("/whatsapp/rentals");

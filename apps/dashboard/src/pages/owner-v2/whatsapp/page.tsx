@@ -62,11 +62,33 @@ function adjustmentDays(form: Pick<RentalForm, "adjustmentDirection" | "adjustme
   return direction === "subtract" ? -days : days;
 }
 
+/*
+ * The bot records why its group sync did not run in `group_sync.last_error`,
+ * and those reason codes are the only trace a silent failure leaves. The panel
+ * exists so that reason reaches the owner instead of sitting in a payload.
+ *
+ * `group_count` is deliberately kept separate from the rental metrics: it is
+ * how many groups the bot is in, which is not how many the owner has sold.
+ */
+function groupSyncFailureText(code: string) {
+  const known: Record<string, string> = {
+    group_sync_webhook_unconfigured: "URL webhook sinkronisasi grup belum diatur di bot, jadi hasil sync tidak bisa dikirim ke dashboard.",
+    heavy_work_paused: "Sync dilewati karena bot sedang menjalankan pekerjaan berat.",
+    connection_not_stable: "Koneksi WhatsApp belum stabil saat sync.",
+    group_sync_on_connect_disabled: "Sync otomatis saat connect dimatikan di konfigurasi bot.",
+    group_sync_failed: "Sinkronisasi grup gagal di bot.",
+  };
+  return known[code] || `Sinkronisasi grup bermasalah (${code}).`;
+}
+
 export default function OwnerConsoleWhatsappPage() {
   const [groups, setGroups] = useState<WhatsappRental[]>([]);
   const [status, setStatus] = useState<WhatsappStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  // Same split as the other owner pages: only a failed load may blank the
+  // rental table. A refused sync reports into `syncError` instead.
   const [error, setError] = useState("");
+  const [syncError, setSyncError] = useState("");
   const [message, setMessage] = useState("");
   const [editing, setEditing] = useState<WhatsappRental | null | undefined>(undefined);
   const [form, setForm] = useState<RentalForm>(emptyForm);
@@ -201,6 +223,21 @@ export default function OwnerConsoleWhatsappPage() {
     }
   }
 
+  async function syncGroups() {
+    if (busy) return;
+    setSyncError("");
+    setBusy("sync");
+    try {
+      const result = await api.whatsappSyncGroups();
+      setMessage(result.message || "Sinkronisasi grup selesai.");
+      await load();
+    } catch (cause) {
+      setSyncError(cause instanceof Error ? cause.message : "Sinkronisasi grup gagal.");
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function copyPairingCode() {
     const code = status?.pairingCode?.trim();
     if (!code || !navigator.clipboard) return;
@@ -223,6 +260,18 @@ export default function OwnerConsoleWhatsappPage() {
   const connectionIssues = status ? (status.connected ? 0 : 1) : 0;
   const filters = useMemo<Array<DataFilter<WhatsappRental>>>(() => [{ id: "status", label: "Status", options: ["active", "paused", "expired"].map((value) => ({ label: value, value })), value: (row) => row.status }], []);
   const pairingCode = status?.pairingCode?.trim() || "";
+  const groupSync = status?.group_sync;
+  const groupSyncError = String(groupSync?.last_error || "");
+  const groupSyncCount = Number(groupSync?.group_count || 0);
+  const groupSyncedAt = groupSync?.last_synced_at || "";
+  // "Never synced" and "last sync failed" are different states and only one of
+  // them is the owner's fault, so the panel says which rather than showing a
+  // bare warning for both.
+  const groupSyncState: "ok" | "never" | "failed" = groupSyncError
+    ? "failed"
+    : groupSyncedAt
+      ? "ok"
+      : "never";
   const showConnectionPanel = !status?.connected && !loading;
   const connectionDetail = status?.error || status?.lastError || status?.state || "Menunggu pairing code dari bot.";
   const createDays = Number(form.durationMonths || 1) * 30;
@@ -233,8 +282,16 @@ export default function OwnerConsoleWhatsappPage() {
   const modalPreviewEndsAt = adjusting && modalDelta ? addDays(adjusting.endsAt, modalDelta) : "";
 
   return <ConsoleShell title="WhatsApp" description="Kelola koneksi bot dan rental grup aktif." refreshing={loading} attentionCount={connectionIssues} systemState={systemStateFor(connectionIssues, { error: Boolean(error), loading })} onRefresh={load}>
-    <MetricRow items={[{ label: "Koneksi", value: status?.connected ? "Connected" : "Periksa", tone: status?.connected ? "success" : "warning" }, { label: "Rental aktif", value: groups.filter((row) => row.status === "active").length }, { label: "Expired", value: groups.filter((row) => row.status === "expired").length, tone: "danger" }, { label: "Total list", value: groups.reduce((sum, row) => sum + Number(row.listCount || 0), 0) }]} />
-    {error ? <Notice tone="danger">{error}</Notice> : null}{message ? <Notice>{message}</Notice> : null}
+    <MetricRow items={[{ label: "Koneksi", value: status?.connected ? "Connected" : "Periksa", tone: status?.connected ? "success" : "warning" }, { label: "Rental aktif", value: groups.filter((row) => row.status === "active").length }, { label: "Grup di bot", value: groupSyncCount, hint: groupSyncedAt ? `Sync ${formatDateTime(groupSyncedAt)}` : "Belum pernah sync", error: groupSyncState === "failed" ? "Sync terakhir gagal" : undefined }, { label: "Expired", value: groups.filter((row) => row.status === "expired").length, tone: "danger" }, { label: "Total list", value: groups.reduce((sum, row) => sum + Number(row.listCount || 0), 0) }]} />
+    {error ? <Notice tone="danger">{error}</Notice> : null}{syncError ? <Notice tone="danger">{syncError}</Notice> : null}{message ? <Notice>{message}</Notice> : null}
+    {/*
+      * The rental table only lists groups the owner has sold. The bot knows
+      * every group it is in, including ones nobody has bought, and that gap is
+      * the thing the owner cannot otherwise see -- a group the bot has left
+      * never appears in the table at all. So the bot's own count is shown
+      * here beside the rental count instead of being merged into one number.
+      */}
+    <section className="console-panel console-whatsapp-sync-panel"><div className="console-panel-header"><div><span>Direktori bot</span><h2>Sinkronisasi grup</h2></div><Badge tone={groupSyncState === "ok" ? "success" : groupSyncState === "failed" ? "danger" : "muted"}>{groupSyncState === "ok" ? "Terbaru" : groupSyncState === "failed" ? "Gagal" : "Belum sync"}</Badge></div><div className="console-whatsapp-sync-body"><div className="console-whatsapp-sync-facts"><span><small>Grup di bot</small><strong>{status ? groupSyncCount : "Memuat"}</strong></span><span><small>Sync terakhir</small><strong>{groupSyncedAt ? formatDateTime(groupSyncedAt) : "Belum pernah"}</strong></span><span><small>Grup disewa</small><strong>{groups.length}</strong></span></div><p>{groupSyncState === "failed" ? groupSyncFailureText(groupSyncError) : groupSyncState === "never" ? "Bot belum pernah mengirim daftar grup. Jalankan sinkronisasi untuk mengisi nama dan JID setiap grup yang diikuti bot." : "Nama dan JID di tabel rental berasal dari daftar yang dikirim bot, bukan dari link yang diisi owner."}</p><div className="console-whatsapp-sync-actions"><button type="button" onClick={() => syncGroups().catch(() => undefined)} disabled={busy === "sync"} aria-busy={busy === "sync"}><RefreshCw size={15} /> {busy === "sync" ? "Menyinkronkan..." : "Sinkron sekarang"}</button></div></div></section>
     {showConnectionPanel ? <section className="console-panel console-whatsapp-pairing-panel"><div className="console-panel-header"><div><span>Koneksi bot</span><h2>{pairingCode ? "Pairing code tersedia" : status?.qrAvailable ? "QR WhatsApp tersedia" : "Pairing code belum terbaca"}</h2></div><Badge tone="warning">{status?.state || "periksa"}</Badge></div><div className="console-whatsapp-pairing-body"><KeyRound size={20} /><div><p>{pairingCode ? "Masukkan kode ini di WhatsApp: Perangkat tertaut -> Tautkan dengan nomor telepon." : status?.qrAvailable ? "Buka halaman pairing WhatsApp untuk melihat QR terbaru dari bot." : `Status bot: ${connectionDetail}. Hapus folder bailey auth lalu restart untuk meminta kode baru.`}</p>{pairingCode ? <strong className="console-whatsapp-pairing-code">{pairingCode}</strong> : null}</div><div className="console-whatsapp-pairing-actions">{pairingCode ? <button type="button" onClick={() => copyPairingCode().catch(() => undefined)}><span>{copiedPairing ? <Check size={15} /> : <Copy size={15} />}</span>{copiedPairing ? "Tersalin" : "Salin kode"}</button> : null}{status?.publicQrUrl ? <a href={status.publicQrUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /> Buka pairing</a> : null}<button type="button" onClick={() => load().catch(() => undefined)}><RefreshCw size={15} /> Refresh</button></div></div></section> : null}
     <section className="console-panel"><div className="console-panel-header"><div><span>Operasional</span><h2>Rental grup</h2></div><div className="console-panel-toolbar-actions"><button type="button" onClick={openCreate}><Plus size={15} /> Tambah rental</button></div></div><DataTable rows={groups} columns={columns} filters={filters} rowKey={(row) => row.id} loading={loading} error={error} initialPageSize={10} /></section>
     {selectedGroup ? <section className="console-panel console-whatsapp-list-history"><div className="console-panel-header"><div><span>Riwayat perubahan list</span><h2>{selectedGroup.name}</h2></div><div className="console-panel-toolbar-actions"><button type="button" disabled={listHistoryLoading} onClick={() => openListHistory(selectedGroup).catch(() => undefined)}><RefreshCw size={15} /> Refresh riwayat</button></div></div>{listHistoryLoading ? <div className="ui-table-state">Memuat riwayat list...</div> : listHistory?.items.length ? <div className="console-list-history-grid">{listHistory.items.map((item) => <article key={item.id} className="console-list-history-card"><div><strong>{item.keyword}</strong><Badge tone={item.source === "audit" ? "success" : "muted"}>{item.action}</Badge></div><p>{item.textPreview || "Isi list tidak memiliki preview teks."}</p><small>{item.senderName || item.sender || (item.source === "snapshot" ? "Snapshot list terakhir" : "Admin tidak tercatat")} / {formatDateTime(item.updatedAt)}{item.media ? " / ada media" : ""}</small></article>)}</div> : <div className="ui-table-state">Belum ada riwayat perubahan list untuk grup ini.</div>}</section> : null}

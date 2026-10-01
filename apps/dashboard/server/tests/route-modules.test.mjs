@@ -588,6 +588,7 @@ test("WhatsApp route module keeps owner APIs and token-authenticated bot APIs se
       "POST /api/whatsapp/rentals/:id/price-sync/apply",
       "GET /api/whatsapp/group-lists",
       "GET /api/whatsapp/rentals/:id/list-history",
+      "POST /api/whatsapp/groups/sync-now",
       "POST /api/whatsapp/groups/sync",
       "POST /api/whatsapp/rentals",
       "PUT /api/whatsapp/rentals/:id",
@@ -596,10 +597,16 @@ test("WhatsApp route module keeps owner APIs and token-authenticated bot APIs se
       "POST /api/whatsapp/orders/:id/payment-message",
     ],
   );
-  for (const index of [0, 1, 2, 3, 4, 5, 7, 8, 9]) {
+  /*
+   * Both sync routes appear in the list above, and only one of them is
+   * owner-guarded. `sync-now` is the owner asking the bot to go look; `sync` is
+   * the bot reporting what it found, authenticating on the inbound token inside
+   * its own handler. They are different directions and must stay that way.
+   */
+  for (const index of [0, 1, 2, 3, 4, 5, 6, 8, 9, 10]) {
     assert.deepEqual(routes[index].handlers[0].roles, ["owner"]);
   }
-  for (const index of [6, 10, 11]) assert.equal(routes[index].handlers.length, 1);
+  for (const index of [7, 11, 12]) assert.equal(routes[index].handlers.length, 1);
 });
 
 test("payment route module preserves webhook, authenticated, and public boundaries", () => {

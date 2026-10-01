@@ -2325,6 +2325,64 @@ async function joinGroupThroughBot(inviteLink) {
   }
 }
 
+/*
+ * Owner-triggered group directory sync.
+ *
+ * The bot only syncs on connect and on a timer, and it reports the outcome --
+ * skipped, throttled, failed -- through `group_sync` in its status payload
+ * rather than by throwing. Without a way to ask for one on demand the owner
+ * could see a week-old directory and no way to say so.
+ *
+ * The bot is what actually reads WhatsApp, so this proxies to it and returns
+ * its verdict verbatim rather than second-guessing it here. Note that its
+ * `group_count` counts every group the bot is in, which is not the same as
+ * the number that match a rental -- the two are kept separate in the UI.
+ */
+async function syncGroupsThroughBot() {
+  const db = await readDb();
+  const tokens = configuredTokens(
+    firstUsableSecret(db.settings?.whatsappBotToken),
+    firstUsableSecret(process.env.WHATSAPP_BOT_TOKEN),
+  );
+  const botUrl = firstConfigured(process.env.WHATSAPP_BOT_URL, db.settings?.whatsappBotUrl, "http://127.0.0.1:4016");
+  if (!tokens.length) return { success: false, error: "whatsapp_bot_not_configured" };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Number(process.env.WHATSAPP_BOT_TIMEOUT_MS || 15000));
+  try {
+    const url = new URL("/groups/sync", botUrl);
+    let lastError = null;
+    for (const token of tokens) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        signal: controller.signal,
+      });
+      const body = await response.json().catch(() => ({}));
+      if (response.ok && body.success !== false) {
+        return {
+          success: true,
+          skipped: Boolean(body.skipped),
+          reason: String(body.reason || ""),
+          group_count: Number(body.group_count || 0),
+        };
+      }
+      lastError = new Error(body.error || `whatsapp_bot_http_${response.status}`);
+    }
+    throw lastError || new Error("whatsapp_bot_unavailable");
+  } catch (error) {
+    return {
+      success: false,
+      error: error.name === "AbortError" ? "whatsapp_bot_timeout" : error.message || "whatsapp_bot_unavailable",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function buildRentalBase(groupJid, rental, listCount) {
   const daysLeft = legacyDaysLeft(rental?.expired);
   const hasRental = Boolean(rental);
@@ -9066,6 +9124,7 @@ registerWhatsAppRoutes(app, {
   getWhatsAppBotStatus,
   handleInboundMessage,
   joinGroupThroughBot,
+  syncGroupsThroughBot,
   legacyRootDir,
   legacyTodayText,
   makeId,
