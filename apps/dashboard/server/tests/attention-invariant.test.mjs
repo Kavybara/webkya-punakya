@@ -166,23 +166,14 @@ test("the attention queue is no longer the owner console's alone", async () => {
   // with console-free class names. If the old file comes back, the two copies
   // will drift and only the owner will see the change.
   //
-  // The orphaned pre-move file is still on disk -- deleting it needs the user
-  // to name it explicitly -- so this asserts it has no importers rather than
-  // asserting it is gone. When it is removed, `assert.rejects` below replaces
-  // the import check.
-  const legacy = await readFile(new URL("pages/owner-v2/overview/AttentionQueue.tsx", root), "utf8").catch(() => null);
-  if (legacy !== null) {
-    const importers = [...ownerPages, ...resellerPages, "pages/owner-v2/page.tsx"];
-    for (const path of importers) {
-      const text = await source(path);
-      assert.doesNotMatch(
-        text,
-        /overview\/AttentionQueue/,
-        `${path} still imports the pre-move queue. Everything should import components/attention/.`,
-      );
-    }
-    void legacy;
-  }
+  // The pre-move copy is deleted, and this asserts that rather than asserting
+  // it is unimported. An unimported duplicate is not neutral: it still reads
+  // as the real one to whoever opens `overview/` first, and the day somebody
+  // imports it the queue is back in one console only.
+  await assert.rejects(
+    () => readFile(new URL("pages/owner-v2/overview/AttentionQueue.tsx", root)),
+    "pages/owner-v2/overview/AttentionQueue.tsx is back. The shared queue lives in components/attention/ -- delete the copy.",
+  );
 
   const queue = await source("components/attention/AttentionQueue.tsx");
   const queueCss = await source("components/attention/attention.css");
