@@ -162,6 +162,36 @@ test("a household lookup only accepts a Netflix travel/verify link with a token"
   assert.doesNotMatch(code(server), /"updatehousehold", "verify", "travel"/);
 });
 
+/**
+ * Who the message was sent to.
+ *
+ * The test was `raw.includes(email) || envelopeTargets.includes(email)`, and the
+ * first half matched the address anywhere in the whole message -- a quoted
+ * reply, a signature, a footer, the body of a mail Netflix addressed to someone
+ * else. NF_VERIF and NF_HOUSE are the owner's labels and hold mail for every
+ * customer the owner has sold to, so a lookup for one customer could return
+ * another customer's code. That is a wrong answer handed to a real person, not
+ * a missing one.
+ *
+ * The envelope is the record of who the message went to. `Delivered-To` is only
+ * consulted when the envelope names no recipient at all, and it is parsed as an
+ * address rather than substring-matched, so a prose mention cannot open it.
+ */
+test("a code is only read from a message actually addressed to that customer", async () => {
+  const server = await source("server/index.js");
+
+  assert.match(server, /function imapSentToRecipient/);
+  assert.match(server, /if \(!imapSentToRecipient\(item, email\)\) continue;/);
+
+  // The substring test is the whole bug and must not come back.
+  assert.doesNotMatch(server, /rawLower\.includes\(email\)/);
+  assert.doesNotMatch(server, /raw\.toLowerCase\(\)\.includes\(email\)/);
+
+  // bcc counts: Netflix does not consistently pick to or cc for a household mail.
+  assert.match(server, /\.\.\.\(item\.envelope\?\.bcc \|\| \[\]\)/);
+  assert.match(server, /delivered-to/i);
+});
+
 test("account access rows preserve readable dark hover and keyboard focus", async () => {
   const [access, styles] = await Promise.all([
     source("src/pages/reseller-v2/access/page.tsx"),

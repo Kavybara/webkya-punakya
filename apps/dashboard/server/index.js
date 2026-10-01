@@ -5404,6 +5404,51 @@ async function lookupGmailAccessValueFresh(db, account, type) {
   return { source: "gmail", reason: "not_found", value: "" };
 }
 
+/* Was this message sent *to* this customer?
+ *
+ * The test used to be `raw.includes(email) || envelopeTargets.includes(email)`,
+ * and the first half is the problem. `raw` is the whole message, so it matches
+ * the address anywhere in it: in a quoted reply, in a signature, in a footer,
+ * in the body of a mail Netflix addressed to somebody else. NF_VERIF and
+ * NF_HOUSE are the owner's labels and collect mail for every customer the owner
+ * has ever sold to, so a lookup for one customer would happily return another
+ * customer's code. A reseller reading someone else's code and handing it to a
+ * customer is a wrong answer, not a missing one.
+ *
+ * The envelope is the only trustworthy answer here: it is what the server
+ * recorded as the recipient, not something the body merely mentions. It is
+ * checked for `to`, `cc`, and `bcc` because Netflix does not consistently pick
+ * one -- a household mail can arrive with the customer in `bcc`.
+ *
+ * `Delivered-To` is consulted as a fallback for the case the envelope cannot
+ * cover: a message with no envelope recipients at all. It is read from the raw
+ * headers only, and it is parsed as an address, not substring-matched, so a
+ * `Delivered-To` that merely mentions the customer somewhere in prose does not
+ * open the gate. */
+function imapSentToRecipient(item = {}, email = "") {
+  const wanted = String(email || "").trim().toLowerCase();
+  if (!wanted) return false;
+
+  const envelopeTargets = [
+    ...(item.envelope?.to || []),
+    ...(item.envelope?.cc || []),
+    ...(item.envelope?.bcc || []),
+  ].map((address) => String(address?.address || "").trim().toLowerCase());
+  if (envelopeTargets.length) return envelopeTargets.includes(wanted);
+
+  const raw = Buffer.isBuffer(item.source) ? item.source.toString("utf8") : Buffer.from(item.source || "").toString("utf8");
+  const header = String(raw).split(/\r?\n\r?\n/, 1)[0] || "";
+  for (const line of header.split(/\r?\n/)) {
+    if (!/^delivered-to\s*:/i.test(line)) continue;
+    // Only the address itself: `<ada@kya.baby>` or a bare one. A prose mention
+    // inside a Delivered-To header is not a delivery record.
+    const value = line.replace(/^delivered-to\s*:/i, "");
+    const addresses = value.match(/[^\s<>,;:"]+@[^\s<>,;:"]+/g) || [];
+    if (addresses.some((address) => address.toLowerCase() === wanted)) return true;
+  }
+  return false;
+}
+
 async function lookupImapAccessValue(db, account, type) {
   const settings = ownerIntegrationSettings(db).gmail;
   if (!gmailImapConfigured(db)) return { source: "fallback", reason: "imap_not_connected", value: "" };
@@ -5445,13 +5490,7 @@ async function lookupImapAccessValue(db, account, type) {
 
         for await (const item of client.fetch(uids, { uid: true, envelope: true, internalDate: true, source: true }, { uid: true })) {
           const raw = Buffer.isBuffer(item.source) ? item.source.toString("utf8") : Buffer.from(item.source || "").toString("utf8");
-          const rawLower = raw.toLowerCase();
-          const envelopeTargets = [
-            ...(item.envelope?.to || []),
-            ...(item.envelope?.cc || []),
-            ...(item.envelope?.bcc || []),
-          ].map((address) => String(address?.address || "").toLowerCase());
-          if (!rawLower.includes(email) && !envelopeTargets.includes(email)) continue;
+          if (!imapSentToRecipient(item, email)) continue;
           if (type !== "disney_otp" && isNetflixAccount(account) && !/netflix/i.test(raw)) continue;
 
           const message = imapRawToGmailMessage(raw, item.uid, item.internalDate);
