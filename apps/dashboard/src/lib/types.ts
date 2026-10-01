@@ -166,7 +166,15 @@ export type Order = {
   email?: string;
   device?: string;
   note?: string;
-  qrisStatus: "paid" | "pending" | "expired";
+  /**
+   * `manual` is set by `payment-reconciliation-service` when the owner approves
+   * a payment by hand, and by the Sheets importer for rows a human entered.
+   * It is a real paid state, not a variant of `paid` -- it is how the audit
+   * trail records that a human, not the gateway, confirmed the money. Omitting
+   * it here made the compiler flag correct branches as unreachable, so the
+   * type was lying about a value the server writes on live orders.
+   */
+  qrisStatus: "paid" | "manual" | "pending" | "expired";
   orderStatus: "pending" | "processing" | "completed" | "cancelled";
   deliveryStatus?: "waiting_payment" | "paid_by_deposit" | "sent" | "failed" | "stock_unavailable_deposit";
   deliveryError?: string;

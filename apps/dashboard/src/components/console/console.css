@@ -81,8 +81,14 @@
   min-height: 240px;
 }
 
+/* The panels that hold a scrollable list rather than a fixed block. Each one
+   is a direct child of a bento cell, which is a flex column, so `flex: 1` is
+   what lets the list take the cell's leftover height and scroll inside it
+   instead of pushing the cell taller than the row it was assigned. */
 .console-cell > .console-system-list,
-.console-cell > .console-attention-list {
+.console-cell > .console-attention-list,
+.console-cell > .console-balance-list,
+.console-cell > .console-top-products {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -93,6 +99,10 @@
 }
 
 .console-panel-header { display: flex; min-height: 70px; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 22px; border-bottom: 1px solid var(--border); }
+/* Any header link is "label + arrow" as one unit. Left free to wrap in a
+   six-column cell the arrow drops onto its own line, where it reads as a stray
+   icon rather than as part of the link. */
+.console-panel-header > a { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; white-space: nowrap; }
 .console-panel-header span { display: block; margin-bottom: 4px; color: var(--text-muted); font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
 .console-panel-header h2 { margin: 0; color: var(--text-primary); font-size: 15px; font-weight: 620; letter-spacing: -0.01em; }
 .console-panel-header > strong { color: var(--text-primary); font-size: 16px; font-weight: 650; }
@@ -114,22 +124,108 @@
 .console-status-badge.is-muted { color: var(--text-muted); }
 .console-panel-link { display: flex; min-height: 44px; align-items: center; justify-content: center; gap: 6px; border-top: 1px solid var(--border); color: var(--text-secondary); font-size: 11px; font-weight: 600; text-decoration: none; transition: background 200ms var(--ease-out-expo), color 200ms var(--ease-out-expo); }
 .console-panel-link:hover { background: var(--surface-hover); color: var(--text-primary); }
-.console-stock-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 20px 22px; }
-.console-stock-stats > div { position: relative; min-width: 0; padding: 15px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-raised); overflow: hidden; }
-.console-stock-stats span { display: block; color: var(--text-muted); font-size: 10px; }
-.console-stock-stats strong { display: block; margin-top: 9px; font-size: 22px; font-weight: 620; }
-.console-stock-stats i { position: absolute; bottom: 0; left: 0; height: 2px; max-width: 100%; background: var(--accent-cyan); }
-.console-stock-stats > div:nth-child(2) i { background: var(--status-warning); }
-.console-stock-stats > div:nth-child(3) i { background: var(--accent-violet); }
+/* Stock: three plain counts, then the products that are about to run out.
+
+   This replaces a set of progress bars where "ready" was hardcoded to 100%
+   whenever any ready stock existed, and the other two were shares of
+   unrelated denominators. A full bar is not a measurement -- it says "some
+   stock exists" and draws it as "stock is full". The counts are now just
+   counts, and the useful half of the panel is the list underneath: which
+   products are within three days of cover, which is a question the bars could
+   never answer. */
+.console-stock-counts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; border-bottom: 1px solid var(--border); background: var(--border); }
+.console-stock-counts > div { padding: 14px 18px; background: var(--surface); }
+.console-stock-counts span { display: block; color: var(--text-muted); font-size: 10px; }
+.console-stock-counts strong { display: block; margin-top: 6px; color: var(--text-primary); font-size: 21px; font-weight: 620; font-variant-numeric: tabular-nums; }
+.console-low-stock { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 14px 18px; }
+.console-low-stock-head { margin: 0 0 10px; color: var(--text-secondary); font-size: 11px; }
+.console-low-stock-head strong { color: var(--status-warning); font-size: 14px; font-weight: 650; }
+.console-low-stock ul { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.console-low-stock li { display: flex; min-width: 0; align-items: baseline; justify-content: space-between; gap: 10px; }
+.console-low-stock li span { overflow: hidden; color: var(--text-secondary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.console-low-stock li b { flex: 0 0 auto; color: var(--status-warning); font-size: 10px; font-weight: 620; }
+.console-low-stock-more { margin: 10px 0 0; color: var(--text-muted); font-size: 10px; }
+
+/* Reseller balances, thinnest first. The `is-thin` amount is the one that
+   needs a decision today, so it is the only number in the panel that gets
+   colour -- a panel where every figure is loud teaches the reader to ignore
+   all of them. */
+.console-balance-list { display: grid; align-content: start; margin: 0; padding: 0; list-style: none; }
+.console-balance-list > li { border-bottom: 1px solid var(--border); }
+.console-balance-list > li:last-child { border-bottom: 0; }
+.console-balance-list a { display: grid; min-width: 0; min-height: 58px; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 11px 18px; color: inherit; text-decoration: none; transition: background 200ms var(--ease-out-expo); }
+.console-balance-list a:hover { background: var(--surface-hover); }
+.console-balance-name { min-width: 0; }
+.console-balance-name strong, .console-balance-name small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.console-balance-name strong { color: var(--text-primary); font-size: 11px; font-weight: 620; }
+.console-balance-name small { margin-top: 4px; color: var(--text-muted); font-size: 9px; }
+.console-balance-amount { display: flex; align-items: center; gap: 5px; color: var(--text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.console-balance-amount.is-thin { color: var(--status-warning); }
+.console-balance-amount.is-thin strong { font-weight: 650; }
+.console-balance-list a > svg { color: var(--text-muted); }
+
+/* Top products, as ranked bars. Scaled to the leader rather than to an
+   absolute maximum: the panel answers "what is outselling what", and a bar
+   pinned to a round number would compress every real difference into the first
+   few percent of its width. The 2% floor keeps a low-but-nonzero product from
+   rendering as an empty track, which would read as "sold nothing". */
+.console-top-products { display: grid; align-content: center; gap: 13px; margin: 0; padding: 18px 22px; list-style: none; }
+.console-top-products > li { display: grid; min-width: 0; grid-template-columns: minmax(80px, 1.1fr) minmax(0, 1.6fr) auto; align-items: center; gap: 12px; }
+.console-top-product-name { overflow: hidden; color: var(--text-secondary); font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.console-top-product-bar { height: 7px; border-radius: 999px; background: color-mix(in srgb, var(--accent-violet) 11%, transparent); overflow: hidden; }
+.console-top-product-bar i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, color-mix(in srgb, var(--accent-violet) 62%, transparent), var(--accent-violet)); }
+.console-top-product-value { text-align: right; font-variant-numeric: tabular-nums; }
+.console-top-product-value strong, .console-top-product-value small { display: block; }
+.console-top-product-value strong { color: var(--text-primary); font-size: 11px; font-weight: 620; }
+.console-top-product-value small { margin-top: 2px; color: var(--text-muted); font-size: 9px; }
+
+/* The wallet ledger, as a detail list rather than four more stat cards. These
+   are components of one figure rather than four independent metrics, so they
+   read as a breakdown: balance is the answer, the other three are how it got
+   there. */
+.console-wallet-list { flex: 1 1 auto; margin: 0; padding: 6px 0; }
+
+/* Queue framing. A queue whose total is shown above the rows tells the reader
+   whether they are looking at a crisis or a clean day before they read a single
+   label, which is the only question they open this panel with. */
+.console-attention-summary { flex: 0 0 auto; padding: 12px 18px 0; }
+.console-attention-summary p { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--text-muted); font-size: 10px; }
+.console-attention-summary strong { color: var(--status-warning); font-size: 15px; font-weight: 650; }
+.console-attention-summary p.is-clear { color: var(--status-success); }
+.console-queue-empty { margin: 0; padding: 20px 22px; color: var(--text-muted); font-size: 10px; line-height: 1.55; }
+.console-queue-error { margin: 0; padding: 20px 22px; color: var(--status-danger); font-size: 10px; line-height: 1.55; }
+.console-list-more { flex: 0 0 auto; margin: 0; padding: 10px 18px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 10px; }
+
+/* Service rows are links now, so each one opens the page that fixes whatever
+   is wrong with it. The chevron is the affordance; it is hidden from assistive
+   tech because the row's own text already says what it is. */
+.console-system-row.is-link { color: inherit; text-decoration: none; transition: background 200ms var(--ease-out-expo); }
+.console-system-row.is-link:hover { background: var(--surface-hover); }
+.console-system-row.is-link > svg { color: var(--text-muted); }
+.console-system-summary { flex: 0 0 auto; margin: 0; padding: 10px 18px; color: var(--status-warning); font-size: 10px; }
+.console-system-summary.is-clear { color: var(--status-success); }
+.console-warning-list { display: grid; gap: 5px; margin: 0; padding: 0 0 0 15px; font-size: 10px; line-height: 1.5; }
+
+/* Operations queue filters. A real tab strip rather than a dropdown, because
+   the counts are the point -- the owner is comparing "3 delivery" against
+   "12 sheets" to decide where to start, and a collapsed menu hides exactly
+   the comparison that makes the strip worth having. */
+.console-focus-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; }
+.console-focus-tabs button { display: inline-flex; min-height: 36px; align-items: center; gap: 7px; padding: 0 13px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-raised); color: var(--text-secondary); font-size: 11px; font-weight: 600; cursor: pointer; transition: background 200ms var(--ease-out-expo), border-color 200ms var(--ease-out-expo), color 200ms var(--ease-out-expo); }
+.console-focus-tabs button:hover { border-color: var(--border-strong); background: var(--surface-hover); color: var(--text-primary); }
+.console-focus-tabs button.is-active { border-color: color-mix(in srgb, var(--accent-violet) 42%, transparent); background: color-mix(in srgb, var(--accent-violet) 11%, transparent); color: var(--text-primary); }
+.console-focus-tabs button span { display: inline-grid; min-width: 20px; height: 20px; place-items: center; padding: 0 6px; border-radius: 999px; background: var(--surface); color: var(--text-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.console-focus-tabs button.is-active span { background: color-mix(in srgb, var(--accent-violet) 20%, transparent); color: var(--text-primary); }
 /* The attention queue is a four-wide cell now, so its five entries stack
    instead of sitting in a five-across strip. It is the tallest list on the
    page and it is beside the chart for that reason: an owner reads the trend
    and the exceptions side by side, not in sequence. */
 .console-attention-list { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; }
 /* These are the five things worth looking at. They are links, so they lift. */
-.console-attention-list > a { display: grid; min-width: 0; min-height: 66px; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 12px 18px; border-bottom: 1px solid var(--border); color: inherit; text-decoration: none; transition: background 200ms var(--ease-out-expo); }
+.console-attention-list > a { display: grid; min-width: 0; min-height: 66px; grid-template-columns: 30px minmax(0, 1fr) auto auto; align-items: center; gap: 9px; padding: 12px 18px; border-bottom: 1px solid var(--border); color: inherit; text-decoration: none; transition: background 200ms var(--ease-out-expo); }
 .console-attention-list > a:last-child { border-bottom: 0; }
 .console-attention-list > a:hover { background: var(--surface-hover); }
+.console-attention-list > a > svg { color: var(--text-muted); }
 .console-attention-dot { display: grid; width: 30px; height: 30px; place-items: center; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--status-success) 8%, transparent); color: var(--status-success); }
 .console-attention-dot.is-warning { background: color-mix(in srgb, var(--status-warning) 8%, transparent); color: var(--status-warning); }
 .console-attention-dot.is-danger { background: color-mix(in srgb, var(--status-danger) 8%, transparent); color: var(--status-danger); }
@@ -333,7 +429,14 @@
 @media (max-width: 767px) {
   .console-chart-wrap { height: 250px; }
   .console-revenue-summary { flex-direction: column; gap: 6px; }
-  .console-stock-stats { grid-template-columns: 1fr; }
+  .console-stock-counts > div { padding: 12px 14px; }
+  .console-balance-list a { grid-template-columns: minmax(0, 1fr) auto; }
+  .console-balance-list a > svg { display: none; }
+  .console-top-products { gap: 11px; padding: 16px; }
+  .console-top-products > li { grid-template-columns: minmax(0, 1fr) auto; }
+  .console-top-product-bar { grid-column: 1 / -1; order: 3; }
+  .console-focus-tabs { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
+  .console-focus-tabs button { flex: 0 0 auto; }
   .console-attention-list > a { min-height: 72px; }
   .console-panel-header { min-height: 0; align-items: flex-start; flex-direction: column; padding: 16px; }
   .console-panel-toolbar-actions { width: 100%; overflow-x: auto; flex-wrap: nowrap; padding-bottom: 2px; }
@@ -355,5 +458,5 @@
 
 @media (max-width: 420px) {
   .console-notification-count { display: none; }
-  .console-stock-stats strong { font-size: 20px; }
+  .console-stock-counts strong { font-size: 18px; }
 }
