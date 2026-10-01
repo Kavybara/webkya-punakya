@@ -320,3 +320,66 @@ test("delivery audit separates historical delivery evidence from active double-d
   assert.match(scope, /activeLinkedAccounts\.length > qty/);
   assert.doesNotMatch(scope, /linkedAccounts\.length > qty/);
 });
+
+test("attention queue stops counting cancelled orders as paid awaiting delivery", async () => {
+  const analytics = await source("pages/owner-v2/overview/analytics.ts");
+  // `isPaid` accepts qrisStatus "manual", and a manually-tagged order that was
+  // later cancelled is still `qrisStatus: "manual"`. Without the cancelled
+  // guard it satisfied all three terms of the paidNotSent predicate at once,
+  // so cancelled orders were counted twice -- once as "Delivery gagal" and once
+  // as "Paid belum terkirim" -- and the header sum overstated the number of
+  // orders actually holding money. Verified against the demo runtime DB: the
+  // two cancelled orders were the *entire* content of both rows.
+  // Asserted on behaviour, not spelling. The guard exists as a named helper so
+  // both rows can share one definition; pinning the inline expression instead
+  // would fail on a refactor that changed nothing observable.
+  assert.match(analytics, /isCancelled[\s\S]{0,120}cancelled/, "the cancelled-order guard is gone");
+  // It has to be applied to BOTH rows, or a cancelled order still counts once.
+  assert.match(analytics, /isLiveDeliveryFailure[\s\S]{0,80}!isCancelled/);
+  assert.match(analytics, /paidNotSent = live\.filter\(\(order\) =>[^\n]*!isCancelled/);
+});
+
+test("attention queue surfaces the per-order delivery reason instead of a bare count", async () => {
+  const analytics = await source("pages/owner-v2/overview/analytics.ts");
+  const queue = await source("pages/owner-v2/overview/AttentionQueue.tsx");
+  // The server already persists the reason on `order.deliveryError` and the
+  // order drawer already renders it. It was absent from the queue row itself,
+  // so the owner had to open orders one by one to learn why four deliveries
+  // were failing -- when the reason is usually one shared sentence, and often
+  // one he has to fix in Sheets. The row now carries it.
+  assert.match(analytics, /deliveryError/);
+  assert.match(analytics, /detail:/);
+  assert.match(queue, /item\.detail/);
+  // And the money-at-risk framing: "unpaid" is what makes a row urgent, so the
+  // hint may not describe a row as waiting on money it never received.
+  assert.doesNotMatch(analytics, /label: "Paid belum terkirim"[\s\S]{0,200}belum menerima pembayaran/);
+});
+
+test("fulfillment repair gives up instead of retrying a broken order forever", async () => {
+  const server = await readFile(new URL("../../server/index.js", import.meta.url), "utf8");
+  const start = server.indexOf("function runFulfillmentRepairJob");
+  let depth = 0;
+  let opened = false;
+  let end = start;
+  for (; end < server.length; end += 1) {
+    if (server[end] === "{") {
+      depth += 1;
+      opened = true;
+    } else if (server[end] === "}") {
+      depth -= 1;
+      if (opened && depth === 0) break;
+    }
+  }
+  const scope = server.slice(start, end);
+  assert.notEqual(start, -1, "runFulfillmentRepairJob is no longer declared in server/index.js");
+  // The repair job runs every 45s and re-selects every paid, unsent order with
+  // no attempt counter and no backoff. A product that is misconfigured, or a
+  // template missing a customer email, therefore retried indefinitely -- the
+  // failure is deterministic, so retrying cannot succeed, and each pass burned
+  // a stock allocation attempt for nothing. It must stop and surface instead.
+  assert.match(scope, /FULFILLMENT_REPAIR_MAX_ATTEMPTS/);
+  assert.match(scope, /fulfillmentRepairAttempts/);
+  // Giving up has to be visible, not silent: the owner is the only one who can
+  // fix a bad product config, so a stopped order must reach the attention queue.
+  assert.match(scope, /deliveryStatus = "abandoned"/);
+});

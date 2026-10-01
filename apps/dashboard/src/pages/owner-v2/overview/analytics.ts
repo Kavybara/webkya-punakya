@@ -380,6 +380,17 @@ export type AttentionItem = {
   label: string;
   count: number;
   hint: string;
+  /**
+   * The concrete reason behind the count, in the owner's terms, or "" when the
+   * queue cannot name one.
+   *
+   * `hint` says what the row *is*. `detail` says *why this one is happening
+   * right now* -- usually the thing only the owner can fix, like a product
+   * missing a customer email or a reseller that no longer exists. Without it a
+   * count is a number the owner cannot act on, and the only way to learn the
+   * cause was to open each row one by one.
+   */
+  detail?: string;
   tone: AttentionTone;
   /**
    * Where clicking goes, carrying enough state to land on the thing that
@@ -410,8 +421,50 @@ export function buildAttentionQueue(orders: ApiOrder[], operations: OperationsCe
   // "Delivery gagal" on both values, so a count that read only `failed` would
   // promise fewer rows than the link delivers. A tile whose number disagrees
   // with the page it opens is worse than no tile.
-  const deliveryFailed = live.filter((order) => ["failed", "needs_redelivery"].includes(String(order.deliveryStatus || "")));
-  const paidNotSent = live.filter((order) => isPaid(order) && order.orderStatus !== "completed" && order.deliveryStatus !== "sent");
+  //
+  // Cancelled orders are excluded from both rows below. They are neither a
+  // delivery failure nor money awaiting delivery: the order was called off, and
+  // the customer is not waiting on anything. They used to be counted twice --
+  // once per row -- because `isPaid` accepts qrisStatus "manual" and a
+  // cancelled order keeps it, so a cancelled order satisfied every term of the
+  // paidNotSent predicate. In the demo runtime the two cancelled orders were
+  // the entire content of both rows, which made the header claim four things
+  // needed handling when there were two.
+  const isCancelled = (order: ApiOrder) => String(order.orderStatus || "").toLowerCase() === "cancelled";
+  const isLiveDeliveryFailure = (order: ApiOrder) => !isCancelled(order) && ["failed", "needs_redelivery", "abandoned"].includes(String(order.deliveryStatus || ""));
+  const deliveryFailed = live.filter(isLiveDeliveryFailure);
+  const failedIds = new Set(deliveryFailed.map((order) => order.id));
+  // Excludes the delivery-failed set, and that exclusion is the whole point.
+  // These two rows are not independent readings that happen to correlate: a
+  // failed order is by definition paid and not sent, so without this every
+  // failure was counted twice and the header sum read "4 hal perlu ditangani"
+  // for two orders. The rows are now disjoint by construction and can be added.
+  //
+  // What is left is the genuinely in-flight set: money settled, delivery not
+  // attempted yet or still retrying. Those are the ones the 45-second repair job
+  // is actively working on, which is why the row is a warning and not a danger.
+  const paidNotSent = live.filter((order) => isPaid(order) && !isCancelled(order) && !failedIds.has(order.id) && order.orderStatus !== "completed" && order.deliveryStatus !== "sent");
+
+  // The reason the delivery failed, so the owner reads why on the row instead of
+  // opening each order. `deliveryError` is written by the fulfillment code on
+  // every known failure path and is already rendered in the order drawer; this
+  // is the same string, surfaced one level earlier. Orders with no reason (the
+  // repair job gives up without setting one) contribute nothing rather than an
+  // empty label.
+  const reasons = deliveryFailed.map((order) => String(order.deliveryError || "").trim()).filter(Boolean);
+  // One line only: a queue cell has room for a sentence, not for every distinct
+  // cause. When the failures share a cause -- which they do, because a bad
+  // product config fails every order the same way -- that one sentence is the
+  // whole story. Distinct causes are counted instead so the owner knows the row
+  // is not one thing.
+  const reasonCounts = new Map<string, number>();
+  for (const reason of reasons) reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1);
+  const topReason = [...reasonCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+  const deliveryDetail = !topReason
+    ? ""
+    : reasonCounts.size === 1
+      ? topReason[0]
+      : `${topReason[0]} (+${reasonCounts.size - 1} alasan lain)`;
   const pendingOverdue = live.filter((order) => {
     if (order.qrisStatus !== "pending" || !order.paymentExpiresAt) return false;
     const expiry = parseDate(order.paymentExpiresAt)?.getTime() ?? Infinity;
@@ -432,23 +485,34 @@ export function buildAttentionQueue(orders: ApiOrder[], operations: OperationsCe
       id: "delivery-failed",
       label: "Delivery gagal",
       count: deliveryFailed.length,
-      hint: "Sudah dibayar tapi fulfillment gagal.",
+      hint: "Sudah dibayar tapi fulfillment gagal. Sudah dicoba ulang otomatis.",
+      detail: deliveryDetail,
       tone: "danger",
       // The orders page has a real `delivery-failed` filter whose predicate is
-      // the same two delivery states counted here, so this lands on exactly the
-      // rows the number refers to, and each one opens an order you can act on.
+      // the same delivery states counted here, so this lands on exactly the rows
+      // the number refers to, and each one opens an order you can act on.
       path: "/owner-v2/orders?status=delivery-failed",
     },
     {
       id: "paid-not-sent",
       label: "Paid belum terkirim",
       count: paidNotSent.length,
-      hint: "Pembayaran masuk, order belum final.",
-      tone: "danger",
-      // No order filter means "paid and not yet sent" -- `paid` is every
-      // settled order regardless of fulfillment -- so the delivery queue on the
-      // operations page is the only place this set exists as rows.
-      path: "/owner-v2/operations?focus=delivery",
+      // Not a danger on its own. The fulfillment-repair job re-attempts every
+      // unsent paid order every 45 seconds, so for the first few minutes after a
+      // payment lands this row is simply the system doing its job. Describing it
+      // as urgent taught the owner to ignore the row; it is `warning` because it
+      // only matters once it stops shrinking, which the hint now says.
+      hint: "Uang masuk, akun belum sampai. Sistem mencoba ulang tiap 45 detik.",
+      tone: "warning",
+      // This pointed at `?focus=delivery`, which renders `deliveryAudit.items`.
+      // That builder only emits rows for orders that are ALREADY finished --
+      // sent-but-no-account, fewer-accounts-than-qty, needs_redelivery,
+      // WhatsApp-failed. It never emits a row for a paid-but-unsent order, so
+      // the owner clicked a count of N and landed on a page not containing
+      // those N orders. The rows that do exist are `manual-order-paid-*` in the
+      // manual queue (server/index.js:7701), each carrying the delivery status
+      // as its detail, so that is where this link goes.
+      path: "/owner-v2/operations?focus=manual",
     },
     {
       id: "expired-active",

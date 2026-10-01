@@ -44,6 +44,12 @@ export function AttentionQueue({ items, loading, error }: { items: AttentionItem
             <span>
               <strong>{item.label}</strong>
               <small>{item.hint}</small>
+              {/* The reason, when there is one to give. `hint` explains what the
+                  row is; this explains why it is happening now, and it is
+                  usually the part only the owner can fix -- a product missing a
+                  customer email, a reseller that no longer exists. Without it the
+                  row was a number to act on blindly. */}
+              {item.detail ? <em className="console-attention-reason">{item.detail}</em> : null}
             </span>
             <b>{item.count}</b>
             <ArrowUpRight size={14} aria-hidden="true" />

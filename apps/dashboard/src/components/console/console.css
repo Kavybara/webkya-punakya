@@ -232,6 +232,13 @@
 .console-attention-list strong, .console-attention-list small { display: block; }
 .console-attention-list strong { color: var(--text-secondary); font-size: 11px; font-weight: 620; }
 .console-attention-list small { margin-top: 4px; color: var(--text-muted); font-size: 9px; line-height: 1.35; }
+/* The concrete cause, in the server's own words. It sits below the hint
+   because it is the answer to "why", and it is allowed to wrap to two lines
+   and clip beyond that: a queue row is a fixed height, and a reason that
+   pushes every other row down costs more than a reason that is slightly
+   truncated. The full text is one click away on the order itself. */
+.console-attention-reason { display: -webkit-box; overflow: hidden; margin-top: 3px; color: var(--status-warning); font-size: 9px; font-style: normal; line-height: 1.3; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.console-attention-list > a:not(.has-issue) .console-attention-reason { color: var(--text-muted); }
 .console-attention-list b { color: var(--text-primary); font-size: 17px; font-weight: 650; }
 .console-attention-list .has-issue b { color: var(--status-warning); }
 

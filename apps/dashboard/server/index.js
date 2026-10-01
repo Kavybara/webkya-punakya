@@ -9108,6 +9108,20 @@ scheduleJob("activity-archive", runActivityArchiveJob, 60_000, 60 * 60 * 1000);
 
 let fulfillmentRepairRunning = false;
 
+// How many times one order may be re-fulfilled before the job stops touching
+// it. At the 45s interval below this is roughly an hour of retrying.
+//
+// The five ways fulfillment fails are all deterministic data problems -- a
+// variant that no longer exists, a product template with fewer customer emails
+// than the quantity bought, a reseller that was deleted. None of them is fixed
+// by trying again, so an uncapped loop never converges: it re-runs the same
+// failing lookup roughly 1,900 times a day, forever, and each pass re-enters
+// the stock allocation path for stock that cannot be delivered. An hour is long
+// enough to ride out a transient Sheets or network blip, and short enough that
+// a genuinely broken order reaches the owner as a visible problem instead of
+// silent background churn.
+const FULFILLMENT_REPAIR_MAX_ATTEMPTS = 80;
+
 async function runFulfillmentRepairJob() {
   if (fulfillmentRepairRunning) return;
   fulfillmentRepairRunning = true;
@@ -9122,6 +9136,10 @@ async function runFulfillmentRepairJob() {
           const orderStatus = String(order.orderStatus || "").toLowerCase();
           if (deliveryStatus === "stock_unavailable_deposit" || deliveryStatus === "late_paid_deposit") return false;
           if (String(order.orderType || order.type || "").toLowerCase() === "deposit_topup") return false;
+          // Already given up on. Terminal, so it is never re-selected -- not even
+          // by the notification branch below, which only ever runs for orders
+          // that reached "sent".
+          if (deliveryStatus === "abandoned") return false;
           const sentButNotifFailed = (
             (deliveryStatus === "sent" || orderStatus === "completed")
             && Boolean(order.fulfillmentText)
@@ -9132,6 +9150,7 @@ async function runFulfillmentRepairJob() {
             return !lastAttemptMs || (Date.now() - lastAttemptMs) >= notificationRetryCooldownMs;
           }
           if (deliveryStatus === "sent") return false;
+          if (deliveryStatus === "failed" && Number(order.fulfillmentRepairAttempts || 0) >= FULFILLMENT_REPAIR_MAX_ATTEMPTS) return false;
           if (paidStatuses.has(deliveryStatus)) return true;
           if (String(order.qrisStatus || "").toLowerCase() === "paid") return true;
           if (orderStatus === "paid") return true;
@@ -9141,7 +9160,29 @@ async function runFulfillmentRepairJob() {
         .slice(0, 8);
 
       for (const order of candidates) {
+        // Counted before the attempt, and only for orders that are genuinely
+        // unsent. The WhatsApp-notification branch re-runs for orders that
+        // already reached "sent" and only resends the message; counting those
+        // here would abandon a delivered order over a notification problem,
+        // which would be strictly worse than the notification never arriving.
+        const unsent = String(order.deliveryStatus || "").toLowerCase() !== "sent" && String(order.orderStatus || "").toLowerCase() !== "completed";
+        if (unsent) {
+          order.fulfillmentRepairAttempts = Number(order.fulfillmentRepairAttempts || 0) + 1;
+          order.fulfillmentRepairLastAttemptAt = nowText();
+        }
         await fulfillPaidOrderAndNotify(db, order.id);
+        // The attempt either succeeded or left a reason. If it used up the last
+        // try and still failed, stop: mark it so no future pass selects it, and
+        // keep the reason so the owner sees why on the queue row. `failed` alone
+        // would let the filter re-pick it forever, which is what this cap exists
+        // to prevent.
+        const stillUnsent = String(order.deliveryStatus || "").toLowerCase() !== "sent";
+        if (unsent && stillUnsent && Number(order.fulfillmentRepairAttempts || 0) >= FULFILLMENT_REPAIR_MAX_ATTEMPTS) {
+          order.deliveryStatus = "abandoned";
+          order.deliveryError = order.deliveryError || `Gagal terkirim setelah ${FULFILLMENT_REPAIR_MAX_ATTEMPTS} percobaan otomatis. Perbaiki penyebabnya lalu kirim ulang manual.`;
+          order.abandonedAt = nowText();
+          console.warn(`[Fulfillment] ${order.id} abandoned after ${FULFILLMENT_REPAIR_MAX_ATTEMPTS} attempts: ${order.deliveryError}`);
+        }
       }
       return { checked: candidates.length };
     });
