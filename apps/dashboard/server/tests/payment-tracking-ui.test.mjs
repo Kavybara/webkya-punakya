@@ -66,10 +66,14 @@ test("public tracking requires token or order plus verification and sets noindex
   const api = read("src/lib/api.ts");
   assert.match(page, /orderId\.trim\(\) && verification\.trim\(\)/);
   assert.match(page, /noindex,nofollow/);
-  assert.match(page, /Credential akun tidak pernah ditampilkan/);
   assert.match(page, /aria-live="polite"/);
   assert.match(page, /genericError/);
-  assert.match(page, /theme-dark min-h-screen/);
+  // The page is the sign-in box and nothing else. The marketing column that
+  // used to sit beside the form carried two claims about what this page will
+  // not show, which is a reassurance nobody reads while holding a receipt.
+  assert.match(page, /AuthFormPanel/);
+  assert.doesNotMatch(page, /Pelacakan aman/);
+  assert.doesNotMatch(page, /Credential akun tidak pernah ditampilkan/);
   assert.match(api, /method: "POST"/);
   assert.match(api, /\/public\/order-tracking/);
   assert.doesNotMatch(api, /\/public\/orders\//);

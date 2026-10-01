@@ -1,0 +1,25 @@
+/*
+ * Order tracking.
+ *
+ * One rule, and it exists because the page borrows the sign-in shell.
+ * `.auth-form-note` is centred text with no layout of its own, which is right
+ * for the one-line notes on the sign-in surfaces. Here the line leads with an
+ * icon, and an inline icon inside a centred block sits on the text baseline --
+ * so the glyph drops below the line and the row reads as two things.
+ *
+ * Everything else on this page is `.auth-*` on purpose. Tracking is the same
+ * act as signing in: prove you are the person who placed the order, then read
+ * one result. Reusing the shell is what makes that obvious, and it means a fix
+ * to the sign-in box lands here too.
+ */
+
+.tracking-help {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.tracking-help svg {
+  flex: 0 0 auto;
+}
