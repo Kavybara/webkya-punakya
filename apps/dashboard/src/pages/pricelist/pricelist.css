@@ -63,7 +63,7 @@
  * no glyph outline to put one behind. One sheet under the row solves it
  * without putting four borders on the page.
  *
- * 8px of blur rather than `--glass-blur`, for the reason `auth-brand` gives:
+ * 8px of blur rather than `--glass-blur`, for the reason `auth.css` gives:
  * this is a translucent sheet over pixel art, and at 18px the farm behind it
  * stops being a scene. */
 .price-stats {

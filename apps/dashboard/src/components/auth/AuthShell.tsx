@@ -1,5 +1,5 @@
 import { useRef, useState, type InputHTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
-import { Check, Eye, EyeOff, House, LoaderCircle, QrCode, RefreshCw, ShieldCheck } from "lucide-react";
+import { Check, Eye, EyeOff, House, LoaderCircle, ShieldCheck } from "lucide-react";
 import { Link } from "react-router-dom";
 import "./auth.css";
 
@@ -9,62 +9,40 @@ type AuthShellProps = {
   description: string;
 };
 
+/**
+ * The three sign-in surfaces: one box, centred, and nothing else to read.
+ *
+ * This used to be a two-column split -- a masthead on the left carrying the
+ * wordmark, a lede ("Stokmu ada di satu tempat..."), and three tick-marked
+ * claims about Google Sheets sync, sold-account locking, and QRIS; the form on
+ * the right. The claims were all true and all checkable, and none of them
+ * helped. A person who has opened the sign-in screen has already found the
+ * product, already decided it is the one they want, and is here to type a
+ * password. Every sentence between them and the field is a sentence that has to
+ * be read before the thing they came to do.
+ *
+ * The masthead also took half the viewport, which meant the box floated off to
+ * one side of a moving video at a size the reader had to hunt for. Centred,
+ * the box is the first thing on the screen and the only thing that moves the
+ * reader forward.
+ *
+ * What survives is the wordmark -- a name, not a claim, and the reader needs it
+ * to know they are in the right place -- and the way home.
+ */
 export function AuthShell({ children, title, description }: AuthShellProps) {
   return (
-    
-      <main className="auth-shell">
-        <AuthBrandPanel />
-        <AuthFormPanel title={title} description={description}>{children}</AuthFormPanel>
-      </main>
-    
-  );
-}
-
-/* What the brand column actually says.
- *
- * This used to be a 260px engraved letterform over an animated blur pool, with
- * one line of copy underneath it -- "Produk digital, dalam satu alur." A person
- * opening the sign-in screen already knows what this site sells; they are here
- * to type a password. What they do not know is whether this is the right Kavya
- * and what happens once they are in, and that is what the column is for.
- *
- * So the space the letterform occupied now carries three claims that are all
- * checkable from inside the product, which is the only kind worth making here.
- * The icons are `aria-hidden` and the sentence carries the meaning, because an
- * icon beside text that already says the same thing is decoration, and the
- * reader who cannot see it loses nothing. */
-const BRAND_FACTS = [
-  { Icon: RefreshCw, text: "Stok terbaca langsung dari Google Sheets, tiap beberapa menit." },
-  { Icon: ShieldCheck, text: "Akun terkunci begitu sold, jadi tidak ada yang terjual dua kali." },
-  { Icon: QrCode, text: "Pembayaran QRIS langsung tercatat ke riwayatmu." },
-];
-
-export function AuthBrandPanel() {
-  return (
-    <aside className="auth-brand" aria-label="Kavya">
-      <Link to="/" className="auth-brand-name" aria-label="Kavya - kembali ke beranda">Kavya</Link>
-      <div className="auth-brand-copy">
-        <p className="auth-brand-lede">Stokmu ada di satu tempat. Kavya yang menjual, catatannya yang rapi.</p>
-        <ul className="auth-brand-facts">
-          {BRAND_FACTS.map(({ Icon, text }) => (
-            <li key={text}>
-              <Icon size={16} aria-hidden="true" />
-              <span>{text}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-      <Link to="/" className="auth-brand-home"><House size={15} aria-hidden="true" /> Kembali ke Beranda</Link>
-    </aside>
+    <main className="auth-shell">
+      <AuthFormPanel title={title} description={description}>{children}</AuthFormPanel>
+    </main>
   );
 }
 
 export function AuthFormPanel({ title, description, children }: AuthShellProps) {
   return (
     <section className="auth-form-side">
-      <div className="auth-mobile-brand">
-        <Link to="/" aria-label="Kavya - kembali ke beranda"><span>K</span>Kavya</Link>
-      </div>
+      <Link to="/" className="auth-wordmark" aria-label="Kavya - kembali ke beranda">
+        <span>K</span>Kavya
+      </Link>
       <div className="auth-form-panel">
         <header className="auth-form-header">
           <h1>{title}</h1>

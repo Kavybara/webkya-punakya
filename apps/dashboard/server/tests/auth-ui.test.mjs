@@ -17,9 +17,49 @@ test("login, register, and reset share the same AuthShell foundation", async () 
 
   for (const page of [login, register, reset]) assert.match(page, /<AuthShell/);
   const components = await source("components/auth/AuthShell.tsx");
-  for (const name of ["AuthShell", "AuthBrandPanel", "AuthFormPanel", "AuthInput", "PasswordInput", "OtpInput", "AuthStepIndicator", "AuthError", "AuthSuccessState", "AuthSubmitButton"]) {
+  for (const name of ["AuthShell", "AuthFormPanel", "AuthInput", "PasswordInput", "OtpInput", "AuthStepIndicator", "AuthError", "AuthSuccessState", "AuthSubmitButton"]) {
     assert.match(components, new RegExp(`export function ${name}`));
   }
+});
+
+test("the sign-in screens are one centred box, with no marketing copy beside it", async () => {
+  // There used to be a half-viewport masthead carrying a lede and three
+  // tick-marked claims -- Sheets sync, sold-account locking, QRIS. All true,
+  // all worth saying on a page about selling, and none of them doing any work
+  // for a person who has come here to type a password. They were the last
+  // thing between the reader and the field, and they came back the moment
+  // somebody thought the screen looked empty.
+  //
+  // So the copy is asserted absent rather than merely unimported. An unused
+  // `BRAND_FACTS` array is not neutral: it is one uncommented away from
+  // returning, and it still reads as the live description of the product.
+  const [components, styles] = await Promise.all([
+    source("components/auth/AuthShell.tsx"),
+    source("components/auth/auth.css"),
+  ]);
+
+  // Comments are stripped before either is checked. Both files explain the
+  // removal in place -- the doc block above quotes the lede it deleted, and the
+  // stylesheet's header lists the five blurs it once had, two of them named
+  // after the masthead. A test that fails on its own explanation is a test
+  // somebody deletes rather than satisfies, and deleting the explanation is the
+  // worse outcome: the next person re-adds the column and nobody knows why it
+  // went.
+  const code = (text) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+  assert.doesNotMatch(code(components), /BRAND_FACTS|AuthBrandPanel/);
+  assert.doesNotMatch(code(components), /auth-brand|Stokmu ada di satu tempat|terbaca langsung dari Google Sheets/);
+  assert.doesNotMatch(code(styles), /\.auth-brand(?![\w-])/, "The masthead's rules went with the masthead.");
+
+  // What does survive: the wordmark, so the reader can tell they are in the
+  // right place, and the way home. Both were on the removed column.
+  assert.match(components, /className="auth-wordmark"/);
+  assert.match(components, /Kembali ke Beranda/);
+
+  // And it is centred, not merely present. A one-column grid with no `columns`
+  // is what replaced the 0.78fr/1.22fr split.
+  assert.match(styles, /\.auth-shell\s*\{[^}]*place-items:\s*center/);
+  assert.doesNotMatch(styles, /\.auth-shell\s*\{[^}]*grid-template-columns/);
 });
 
 test("login uses the requested copy, inline validation, safe errors, and existing role redirects", async () => {
