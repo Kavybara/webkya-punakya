@@ -161,15 +161,70 @@ Jangan percaya website sudah benar hanya karena sudah nyala. Cek:
 
 ## Catatan: kenapa backup tidak dikirim
 
-Kalau kamu membuka dokumen ini karena **tidak ada file baru di WhatsApp**, kemungkinan penyebabnya:
+> **Koreksi 2026-10-01.** Versi dokumen ini sebelumnya menyatakan backup "hanya
+> jalan saat server start, tidak terjadwal", dan mengarahkan cek ke `crontab -l`.
+> **Itu salah.** Jadwal 24 jam memang ada dan memang berjalan (lihat di bawah).
+> Kalau kamu sudah mengecek `crontab` dan tidak menemukan apa-apa, itu normal —
+> memang tidak ada cron. Jangan menyimpulkan backup rusak dari sana.
+
+Backup otomatis punya **dua** pemicu, dan keduanya sudah ada di repo:
+
+| Pemicu | Yang meng-arm | Default |
+|---|---|---|
+| Sekali saat start | `scripts/startup/kavya-start.mjs:670` | **mati** (`AUTO_BACKUP_ON_START=false`) |
+| Tiap 24 jam | `apps/bot/handle/connection.js:805` | **nyala** (`AUTO_BACKUP_SCHEDULE_ENABLED=true`) |
+
+Jadi pada konfigurasi yang sekarang, **yang benar-benar bekerja adalah timer
+24 jam di proses bot WhatsApp** — bukan `kavya-start.mjs`.
+
+### Konsekuensi yang harus kamu tahu
+
+Tiga hal ini yang membuat backup diam-diam tidak jalan, dan ketiganya **tidak
+akan muncul di `crontab`**:
+
+1. **Bot WhatsApp mati → tidak ada backup sama sekali.** Timer-nya hidup di
+   proses bot (`connection.js:1109`), bukan di cron sistem. Kalau proses bot
+   stop atau crash, tidak ada yang menjadwalkan apa pun. Ini titik kegagalan
+   tunggal, dan tidak tertulis di `.env.example`.
+2. **WhatsApp tidak connect → backup dilewati, arsip pun tidak dibuat.**
+   `runScheduledBackup` mengecek `isSocketOpen` (`connection.js:771`) dan
+   `return` **sebelum** arsipnya dibangun. Jadi bukan "saja tidak terkirim" —
+   tidak ada file sama sekali.
+3. **Back-to-back backup di-throttle 30 menit** (`AUTO_BACKUP_MIN_INTERVAL_MS`).
+   Kalau kamu tes manual berulang kali, yang berikutnya ditolak dengan
+   `auto_backup_throttled`. Itu perilaku yang benar, bukan bug.
+
+### Cara cek yang benar
+
+Jangan pakai `crontab`. Tanya langsung ke proses bot:
+
+```bash
+# di VPS — butuh token bot, bukan password root
+curl -s -H "Authorization: Bearer $WHATSAPP_BOT_TOKEN" \
+  http://127.0.0.1:4016/session/status | jq '.auto_backup'
+```
+
+`4016` adalah `WHATSAPP_PORT` di `.env.example`; kalau di `.env`mu berbeda, pakai
+yang tertulis di situ. Balasannya memuat `enabled`, `scheduled`, `interval_ms`,
+`owner_configured`, `last_run_at`, `last_status`, dan `last_error` — cukup untuk
+tahu backup terakhir jalan atau tidak, tanpa menebak.
+
+| Yang dilihat di `last_status` | Artinya |
+|---|---|
+| `sent` | Backup terbaru terkirim ke WhatsApp |
+| `created` | Arsip dibuat, tapi gagal dikirim |
+| `skipped` | Dilewati — cek `last_error` |
+| `failed` | Error; `last_error` berisi alasannya |
+| `disabled` | `AUTO_BACKUP` atau `AUTO_BACKUP_SCHEDULE_ENABLED`=false |
+
+Kalau `last_run_at` kosong jauh lebih lama dari 24 jam, timer-nya tidak pernah
+senang — periksa proses bot dulu, bukan jadwal.
+
+### Sisanya
 
 | Gejala | Penyebab | Cara cek di VPS |
 |---|---|---|
-| Tidak ada backup sama sekali | `AUTO_BACKUP_ON_START` dimatikan, atau proses start-nya bukan `kavya-start.mjs` | `grep AUTO_BACKUP_ON_START .env` |
 | Backup jalan tapi tidak terkirim | `BACKUP_OWNER_NUMBER` atau `WHATSAPP_BOT_TOKEN` kosong | `grep -E 'BACKUP_OWNER_NUMBER\|WHATSAPP_BOT_TOKEN' .env` |
+| `owner_configured: false` di status | `BACKUP_OWNER_NUMBER` kosong, atau tidak ada owner yang bisa dibaca | sama seperti di atas |
 | File `.enc` tapi tidak bisa dibuka | `BACKUP_ENCRYPTION_KEY` berbeda dari yang dipakai saat enkripsi | bandingkan dengan key yang tersimpan |
-| Tidak ada backup dalam berminggu-minggu | Backup hanya jalan **saat server start**, tidak terjadwal | `crontab -l` |
-
-Yang terakhir adalah penyebab paling sering: **skripnya ada dan otomatis jalan
-setiap kali server start, tapi tidak ada jadwal harian.** Kalau server tidak pernah
-restart, backup tidak pernah dibuat.
+| Tidak ada backup sama sekali | Proses bot WhatsApp tidak jalan | `systemctl status <unit-bot>` / `ps aux \| grep bot` |
