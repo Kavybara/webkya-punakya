@@ -48,7 +48,7 @@ import { joinPublicUrl, publicWebsiteUrl } from "./lib/public-url.js";
 import { stockBlockedByAccountCondition } from "./google-sheets/account-condition.js";
 import { createOrderStockService } from "./services/order-stock-service.js";
 import { createFulfillmentNotificationService } from "./services/fulfillment-notification-service.js";
-import { extractNetflixVerificationCode } from "./services/account-access-code-service.js";
+import { extractNetflixVerificationCode, hasFifteenMinuteExpiry, hasTenMinuteExpiry, isNetflixAccountChangeVerification } from "./services/account-access-code-service.js";
 import {
   accountAccessGmailQueries,
   accountAccessMailboxPaths,
@@ -5137,13 +5137,66 @@ function isFreshAccountAccessMessage(dateMs = 0, nowMs = Date.now(), type = "") 
   return value >= nowMs - accountAccessMaxAgeMs(type) && value <= nowMs + ACCOUNT_ACCESS_CLOCK_SKEW_MS;
 }
 
-function hasFifteenMinuteExpiry(text = "") {
-  return /(?:kedaluwarsa|kadaluarsa|berakhir|expired|expires|valid)[\s\S]{0,60}(?:15\s*(?:mnt|menit|min|mins|minutes?))|(?:15\s*(?:mnt|menit|min|mins|minutes?))[\s\S]{0,60}(?:kedaluwarsa|kadaluarsa|berakhir|expired|expires|valid)/i.test(String(text || ""));
-}
+/* How many aged-out messages the failure path is willing to open.
+ *
+ * This runs only after the fresh search came up empty, and a mailbox that has
+ * been receiving Netflix mail for a year has a long tail of them. Three is the
+ * newest few: enough to catch "the customer triggered it just after the window
+ * closed", which is the case worth reporting, without making the reseller wait
+ * to be told their code expired. */
+const STALE_ACCESS_CANDIDATES = 3;
 
-function isNetflixAccountChangeVerification(text = "") {
-  const source = String(text || "");
-  return /konfirmasikan\s+perubahan\s+akun|perubahan\s+akun(?:mu)?|mengubah\s+informasi\s+akun|kode\s+ini\s+untuk\s+mengonfirmasi|confirm(?:asikan)?\s+(?:perubahan|change)|change\s+(?:your\s+)?account|account\s+information|10\s*(?:menit|min|mins|minutes?)/i.test(source);
+/**
+ * "No code in the mailbox" and "the code is in the mailbox, 40 minutes old"
+ * are different problems with opposite remedies -- wait, or ask the customer to
+ * send another one -- and the lookup used to return the same `not_found` for
+ * both. The reseller was told the email had not arrived while it sat in
+ * `NF_VERIF` the whole time, which is the worst of the two answers: it teaches
+ * the customer to trigger the email again, and it does not teach the operator
+ * that the window is what bit them.
+ *
+ * So the aged-out messages are kept instead of dropped, and this is the one
+ * that reports them. It runs the *same* extractor the fresh path runs, so what
+ * comes back is a message the lookup genuinely would have returned had it
+ * arrived in time -- not merely an old email that happens to share the label.
+ */
+async function staleAccessResult(type, staleItems, nowMs, account = {}, extra = {}) {
+  const seen = new Set();
+  const candidates = [...staleItems]
+    .sort((left, right) => Number(right.dateMs || 0) - Number(left.dateMs || 0))
+    // One Netflix email lives in the label, in All Mail, and in the inbox at
+    // once, so the IMAP walk reports the same message three times. Without
+    // this the three-slot budget is spent on one email and a genuinely older
+    // second-newest code never gets examined.
+    .filter((item) => {
+      const key = String(item.message?.id || item.uid || `${item.dateMs}`);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, STALE_ACCESS_CANDIDATES);
+
+  for (const item of candidates) {
+    const extracted = await extractAccessValue(type, item.message, account);
+    if (!extracted?.value) continue;
+    const ageMs = Math.max(0, nowMs - Number(item.dateMs || 0));
+    return {
+      ...extra,
+      source: "gmail",
+      reason: "stale",
+      value: "",
+      staleMessage: {
+        subject: gmailHeader(item.message, "Subject"),
+        from: gmailHeader(item.message, "From"),
+        date: gmailHeader(item.message, "Date"),
+        internalDate: item.message.internalDate || "",
+        dateMs: item.dateMs,
+        ageMinutes: Math.max(1, Math.round(ageMs / 60000)),
+        windowMinutes: Math.round(accountAccessMaxAgeMs(type) / 60000),
+      },
+    };
+  }
+  return null;
 }
 
 function isNetflixSigninMessage(text = "") {
@@ -5198,7 +5251,13 @@ async function extractAccessValue(type, message, account = {}) {
   if (type === "verification") {
     const source = normalizedAll || normalizedVisible || normalizedCombined;
     if (isNetflixAccountChangeVerification(source)) return null;
-    if (/10\s*(?:menit|min|mins|minutes?)/i.test(source) && !hasFifteenMinuteExpiry(source)) return null;
+    // A ten-minute window with no fifteen-minute one is Netflix's account
+    // change mail, which carries its own six-digit code. Returning that as a
+    // sign-in code hands the reseller a number Netflix will reject. When the
+    // message mentions both, it is an access mail that happens to have a
+    // fifteen-minute window in its footer, and the code is worth returning --
+    // which is the opposite of what this rule used to do.
+    if (hasTenMinuteExpiry(source) && !hasFifteenMinuteExpiry(source)) return null;
   }
   const hints = type === "signin"
     ? ["enter this code to sign in", "your sign-in code", "sign-in code", "sign in code", "kode masuk", "kode login", "login code"]
@@ -5267,6 +5326,7 @@ async function lookupGmailAccessValueFresh(db, account, type) {
   const messages = Array.from(messageMap.values());
   const nowMs = Date.now();
   const hydratedMessages = [];
+  const staleMessages = [];
   for (const item of messages) {
     const messageResponse = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${item.id}?format=full`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -5274,7 +5334,10 @@ async function lookupGmailAccessValueFresh(db, account, type) {
     const message = await messageResponse.json().catch(() => ({}));
     if (!messageResponse.ok) continue;
     const dateMs = Number(message.internalDate || 0) || Date.parse(gmailHeader(message, "Date") || "") || 0;
-    if (!isFreshAccountAccessMessage(dateMs, nowMs, type)) continue;
+    if (!isFreshAccountAccessMessage(dateMs, nowMs, type)) {
+      staleMessages.push({ message, dateMs });
+      continue;
+    }
     hydratedMessages.push({
       message,
       dateMs,
@@ -5300,6 +5363,9 @@ async function lookupGmailAccessValueFresh(db, account, type) {
       ...extracted,
     };
   }
+
+  const stale = await staleAccessResult(type, staleMessages, nowMs, account);
+  if (stale) return stale;
 
   if (gmailImapConfigured(db) && mode !== "imap") {
     return lookupImapAccessValue(db, account, type);
@@ -5330,6 +5396,7 @@ async function lookupImapAccessValue(db, account, type) {
     const availableMailboxes = await client.list().catch(() => []);
     const mailboxes = accountAccessMailboxPaths(type, availableMailboxes);
     const hydratedMessages = [];
+    const staleMessages = [];
     const nowMs = Date.now();
     const mailboxErrors = [];
 
@@ -5358,7 +5425,10 @@ async function lookupImapAccessValue(db, account, type) {
 
           const message = imapRawToGmailMessage(raw, item.uid, item.internalDate);
           const dateMs = Number(message.internalDate || 0) || Date.parse(gmailHeader(message, "Date") || "") || 0;
-          if (!isFreshAccountAccessMessage(dateMs, nowMs, type)) continue;
+          if (!isFreshAccountAccessMessage(dateMs, nowMs, type)) {
+            staleMessages.push({ message, dateMs, mailbox });
+            continue;
+          }
           hydratedMessages.push({
             mailbox,
             dateMs,
@@ -5393,6 +5463,9 @@ async function lookupImapAccessValue(db, account, type) {
         ...extracted,
       };
     }
+
+    const stale = await staleAccessResult(type, staleMessages, nowMs, account, { mode: "imap" });
+    if (stale) return stale;
 
     if (mailboxes.length && mailboxErrors.length === mailboxes.length) {
       return { source: "gmail", mode: "imap", reason: "label_not_found", error: `Label Gmail tidak bisa dibuka: ${mailboxErrors.join("; ")}`, value: "" };

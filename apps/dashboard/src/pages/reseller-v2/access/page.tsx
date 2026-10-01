@@ -101,6 +101,30 @@ function emptyText(type: AccessTool) {
   return "Belum ada Disney OTP 4 digit untuk nomor ini.";
 }
 
+/**
+ * The code is in the mailbox, but it aged out before anyone looked.
+ *
+ * This used to render the same words as "the email has not arrived yet", which
+ * is the answer that costs the reseller a second message to the customer: they
+ * ask the customer to trigger another code, and nothing changes, because the
+ * first one is sitting in `NF_VERIF` the whole time. The remedy here is the
+ * opposite -- stop waiting, ask for a fresh code.
+ *
+ * Returns null for every other outcome, so the caller keeps one branch to
+ * reason about rather than a third string it has to keep in sync.
+ */
+function staleNotice(result: AccountAccessLookupResult) {
+  const stale = result.result.staleMessage;
+  if (!stale) return null;
+  const age = stale.ageMinutes >= 60
+    ? `${Math.floor(stale.ageMinutes / 60)} jam ${stale.ageMinutes % 60} menit lalu`
+    : `${stale.ageMinutes} menit lalu`;
+  return {
+    title: "Kode sudah masuk, tapi sudah kedaluwarsa",
+    description: `Emailnya ada di Gmail owner, dikirim ${age} — melewati jendela ${stale.windowMinutes} menit. Kode lama tidak akan bisa dipakai; minta pelanggan mengirim ulang kode, lalu tekan Cari Akun lagi.`,
+  };
+}
+
 function normalizeEmail(value = "") {
   return String(value || "").trim().toLowerCase();
 }
@@ -439,7 +463,8 @@ export default function ResellerV2AccessPage() {
     const targetLabel = lookupResult.type === "disney_otp"
       ? (lookupResult.account.loginPhone || lookupResult.account.email)
       : lookupResult.account.email;
-    const detail = lookupResult.result.error || (lookupResult.result.reason === "not_found"
+    const stale = staleNotice(lookupResult);
+    const detail = stale?.description || lookupResult.result.error || (lookupResult.result.reason === "not_found"
       ? lookupResult.type === "disney_otp"
         ? "Nomor ditemukan, tapi Disney OTP terbaru belum ada di label Gmail owner."
         : "Email ditemukan, tetapi pesan/kode terbaru belum masuk ke Gmail owner. Coba lagi setelah email diterima."
@@ -485,7 +510,7 @@ export default function ResellerV2AccessPage() {
             </div>
           ) : (
             <div className="reseller-v2-access-result-body">
-              <EmptyState title={emptyText(lookupResult.type)} description={detail} />
+              <EmptyState title={stale?.title || emptyText(lookupResult.type)} description={detail} />
             </div>
           )}
         </section>

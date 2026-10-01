@@ -431,6 +431,20 @@ export type AccountAccessLookupResult = {
     from?: string;
     date?: string;
     internalDate?: string;
+    /**
+     * Only present when `reason` is `"stale"` -- the code is in the mailbox but
+     * arrived outside the window. That is a different instruction to the
+     * reseller than "it has not arrived", so it is not folded into `not_found`.
+     */
+    staleMessage?: {
+      subject: string;
+      from: string;
+      date: string;
+      internalDate: string;
+      dateMs: number;
+      ageMinutes: number;
+      windowMinutes: number;
+    };
   };
   refreshedAt: string;
   expiresInSeconds: number | null;
