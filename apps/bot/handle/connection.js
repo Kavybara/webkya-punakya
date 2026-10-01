@@ -119,6 +119,7 @@ export function createWhatsAppConnection({ config, logger, store, plugins }) {
   let lastGroupSyncAt = "";
   let lastGroupSyncError = "";
   let lastGroupSyncCount = 0;
+  let groupSyncInFlight = false;
   let scheduledBackupTimer = null;
   let scheduledBackupRunning = false;
   let lastScheduledBackupAt = "";
@@ -478,12 +479,28 @@ export function createWhatsAppConnection({ config, logger, store, plugins }) {
     };
   }
 
-  function groupInfoFromMetadata(group = {}, fallbackJid = "") {
+  /*
+   * `includeParticipants: false` returns the same group with the roster left
+   * out. It exists because two callers want very different shapes from the same
+   * Baileys metadata:
+   *
+   *   - `getGroupInfo` / `getGroupParticipantInfo` need every member, because
+   *     they answer admin checks and the legacy group commands, and that is
+   *     answered from live metadata on demand rather than cached.
+   *   - `listJoinedGroups` runs over *every* group the bot is in, on every sync,
+   *     and used to build a full roster for each one. The dashboard threw the
+   *     roster away -- `normalizeSyncedGroup` is a whitelist with no
+   *     `participants` key -- so a 1000-member group meant 1000 phone numbers
+   *     serialised onto the wire for nothing.
+   *
+   * The count is still carried, because that is the field anyone actually reads.
+   */
+  function groupInfoFromMetadata(group = {}, fallbackJid = "", { includeParticipants = true } = {}) {
     const groupJid = normalizeGroupJid(group?.id || group?.jid || fallbackJid || "");
     if (!groupJid) return null;
     const ownerJid = String(group?.owner || group?.subjectOwner || "").trim();
     const ownerNumber = normalizeWhatsAppNumber(ownerJid.split("@")[0].split(":")[0]);
-    const participants = Array.isArray(group?.participants)
+    const participants = includeParticipants && Array.isArray(group?.participants)
       ? group.participants.map((participant) => {
           const id = String(participant?.id || participant?.jid || "").trim();
           const jid = String(participant?.jid || participant?.phoneNumber || participant?.pn || participant?.id || "").trim();
@@ -608,7 +625,7 @@ export function createWhatsAppConnection({ config, logger, store, plugins }) {
 
     const response = await sock.groupFetchAllParticipating();
     return Object.values(response || {})
-      .map((group) => groupInfoFromMetadata(group))
+      .map((group) => groupInfoFromMetadata(group, "", { includeParticipants: false }))
       .filter(Boolean);
   }
 
@@ -635,6 +652,31 @@ export function createWhatsAppConnection({ config, logger, store, plugins }) {
   }
 
   async function syncJoinedGroups(reason = "manual") {
+    /*
+     * One sync at a time.
+     *
+     * The two guards below are both skipped for any reason beginning with
+     * "manual" -- which is exactly the reason the owner-triggered endpoint uses,
+     * and the only manual caller anywhere. So two manual syncs would both pass
+     * the throttle, both pass the heavy-work pause, both fetch the group list,
+     * and both POST it. The dashboard serialises its writes, so the loser is not
+     * an error: it is a silently discarded result, and the owner's second click
+     * looks like it did nothing.
+     *
+     * A second caller is now told so rather than being allowed to race.
+     */
+    if (groupSyncInFlight) {
+      return { success: true, skipped: true, reason: "group_sync_in_flight", group_count: lastGroupSyncCount };
+    }
+    groupSyncInFlight = true;
+    try {
+      return await runGroupSync(reason);
+    } finally {
+      groupSyncInFlight = false;
+    }
+  }
+
+  async function runGroupSync(reason) {
     const lastSyncMs = lastGroupSyncAt ? new Date(lastGroupSyncAt).getTime() : 0;
     if (!String(reason || "").startsWith("manual") && lastSyncMs && Date.now() - lastSyncMs < GROUP_SYNC_MIN_INTERVAL_MS) {
       return { success: true, skipped: true, reason: "group_sync_throttled", group_count: lastGroupSyncCount };

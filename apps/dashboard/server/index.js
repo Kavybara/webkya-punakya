@@ -2373,8 +2373,14 @@ async function mergedWhatsappRentals(db, options = {}) {
     return {
       ...row,
       name: shouldUseSyncedName ? synced.name || currentName || groupJid : currentName,
+      // `members` is a fact about the group: how many people WhatsApp says are
+      // in it. `capacity` is a business fact: how many seats this owner sold.
+      // The two used to fall back to each other, which made "seats available"
+      // mirror "people in the chat" -- so a full rental looked empty and an
+      // empty one looked sold out. A sync knows the headcount and knows nothing
+      // about what was sold, so it may only write `members`.
       members: Number(row.members || synced.members || 0),
-      capacity: Number(row.capacity || synced.members || 0),
+      capacity: Number(row.capacity || 0),
       owner: row.owner || synced.owner || "",
       contact: row.contact || synced.contact || "",
       description: row.description || synced.description || "",
@@ -2571,7 +2577,10 @@ function syncWhatsappGroups(db, groups = [], source = "bot") {
     Object.assign(rental, {
       name: group.name || rental.name,
       members: group.members || rental.members || 0,
-      capacity: group.members || rental.capacity || 0,
+      // See `mergedWhatsappRentals`: capacity is what was sold, not a headcount.
+      // Overwriting it with the group's member count destroyed the owner's
+      // recorded seat allocation on every sync.
+      capacity: Number(rental.capacity || 0),
       owner: group.owner || rental.owner || "",
       contact: rental.contact || group.contact || "",
       groupJid: group.groupJid,

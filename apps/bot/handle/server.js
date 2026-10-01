@@ -1,6 +1,53 @@
 import { createServer } from "node:http";
 import { html, json, readJsonBody } from "../lib/http.js";
 
+/**
+ * A WhatsApp JID suffix that addresses a group or a broadcast list rather than
+ * one person.
+ *
+ * `/messages/send` is a generic "message any chat" primitive guarded by a single
+ * shared bearer token, with no rate limit and no allowlist on the far side. Left
+ * open to groups, it is a broadcast gun pointed at live customer groups: each
+ * send is serialised through a 750ms queue with up to six retries, so a loop
+ * drives roughly 1.3 messages a second into rooms full of customers who never
+ * asked to be in a mailing list.
+ *
+ * Nothing legitimate needs it. Every caller is the dashboard, and all six of its
+ * sends go to a person's number -- password-reset OTPs, registration OTPs, and
+ * two reseller welcome messages. Not one of them targets a group. So this is not
+ * a capability being taken away; it is a capability that was never used, made
+ * explicit so that a leaked token cannot turn it into one.
+ *
+ * `@broadcast` and `@newsletter` are the other two ways to address many people
+ * at once, and are denied for the same reason. `@s.whatsapp.net` (a person) and
+ * `@lid` (WhatsApp's privacy-preserving alias for a person) stay allowed --
+ * `@lid` is what a modern save can hand back instead of the real number, so
+ * denying it would quietly break delivery to some legitimate recipients.
+ */
+const GROUP_JID_SUFFIXES = ["@g.us", "@broadcast", "@newsletter"];
+
+function isGroupTarget(value) {
+  const target = String(value || "").trim().toLowerCase();
+  return GROUP_JID_SUFFIXES.some((suffix) => target.endsWith(suffix));
+}
+
+/**
+ * Strip member phone numbers off a group record.
+ *
+ * `/groups/sync` used to hand back the full roster of every group the bot is in,
+ * behind the same token that guards `/messages/send`. Anyone holding that token
+ * could read the complete member list of every live customer group, and the
+ * dashboard -- the only real consumer -- never called this route at all. The
+ * summary fields are all the caller needs; the roster is not in the response.
+ */
+function withoutParticipants(groups = []) {
+  return (Array.isArray(groups) ? groups : []).map((group) => {
+    if (!group || typeof group !== "object") return group;
+    const { participants, ...rest } = group;
+    return rest;
+  });
+}
+
 function isAuthorized(config, req) {
   if (!config.token) {
     return false;
@@ -44,6 +91,12 @@ export function createHttpServer({ config, connection }) {
 
         if (!to || (!text && !imageUrl && !mediaPath && !documentPath)) {
           return json(res, 400, { success: false, error: "to_and_text_required" });
+        }
+
+        // Group and broadcast targets are refused here rather than further down,
+        // so nothing downstream has to be trusted to remember the rule.
+        if (isGroupTarget(to)) {
+          return json(res, 400, { success: false, error: "group_target_not_allowed" });
         }
 
         const sentMessage = await connection.sendMessage(to, text, imageUrl, mediaPath, documentPath, fileName);
@@ -111,7 +164,9 @@ export function createHttpServer({ config, connection }) {
     if (pathname === "/groups/sync" && method === "POST") {
       try {
         const result = await connection.syncJoinedGroups("manual-owner-sync");
-        return json(res, 200, result);
+        // The roster comes back in `result.groups` and is stripped before it
+        // leaves the process -- see `withoutParticipants`.
+        return json(res, 200, { ...result, groups: withoutParticipants(result?.groups) });
       } catch (error) {
         return json(res, 500, {
           success: false,
