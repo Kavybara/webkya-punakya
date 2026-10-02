@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { MessageSquareWarning, Plus, RefreshCw, ShieldCheck } from "lucide-react";
 import { DataTable, type DataColumn, type DataFilter } from "../../../components/ui/DataTable";
 import { ConsoleShell } from "../../../components/console/ConsoleShell";
@@ -56,20 +57,6 @@ function formatReviewDuration(minutes = 0) {
 }
 
 type PreparedEvidence = { name: string; mimeType: string; dataUrl: string; size: number };
-
-/*
- * What the owner selected, and what became of it.
- *
- * `claims` is frozen at click time rather than read back from the table on
- * confirm. The table can re-sort, re-page and re-filter underneath an open
- * dialog, so reading the live selection later would act on whatever the table
- * happened to be showing by then -- not what was ticked.
- */
-type BulkSheetRetry = {
-  claims: WarrantyClaim[];
-  clearSelection: () => void;
-  result: { synced: number; failed: { id: string; reason: string }[]; skipped: string[] } | null;
-};
 
 function fileAsDataUrl(file: Blob) {
   return new Promise<string>((resolve, reject) => {
@@ -129,8 +116,6 @@ export default function OwnerConsoleWarrantyPage() {
   const [busy, setBusy] = useState(false);
   const [candidateLoading, setCandidateLoading] = useState(false);
   const [confirmReplace, setConfirmReplace] = useState(false);
-  const [bulk, setBulk] = useState<BulkSheetRetry | null>(null);
-  const [bulkBusy, setBulkBusy] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
   const [manualOptions, setManualOptions] = useState<WarrantyManualClaimOption[]>([]);
   const [manualLoading, setManualLoading] = useState(false);
@@ -146,6 +131,7 @@ export default function OwnerConsoleWarrantyPage() {
   const actionLockRef = useRef(false);
   const claimRequestRef = useRef(0);
   const [candidateError, setCandidateError] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
   const clearMessage = useCallback(() => setMessage(""), []);
 
   const load = useCallback(async () => {
@@ -163,6 +149,48 @@ export default function OwnerConsoleWarrantyPage() {
   }, []);
 
   useEffect(() => { load().catch(() => undefined); }, [load]);
+
+  /*
+   * The link the notification sends, made to work.
+   *
+   * When a reseller files a claim, the owner gets a WhatsApp message ending in
+   * `Buka Warranty Center <url>?claim=<id>` -- built by `warranty-service.js` for
+   * both the claim-created and claim-updated messages. This page never read it.
+   * The owner followed the one instruction the notification gave, landed here,
+   * and found the front of the queue: the claim that had just arrived, in a
+   * table, unselected, behind a click they had already made once.
+   *
+   * Two details that are the whole difference between working and not:
+   *
+   * `if (loading) return;` -- the claims arrive from the network. An effect that
+   * fires on first render finds an empty array and opens nothing, which looks
+   * identical to the original bug and would have passed a weaker test.
+   *
+   * And the parameter is cleared afterwards. Left in the URL it re-fires on
+   * every later change to `claims` -- a refresh, a status save that re-fetches
+   * the list -- dragging the owner back into a claim they had already closed.
+   */
+  useEffect(() => {
+    const claimId = searchParams.get("claim");
+    if (!claimId) return;
+    if (loading) return;
+    const claim = claims.find((row) => row.id === claimId);
+    if (!claim) {
+      setError(`Klaim ${claimId} tidak ditemukan di antrean ini.`);
+      const next = new URLSearchParams(searchParams);
+      next.delete("claim");
+      setSearchParams(next, { replace: true });
+      return;
+    }
+    openClaim(claim);
+    const next = new URLSearchParams(searchParams);
+    next.delete("claim");
+    setSearchParams(next, { replace: true });
+    // `openClaim` is not stable across renders, so it is intentionally left out
+    // rather than wrapped: depending on it here would re-open the claim on every
+    // render. `claims` and the param are the actual triggers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claims, loading, searchParams]);
 
   /*
    * One claim open at a time, even if the fetches disagree about arrival order.
@@ -477,73 +505,6 @@ export default function OwnerConsoleWarrantyPage() {
     }
   }
 
-  /*
-   * Retry the Google Sheets stock-review sync for every claim the owner ticked.
-   *
-   * This is the per-row "Coba Sync Ulang" button's endpoint, run over a
-   * selection. It is the bulk action on this page rather than the notification
-   * retry two handlers above because it writes spreadsheet cells and nothing
-   * else -- `retry-stock-review-sync` calls `syncWarrantyStockReviewToGoogleSheets`
-   * and `updateDb`, and sends no message to anybody. A claim queue accumulates
-   * these in batches the same way it accumulates notification failures, so the
-   * twenty-click version of the job is a real job.
-   *
-   * It still confirms first, because the write is not inert: a successful sync
-   * clears `warrantyReviewBlocked` on every stock row the claim touched, which
-   * is what puts that stock back into circulation. That is the intended
-   * outcome and it is also irreversible from here -- there is no bulk "block it
-   * again" -- so the owner is told what they are about to release.
-   *
-   * The lock is `actionLockRef`, the same one every sibling handler takes, for
-   * the reason the long comment above those handlers gives: `busy` is React
-   * state and does not change until a render lands, so the disabled button is
-   * not what stops a second click. The stakes are lower than the notification
-   * retry's -- a double-fire here is redundant sheet writes, not duplicate
-   * messages to customers -- but the shape is identical and the lock is free.
-   *
-   * Sequential. These are real writes through one Sheets client, and "3 of 20
-   * failed" is only actionable if the run can say which three and why.
-   */
-  async function runBulkSheetRetry() {
-    if (!bulk || actionLockRef.current) return;
-    const clearSelection = bulk.clearSelection;
-    setBulkBusy(true);
-    actionLockRef.current = true;
-    setActionError("");
-    const failed: { id: string; reason: string }[] = [];
-    const skipped: string[] = [];
-    let synced = 0;
-    for (const claim of bulk.claims) {
-      // The endpoint 404s on anything that never triggered a review. Separating
-      // those out here keeps them out of the failure count, so "4 synced, 0
-      // failed" never hides the four the endpoint refused.
-      if (!claim.stockReviewTriggered || !claim.stockReviewStockIds?.length) {
-        skipped.push(claim.id);
-        continue;
-      }
-      try {
-        await api.retryWarrantyStockReviewSync(claim.id);
-        synced += 1;
-      } catch (cause) {
-        failed.push({ id: claim.id, reason: cause instanceof Error ? cause.message : "sinkronisasi gagal" });
-      }
-    }
-    setBulk((current) => current && { ...current, result: { synced, failed, skipped } });
-    clearSelection();
-    await load();
-    actionLockRef.current = false;
-    setBulkBusy(false);
-  }
-
-  /*
-   * The same guard the endpoint applies, so the count shown before confirming
-   * is the count that will actually be written. A selection the endpoint would
-   * 404 on every row of reports "0 synced, 8 failed" and teaches nothing.
-   */
-  const bulkEligible = bulk
-    ? bulk.claims.filter((claim) => claim.stockReviewTriggered && Boolean(claim.stockReviewStockIds?.length))
-    : [];
-
   const columns = useMemo<Array<DataColumn<WarrantyClaim>>>(() => [
     { id: "claim", header: "Klaim", value: (row) => row.id, sortable: true, cell: (row) => <span className="console-product-cell"><strong>{row.id}</strong><small>{formatDateTimeFull(row.createdAt)}</small></span> },
     { id: "reseller", header: "Reseller", value: (row) => row.resellerName || row.resellerId || "-", sortable: true, cell: (row) => <span className="console-product-cell"><strong>{row.resellerName || row.resellerId || "-"}</strong><small>{row.accountIdentity || "Identitas dimasking"}</small></span> },
@@ -591,12 +552,7 @@ export default function OwnerConsoleWarrantyPage() {
     <Toast message={message} onClose={clearMessage} />
     <section className="console-panel">
       <div className="console-panel-header"><div><span>Warranty Center</span><h2>{claimView === "active" ? "Antrean klaim aktif" : "Riwayat klaim"}</h2></div><div className="console-panel-toolbar-actions"><button type="button" aria-pressed={claimView === "active"} onClick={() => setClaimView("active")}>Antrean Aktif ({activeClaims.length})</button><button type="button" aria-pressed={claimView === "history"} onClick={() => setClaimView("history")}>Riwayat ({historyClaims.length})</button><button type="button" onClick={() => openManualClaim().catch(() => undefined)}><Plus size={15} /> Tambah klaim manual</button><button type="button" onClick={load}><RefreshCw size={15} /> Perbarui</button></div></div>
-      <DataTable rows={visibleClaims} columns={columns} filters={filters} rowKey={(row) => row.id} loading={loading} error={error} emptyText={claimView === "active" ? "Tidak ada klaim yang perlu ditangani." : "Belum ada riwayat klaim selesai."} initialPageSize={10} bulkAction={{
-        label: "Sinkronkan ulang ke Google Sheets",
-        hint: "Hanya klaim yang pernah memicu pemeriksaan stok. Menjalankan sinkronisasi melepas blokir stok yang sudah diperiksa.",
-        busy: bulkBusy,
-        onClick: (claims, clearSelection) => { setActionError(""); setBulk({ claims, clearSelection, result: null }); },
-      }} />
+      <DataTable rows={visibleClaims} columns={columns} filters={filters} rowKey={(row) => row.id} loading={loading} error={error} emptyText={claimView === "active" ? "Tidak ada klaim yang perlu ditangani." : "Belum ada riwayat klaim selesai."} initialPageSize={10} />
     </section>
 
     {manualOpen ? <Dialog open title="Tambah klaim manual" eyebrow="Dari WhatsApp reseller" onClose={closeManualClaim} wide footer={<DialogActions onCancel={closeManualClaim} onConfirm={() => submitManualClaim().catch(() => undefined)} confirmLabel="Buat klaim" busy={busy || manualLoading || manualEvidenceBusy} />}>
@@ -717,23 +673,6 @@ export default function OwnerConsoleWarrantyPage() {
     {selected && confirmReplace ? <Dialog open title="Konfirmasi penggantian" eyebrow={selected.id} onClose={() => setConfirmReplace(false)} footer={<DialogActions onCancel={() => setConfirmReplace(false)} onConfirm={executeReplacement} confirmLabel="Ya, ganti akun" busy={busy} danger />}>
       {actionError ? <Notice tone="danger">{actionError}</Notice> : null}
       <Notice tone="danger">Akun lama akan ditandai REPLACED dan tidak dikembalikan ke stok. Akun baru memakai order, reseller, serta tanggal berakhir yang sama. Tindakan ini tercatat dan tidak dapat memilih stok kedua setelah selesai.</Notice>
-    </Dialog> : null}
-
-    {/*
-      * Two states in one dialog, because the second answers the first. The
-      * claim list the owner selected stays on screen next to what happened to
-      * each one; a toast would leave them re-opening twenty claims to find out
-      * which three failed.
-      */}
-    {bulk ? <Dialog open title="Sinkronkan ulang ke Google Sheets" eyebrow={`${bulk.claims.length} klaim dipilih`} onClose={() => { if (!bulkBusy) setBulk(null); }} footer={bulk.result ? <div className="ui-dialog-actions"><button type="button" onClick={() => setBulk(null)}>Tutup</button></div> : <DialogActions onCancel={() => setBulk(null)} onConfirm={() => runBulkSheetRetry().catch(() => undefined)} confirmLabel={`Sinkronkan ${bulkEligible.length} klaim`} busy={bulkBusy} />}>
-      {bulk.result ? <>
-        <Notice tone={bulk.result.failed.length ? "warning" : "success"}>{bulk.result.synced} dari {bulkEligible.length} klaim berhasil disinkronkan ke Google Sheets.</Notice>
-        {bulk.result.failed.length ? <div className="mt-4"><Notice tone="danger">Gagal disinkronkan:{bulk.result.failed.map((item) => ` ${item.id} (${item.reason})`).join(";")}. Buka klaim satu per satu untuk mencoba lagi.</Notice></div> : null}
-        {bulk.result.skipped.length ? <div className="mt-4"><Notice>{bulk.result.skipped.length} klaim dilewati karena tidak pernah memicu pemeriksaan stok: {bulk.result.skipped.join(", ")}.</Notice></div> : null}
-      </> : <>
-        <Notice>Konfirmasi sinkronkan menulis ulang kolom kondisi di Google Sheets untuk stok yang diperiksa klaim terpilih. Tidak ada pesan yang dikirim ke reseller.</Notice>
-        <p className="mt-4 text-sm leading-6 text-[var(--text-muted)]">{bulkEligible.length} dari {bulk.claims.length} klaim terpilih akan disinkronkan. {bulk.claims.length - bulkEligible.length ? `${bulk.claims.length - bulkEligible.length} klaim lain dilewati karena tidak pernah memicu pemeriksaan stok. ` : ""}Stok yang sinkronnya berhasil akan lepas dari blokir dan kembali bisa dijual. Pemrosesan berjalan satu per satu.</p>
-      </>}
     </Dialog> : null}
   </ConsoleShell>;
 }

@@ -85,9 +85,19 @@ export function registerWhatsAppRoutes(app, deps) {
     res.json(await getWhatsAppBotStatus(db));
   });
 
+  /*
+   * `includeExpired` on purpose.
+   *
+   * The WhatsApp page counts ended rentals off this list -- its "Expired"
+   * metric is a filter over the response. Without this flag `mergedWhatsappRentals`
+   * drops every row whose `daysLeft` has run out, so that metric was counting
+   * rows from a list that had already had them removed and could only ever read
+   * zero. Every other caller here (the cron, the price-sync preview, bootstrap)
+   * already asked for expired rows; the listing is what the owner reads.
+   */
   app.get("/api/whatsapp/rentals", requireAuth(["owner"]), async (_req, res) => {
     const db = await readDb();
-    res.json(await mergedWhatsappRentals(db));
+    res.json(await mergedWhatsappRentals(db, { includeExpired: true }));
   });
 
   app.get("/api/whatsapp/rentals/:id/price-sync/preview", requireAuth(["owner"]), async (req, res, next) => {
