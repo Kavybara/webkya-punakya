@@ -509,6 +509,7 @@ export default function ResellerV2OrdersPage() {
                         <dt>Password / link</dt>
                         <dd>
                           <SensitiveValue
+                            kind="secret"
                             value={account.password || account.canvaLink || "-"}
                             concealAfterMs={REVEAL_AFTER_MS}
                           />
@@ -521,7 +522,7 @@ export default function ResellerV2OrdersPage() {
                       <div>
                         <dt>PIN</dt>
                         <dd>
-                          <SensitiveValue value={account.pin || "-"} concealAfterMs={REVEAL_AFTER_MS} />
+                          <SensitiveValue kind="secret" value={account.pin || "-"} concealAfterMs={REVEAL_AFTER_MS} />
                         </dd>
                       </div>
                       <div>

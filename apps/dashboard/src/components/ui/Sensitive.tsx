@@ -9,6 +9,18 @@ import { Check, CircleAlert, Copy, Eye, EyeOff } from "lucide-react";
  * single place in the product where a credential is deliberately on screen was
  * also the one place it was on screen permanently and in a shoulder-surfable
  * row. Revealing here is a deliberate act, and the reveal expires.
+ *
+ * `kind` decides what "masked" means, because the two are opposites. An identity
+ * -- an email, a login phone -- is shown partially on purpose: the reader has to
+ * recognise *which* account it is, and the tail is often how people tell two
+ * of their own accounts apart. A secret has no such job. Revealing the last
+ * three characters of a password tells the reader nothing useful and hands over
+ * most of the answer, so a secret shows no characters at all.
+ *
+ * Every caller used the identity mask for both, which meant a masked password
+ * still displayed its first and last three digits -- for a purely numeric
+ * seven-character password, six of its seven characters. The row read
+ * "masked" while being nearly readable.
  */
 export function maskIdentity(value = "") {
   const clean = String(value || "").trim();
@@ -25,6 +37,13 @@ export function maskIdentity(value = "") {
   return `${clean.slice(0, 2)}${"*".repeat(Math.max(3, clean.length - 2))}`;
 }
 
+/**
+ * Masks a secret, showing nothing of it by default.
+ *
+ * The count of asterisks is the value's length, so a short PIN and a long
+ * password are distinguishable by shape without either being readable -- which
+ * is the only thing a masked secret is allowed to give away.
+ */
 export function maskSecret(value = "", visibleHead = 0, visibleTail = 0) {
   const clean = String(value || "").trim();
   if (!clean) return "-";
@@ -34,7 +53,7 @@ export function maskSecret(value = "", visibleHead = 0, visibleTail = 0) {
 
 const REVEAL_AFTER_MS = 15000;
 
-export function SensitiveValue({ value, concealAfterMs = REVEAL_AFTER_MS }: { value: string; concealAfterMs?: number }) {
+export function SensitiveValue({ value, kind = "identity", concealAfterMs = REVEAL_AFTER_MS }: { value: string; kind?: "identity" | "secret"; concealAfterMs?: number }) {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -43,9 +62,11 @@ export function SensitiveValue({ value, concealAfterMs = REVEAL_AFTER_MS }: { va
     return () => window.clearTimeout(timer);
   }, [concealAfterMs, visible]);
 
+  const masked = kind === "secret" ? maskSecret(value) : maskIdentity(value);
+
   return (
     <span className="ui-sensitive">
-      <code>{visible ? value : maskIdentity(value)}</code>
+      <code>{visible ? value : masked}</code>
       <button type="button" onClick={() => setVisible((current) => !current)} aria-label={visible ? "Sembunyikan nilai" : "Tampilkan nilai"}>
         {visible ? <EyeOff size={16} /> : <Eye size={16} />}
       </button>

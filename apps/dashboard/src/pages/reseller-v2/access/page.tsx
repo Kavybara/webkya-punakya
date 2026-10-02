@@ -253,13 +253,20 @@ function groupDescription(group: AccountGroup, source: AccessSource) {
   return profileCount > 1 ? `${base} - ${profileCount} profil` : base;
 }
 
-/** A code the reseller can read for fifteen seconds and then has to ask for again. */
+/**
+ * A code the reseller can read for fifteen seconds and then has to ask for again.
+ *
+ * These are the sign-in codes, verification codes and OTPs -- short and numeric,
+ * which is the exact shape `maskIdentity` masks worst, showing two of a four
+ * digit OTP. A code that is two-thirds legible is not masked, so it is masked as
+ * a secret instead: no characters at all until it is deliberately revealed.
+ */
 function CodeValue({ label, value }: { label: string; value: string }) {
   return (
     <div className="reseller-v2-access-value">
       <div>
         <p>{label}</p>
-        <SensitiveValue value={value} />
+        <SensitiveValue kind="secret" value={value} />
       </div>
       <CopyButton value={value} />
     </div>
