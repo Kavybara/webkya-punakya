@@ -133,8 +133,8 @@ export type RevenueSummary = {
   changePercent: number | null;
   week: number;
   weekOrders: number;
+  /** Live orders still awaiting payment. Excludes smoke tests. */
   pending: number;
-  failed: number;
   /**
    * Mean of the paid orders *inside the same window* as `week` and `weekOrders`.
    *
@@ -175,6 +175,18 @@ export function summariseRevenue(series: RevenuePoint[], orders: ApiOrder[]): Re
     : [];
   const todayPaid = todayOrders.filter((order) => isPaid(order)).length;
 
+  // Live orders only, computed once. Both numbers below are read by the owner as
+  // real business state, so neither may include a test order.
+  //
+  // `pending` in particular was counting smoke tests. The owner's own smoke test
+  // is always paid (it is created as manual), so it never leaked here -- but an
+  // order placed by a smoke-test *reseller* is created with `qrisStatus:
+  // "pending"` and `excludeFromSalesMetrics: true`, which is exactly the shape
+  // this filter accepted. The owner's smoke-test orders therefore showed up as
+  // customers waiting to pay, next to the paid figures that had deliberately
+  // excluded them.
+  const liveOrders = orders.filter((order) => !isSmokeTest(order));
+
   return {
     today,
     todayOrders: todayOrders.length,
@@ -184,8 +196,7 @@ export function summariseRevenue(series: RevenuePoint[], orders: ApiOrder[]): Re
     changePercent: !previous || previous.revenue === 0 ? null : ((today - previous.revenue) / previous.revenue) * 100,
     week,
     weekOrders,
-    pending: orders.filter((order) => order.qrisStatus === "pending").length,
-    failed: orders.filter((order) => order.deliveryStatus === "failed").length,
+    pending: liveOrders.filter((order) => order.qrisStatus === "pending").length,
     paidOrders: weekOrders,
     // week / weekOrders, so the mean, the order count, and the week total in the
     // same row are one set of numbers. See RevenueSummary.averageOrderValue.

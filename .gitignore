@@ -47,6 +47,10 @@ kavya-pterodactyl-linux-latest.tar.gz
 smoke-*.log
 reports/stock-id-backfill-*
 
+# Transpiled TypeScript emitted by the server test suite at run time. The suite
+# removes it on exit, but a hard crash mid-run would leave it untracked.
+apps/dashboard/server/.compiled-tests/
+
 # OS/editor noise
 .DS_Store
 *.tsbuildinfo
