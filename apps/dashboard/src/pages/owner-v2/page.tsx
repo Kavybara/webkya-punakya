@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { Badge, Bento, BentoCell, BentoStat, DetailRow, Toast } from "../../components/ui";
 import { DataTable, type DataColumn, type DataFilter } from "../../components/ui/DataTable";
 import { ConsoleShell } from "../../components/console/ConsoleShell";
-import { api, subscribeRealtime, type ApiOrder, type ApiReseller, type ApiStockItem, type OperationsCenterResult, type SystemStatus } from "../../lib/api";
+import { api, subscribeRealtime, type ApiOrder, type ApiStockItem, type OperationsCenterResult, type SystemStatus } from "../../lib/api";
 import type { Product } from "../../lib/types";
 import { formatRupiah } from "../../lib/format";
 import { formatDateTime } from "../../lib/format";
@@ -33,13 +33,12 @@ import {
 type OverviewData = {
   orders: ApiOrder[];
   stock: ApiStockItem[];
-  resellers: ApiReseller[];
   products: Product[];
   operations: OperationsCenterResult | null;
   system: SystemStatus | null;
 };
 
-const emptyData: OverviewData = { orders: [], stock: [], resellers: [], products: [], operations: null, system: null };
+const emptyData: OverviewData = { orders: [], stock: [], products: [], operations: null, system: null };
 
 const REVENUE_DAYS = 7;
 const TOP_PRODUCT_LIMIT = 5;
@@ -83,14 +82,21 @@ export default function OwnerConsoleOverviewPage() {
 
   const loadData = useCallback(async (manual = false) => {
     manual ? setRefreshing(true) : setLoading(true);
-    // Six parallel calls, and none of them waits on another. The previous
+    // Five parallel calls, and none of them waits on another. The previous
     // version fanned out to five in sequence-aware batches and took visibly
     // longer to settle; these are independent reads, so the only cost is
     // connection concurrency. `products` is here to turn stock's bare
     // `productId` into a name -- the stock rows carry no display name, so
     // without it the low-stock list would be a column of ids.
-    const results = await Promise.allSettled([api.orders(), api.stock(), api.resellers(), api.products(), api.operationsCenter(), api.systemStatus()]);
-    const keys = ["orders", "stock", "resellers", "products", "operations", "system"] as const;
+    //
+    // The reseller-list request used to be here, feeding an active-reseller count
+    // that was computed and never rendered. It was not free: this runs
+    // again on every realtime event, and its failure mode was invisible,
+    // because no panel read its error key -- so a list that stopped loading
+    // left the page reporting "Ringkasan berhasil diperbarui". The reseller
+    // figures here all come from `operations`, which is still fetched.
+    const results = await Promise.allSettled([api.orders(), api.stock(), api.products(), api.operationsCenter(), api.systemStatus()]);
+    const keys = ["orders", "stock", "products", "operations", "system"] as const;
     const nextErrors: Record<string, string> = {};
     setData((current) => {
       const next = { ...current };
@@ -132,7 +138,6 @@ export default function OwnerConsoleOverviewPage() {
   const products = useMemo(() => topProducts(data.orders, TOP_PRODUCT_LIMIT), [data.orders]);
   const services = useMemo(() => serviceRows(data.system), [data.system]);
   const warnings = useMemo(() => systemWarnings(data.system), [data.system]);
-  const activeResellers = useMemo(() => data.resellers.filter((item) => item.isActive !== false).length, [data.resellers]);
   const recentOrders = useMemo(
     () =>
       data.orders

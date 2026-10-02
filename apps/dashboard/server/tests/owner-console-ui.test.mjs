@@ -39,6 +39,36 @@ test("Owner Console Overview excludes credential-bearing account APIs and fields
   assert.match(overview, /Password, OTP, PIN, token, dan kredensial akun tidak ditampilkan/);
 });
 
+test("Owner Console Overview fetches only what it renders", async () => {
+  const overview = await source("pages/owner-v2/page.tsx");
+
+  // Every api call this page makes has to be for a figure it actually shows.
+  // The reseller-list fetch fed an `activeResellers` count that was computed and
+  // never rendered, and since no panel read its error key its failure was
+  // invisible -- the page reported "Ringkasan berhasil diperbarui" while the
+  // request it never used had been failing all along. It also re-ran on every
+  // realtime event.
+  //
+  // The reseller figures on the overview come from `operations`, which is still
+  // fetched, so nothing was lost. Asserting the absence is what keeps a fetch
+  // from being reintroduced for a number nobody sees. The pattern is built from
+  // parts so this comment does not match the assertion testing it.
+  assert.doesNotMatch(
+    overview,
+    new RegExp(`api\\.${"resellers"}\\(`),
+    "the overview fetches the reseller list again; check that whatever consumes it is rendered",
+  );
+  assert.doesNotMatch(overview, /activeResellers/, "a computed count with no render site came back");
+  assert.doesNotMatch(overview, /resellers: ApiReseller\[\]/, "the dead resellers field is back in OverviewData");
+
+  // The five that remain must still be fetched, or this test passes on a page
+  // that renders nothing at all.
+  for (const call of ["orders", "stock", "products", "operationsCenter", "systemStatus"]) {
+    assert.match(overview, new RegExp(`api\\.${call}\\(`), `api.${call}() is missing from the overview`);
+  }
+  assert.doesNotMatch(overview, /errors\.resellers/, "nothing renders this key, so a failure would be silent");
+});
+
 test("Owner Console navigation uses v2 destinations without legacy links", async () => {
   const navigation = await source("components/console/navigation.ts");
   assert.match(navigation, /path: "\/owner-v2\/orders"/);
