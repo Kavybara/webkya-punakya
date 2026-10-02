@@ -203,6 +203,21 @@
 /* A centred modal. The drawer below is the same panel pushed to the edge. */
 .ui-overlay {
   position: fixed;
+  /*
+   * The four insets, explicitly. Without them a `position: fixed` box with all
+   * four sides `auto` keeps its static position and sizes to its content -- so
+   * the scrim covered only the dialog's own rectangle, and the dialog centred
+   * inside that rectangle instead of inside the viewport. Measured on the
+   * warranty page: the overlay was 1152x442 at (288, 651) in a 1440x900
+   * window, so a dialog opened low on a long page looked correct and the same
+   * dialog anywhere else sat half off-screen. The drawer inherited the same
+   * static offset.
+   *
+   * `inset: 0` is what makes this a scrim rather than a box. Pinned by
+   * `ui-kit.test.mjs`, because a rule this load-bearing is one careless
+   * "tidy up" away from coming back.
+   */
+  inset: 0;
   z-index: 90;
   display: grid;
   padding: 24px;

@@ -132,6 +132,41 @@ test("the empty state does not claim success or failure", async () => {
 });
 
 /**
+ * The overlay must cover the viewport.
+ *
+ * `.ui-overlay` is the scrim behind every dialog, every drawer and the command
+ * palette, and it was `position: fixed` with all four sides left `auto`. That
+ * combination does not do the obvious thing: the box keeps its static position
+ * in the flow and sizes to its content. So the scrim covered only the dialog's
+ * own rectangle, and `place-items: center` centred the panel inside that
+ * rectangle rather than inside the viewport.
+ *
+ * It survived because it is position-dependent. Measured on the warranty page
+ * at 1440x900, the overlay was 1152x442 at (288, 651) -- which put the dialog
+ * in roughly the right place on that page, and half off-screen anywhere else.
+ * A drawer took the same static offset. This is the kind of defect that reads
+ * as "fine" in every screenshot taken on the page it was noticed on.
+ */
+test("the overlay scrim covers the viewport instead of sizing to its content", async () => {
+  const { css } = await kit();
+  const rule = css.slice(css.indexOf(".ui-overlay {"), css.indexOf(".ui-overlay:has"));
+  assert.ok(rule.length > 0, "the overlay rule is missing from the kit stylesheet");
+  assert.match(rule, /position:\s*fixed/, "the overlay must be taken out of the flow");
+  // The load-bearing line. `inset: 0` (or the four longhands) is what makes a
+  // fixed box cover the viewport rather than shrink-wrap its contents.
+  const coversViewport = /\binset:\s*0\s*;/.test(rule)
+    || ["top", "right", "bottom", "left"].every((side) => new RegExp(`\\b${side}:\\s*0`).test(rule));
+  assert.ok(
+    coversViewport,
+    ".ui-overlay is fixed with no insets, so it shrink-wraps its content and the dialog centres on itself rather than on the viewport",
+  );
+  // And it must stay a scrim rather than a transparent full-screen sheet --
+  // a full-viewport box with no background would swallow every click on the
+  // page behind without showing that anything is blocked.
+  assert.match(rule, /background:/, "the overlay must paint a backdrop");
+});
+
+/**
  * The frame must stay one frame.
  *
  * There were two, 79% identical, and they drifted: the owner console had a
