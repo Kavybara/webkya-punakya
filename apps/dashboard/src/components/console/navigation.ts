@@ -1,6 +1,7 @@
 import type { AppShellNavGroup, AppShellNavItem } from "../ui";
 import {
   Boxes,
+  CalendarDays,
   CircleGauge,
   HeartPulse,
   KeyRound,
@@ -47,7 +48,8 @@ export const consoleNavigation: ConsoleNavigationGroup[] = [
     items: [
       { label: "Antrean Kerja", path: "/owner-v2/operations", icon: ListChecks },
       { label: "Health Center", path: "/owner-v2/health", icon: HeartPulse },
-      { label: "WhatsApp", path: "/owner-v2/whatsapp", icon: MessageCircle },
+      { label: "WhatsApp Bot", path: "/owner-v2/whatsapp", icon: MessageCircle },
+      { label: "Rental", path: "/owner-v2/rental", icon: CalendarDays },
     ],
   },
   {

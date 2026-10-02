@@ -310,14 +310,17 @@ test("public store aliases reach the live catalog instead of the not-found page"
 });
 
 test("Owner Console rental form only asks for owner-facing rental fields", async () => {
-  const whatsapp = await source("pages/owner-v2/whatsapp/page.tsx");
-  assert.match(whatsapp, /label="Link grup"/);
-  assert.match(whatsapp, /label="Nama owner"/);
-  assert.match(whatsapp, /label="Nomor owner"/);
-  assert.match(whatsapp, /label="Mulai"/);
-  assert.match(whatsapp, /label="Berakhir"/);
-  assert.doesNotMatch(whatsapp, /label="Group JID"/);
-  assert.doesNotMatch(whatsapp, /label="Harga bulanan"/);
+  // Rentals live on their own page now. The assertion is unchanged -- the form
+  // still must not ask the owner for the two fields the bot fills in itself --
+  // only the path it lives at moved.
+  const rental = await source("pages/owner-v2/rental/page.tsx");
+  assert.match(rental, /label="Link grup"/);
+  assert.match(rental, /label="Nama owner"/);
+  assert.match(rental, /label="Nomor owner"/);
+  assert.match(rental, /label="Mulai"/);
+  assert.match(rental, /label="Berakhir"/);
+  assert.doesNotMatch(rental, /label="Group JID"/);
+  assert.doesNotMatch(rental, /label="Harga bulanan"/);
 });
 
 test("delivery audit separates historical delivery evidence from active double-drop signals", async () => {

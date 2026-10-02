@@ -90,7 +90,7 @@ export function buildOwnerNotifications({
       severity: expired ? "danger" : "warning",
       title: expired ? "Rental sudah berakhir" : "Rental hampir berakhir",
       detail: `${rental.name || "Grup WhatsApp"} / ${expired ? "0 hari tersisa" : `${daysLeft} hari tersisa`}`,
-      href: "/owner-v2/whatsapp",
+      href: "/owner-v2/rental",
       createdAt: rental.endsAt || rental.startedAt || "",
     });
   }
