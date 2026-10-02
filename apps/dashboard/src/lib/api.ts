@@ -1357,7 +1357,7 @@ export const api = {
     return request<ApiAccount>(`/accounts/${encodeURIComponent(id)}`, { method: "PUT", body: payload });
   },
   deleteAccount(id: string, payload?: { password?: string }) {
-    return request<{ ok: boolean; returned?: number; archived?: boolean; accounts?: ApiAccount[]; stocks?: ApiStockItem[]; sheets?: Record<string, unknown>; credentialSync?: Record<string, unknown> }>(
+    return request<{ ok: boolean; returned?: number; archived?: boolean; accounts?: ApiAccount[]; stocks?: ApiStockItem[]; sheets?: { ok?: boolean; skipped?: boolean; error?: string }; credentialSync?: Record<string, unknown> }>(
       `/accounts/${encodeURIComponent(id)}`,
       { method: "DELETE", body: payload },
     );

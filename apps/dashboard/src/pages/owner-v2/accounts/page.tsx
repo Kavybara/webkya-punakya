@@ -11,6 +11,25 @@ type AccountForm = { stockId: string; product: string; variant: string; email: s
 type AccountAction = { type: "delete"; account: ApiAccount } | null;
 
 /**
+ * Whether the delete endpoint can do anything for this row.
+ *
+ * The same test the server applies, so the button and the endpoint agree.
+ * `isNetflixManagedAccount` on the server matches on the product name, and
+ * Netflix falls through to the refusal at the end of that branch -- every
+ * Netflix row, always. So for a Netflix account the button does not delete; it
+ * raises a 400. Offering it, under a dialog that said "akun akan dihapus", was
+ * the old behaviour.
+ */
+function isSheetOwned(row: ApiAccount) {
+  return [row.product, row.variant].join(" ").toLowerCase().includes("netflix");
+}
+
+function canDelete(row: ApiAccount) {
+  if (isSheetOwned(row)) return false;
+  return ["expired", "replaced", "disabled"].includes(String(row.status || "").toLowerCase());
+}
+
+/**
  * The fields worth copying, and whether each one is worth hiding by default.
  *
  * `canvaLink` is in the same list as the password because it is the same kind of
@@ -134,7 +153,32 @@ export default function OwnerConsoleAccountsPage() {
       setAudit({ account: row, loading: false, error: reason });
     }
   }
-  async function executeAction() { if (!action) return; setFormError(""); setBusy(true); try { await api.deleteAccount(action.account.id); setAction(null); setMessage("Akun dihapus melalui flow aman."); await load(); } catch (cause) { setFormError(cause instanceof Error ? cause.message : "Tindakan akun gagal."); } finally { setBusy(false); } }
+  /*
+   * Two facts the old success message did not carry: that the row is archived
+   * rather than erased, and that clearing it in Google Sheets is a second step
+   * which can fail on its own. The endpoint answers with both, so the message
+   * says what actually happened instead of "dihapus melalui flow aman".
+   */
+  async function executeAction() {
+    if (!action) return;
+    const target = action.account;
+    setFormError("");
+    setBusy(true);
+    try {
+      const result = await api.deleteAccount(target.id);
+      setAction(null);
+      setMessage(
+        result?.sheets?.ok
+          ? `${target.email || target.loginPhone || target.id} diarsipkan dan row-nya dikosongkan di Google Sheets.`
+          : `${target.email || target.loginPhone || target.id} diarsipkan, tapi row-nya di Google Sheets belum berhasil dikosongkan. Periksa sinkronisasi.`,
+      );
+      await load();
+    } catch (cause) {
+      setFormError(cause instanceof Error ? cause.message : "Tindakan akun gagal.");
+    } finally {
+      setBusy(false);
+    }
+  }
   const columns = useMemo<Array<DataColumn<ApiAccount>>>(() => [
     { id: "identity", header: "Identitas", value: (row) => row.email || row.loginPhone || "-", sortable: true, cell: (row) => <span className="console-product-cell"><strong>{row.email || row.loginPhone || "-"}</strong><small>{row.profile || "Tanpa profil"}</small></span> },
     { id: "owner", header: "Reseller", value: (row) => row.reseller || row.resellerId || "-", sortable: true, cell: (row) => <span className="console-product-cell"><strong>{row.reseller || "-"}</strong><small>{row.buyer || "Tanpa buyer"}</small></span> },
@@ -176,6 +220,11 @@ export default function OwnerConsoleAccountsPage() {
       </> : null}
     </Dialog> : null}
     {audit ? <Dialog open title="Audit akun" eyebrow={audit.account.id} onClose={() => { auditRequestRef.current += 1; setAudit(null); }} wide><div className="console-audit-timeline">{audit.loading ? <p>Memuat timeline...</p> : audit.error ? <Notice tone="danger">Timeline audit gagal dimuat: {audit.error}</Notice> : audit.data?.timeline.length ? audit.data.timeline.map((row) => <article key={row.id}><span /><div><strong>{row.title}</strong><p>{row.detail}</p><small>{formatDate(row.createdAt)} / {row.source}</small></div></article>) : <p>Belum ada timeline audit.</p>}</div></Dialog> : null}
-    {action ? <Dialog open title="Hapus managed account" eyebrow={action.account.id} onClose={() => setAction(null)} footer={<DialogActions onCancel={() => setAction(null)} onConfirm={executeAction} confirmLabel="Hapus akun" busy={busy} danger />}>{formError ? <Notice tone="danger">{formError}</Notice> : null}<Notice tone="danger">Akun akan dihapus melalui endpoint owner. Data historis dan sinkronisasi mengikuti aturan backend yang sekarang.</Notice></Dialog> : null}
+    {action ? <Dialog open title="Hapus managed account" eyebrow={action.account.email || action.account.loginPhone || action.account.id} onClose={() => setAction(null)} footer={<DialogActions onCancel={() => setAction(null)} onConfirm={executeAction} confirmLabel={canDelete(action.account) ? "Arsipkan akun" : "Coba hapus"} busy={busy} danger />}>
+      {formError ? <Notice tone="danger">{formError}</Notice> : null}
+      <Notice tone="danger">{isSheetOwned(action.account)
+        ? "Baris produk ini dimiliki Google Sheets, jadi tidak bisa dilepas dari web. Kosongkan atau ubah row-nya di Sheets, lalu tunggu sinkron. Tombol di bawah akan ditolak."
+        : `Akun ${action.account.status} akan diarsipkan: hilang dari daftar, dicatat di log aktivitas, dan row-nya dikosongkan di Google Sheets. Stok sumber tidak diubah, dan akun tidak kembali ke stok.`}</Notice>
+    </Dialog> : null}
   </ConsoleShell>;
 }
