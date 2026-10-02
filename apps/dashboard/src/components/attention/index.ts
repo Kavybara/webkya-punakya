@@ -3,7 +3,6 @@
 // is how the two drift apart.
 export { AttentionQueue } from "./AttentionQueue";
 export {
-  attentionSideTotals,
   attentionTotal,
   PAGES_WITHOUT_ATTENTION,
   systemStateFor,

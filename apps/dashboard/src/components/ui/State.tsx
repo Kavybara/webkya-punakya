@@ -1,4 +1,4 @@
-import { AlertCircle, Check, LoaderCircle } from "lucide-react";
+import { AlertCircle, LoaderCircle } from "lucide-react";
 import type { ReactNode } from "react";
 
 /**
@@ -73,18 +73,6 @@ export function ErrorState({
       <strong>Data belum dapat dimuat</strong>
       <p>{message}</p>
       {onRetry ? <button type="button" onClick={onRetry}>Coba Lagi</button> : null}
-    </div>
-  );
-}
-
-/** Success confirmation for a region that has finished a job. */
-export function SuccessState({ title, description, action }: { title: string; description?: string; action?: ReactNode }) {
-  return (
-    <div className="ui-state is-success">
-      <span className="ui-state-icon"><Check size={19} aria-hidden="true" /></span>
-      <strong>{title}</strong>
-      {description ? <p>{description}</p> : null}
-      {action}
     </div>
   );
 }

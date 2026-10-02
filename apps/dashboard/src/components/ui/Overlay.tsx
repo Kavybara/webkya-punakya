@@ -183,45 +183,14 @@ export function Drawer({ open, title, description, eyebrow, onClose, children }:
 /**
  * The confirm/cancel pair.
  *
- * `ConfirmDialog` is the reseller's shape -- a description and a question,
- * because a destructive action that only says "are you sure?" tells the reader
- * nothing about what they are agreeing to. The owner console's equivalent
- * (`ConsoleDialogActions`) was a bare pair of buttons that the caller had to
- * place by hand, which is how a confirm ends up with no explanation attached.
+ * `DialogActions` is deliberately only the buttons, not the whole dialog. A
+ * destructive action that only says "are you sure?" tells the reader nothing
+ * about what they are agreeing to, so the description belongs to the caller,
+ * who is the only one who knows what is about to happen -- the owner console
+ * hand-assembles `Drawer` + `DialogActions` + `Notice` for exactly this reason.
+ * A shared wrapper that took the description as a prop would be that assembly
+ * frozen at the one point in the flow it was written for.
  */
-export function ConfirmDialog({
-  open,
-  title,
-  description,
-  confirmLabel = "Konfirmasi",
-  busy,
-  danger,
-  onClose,
-  onConfirm,
-}: {
-  open: boolean;
-  title: string;
-  description: string;
-  confirmLabel?: string;
-  busy?: boolean;
-  danger?: boolean;
-  onClose: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <Drawer open={open} title={title} onClose={onClose}>
-      <p>{description}</p>
-      <DialogActions
-        onCancel={onClose}
-        onConfirm={onConfirm}
-        confirmLabel={confirmLabel}
-        busy={busy}
-        danger={danger}
-      />
-    </Drawer>
-  );
-}
-
 export function DialogActions({ onCancel, onConfirm, confirmLabel, busy = false, danger = false }: {
   onCancel: () => void;
   onConfirm: () => void;

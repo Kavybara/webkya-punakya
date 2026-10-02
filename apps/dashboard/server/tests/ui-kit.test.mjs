@@ -107,8 +107,15 @@ test("the ui kit keeps the capabilities only one console had", async () => {
   assert.match(text, /REVEAL_AFTER_MS/);
   assert.match(text, /concealAfterMs/);
 
-  // A confirm that says what is being confirmed.
-  assert.match(text, /export function ConfirmDialog/);
+  // A confirm that says what is being confirmed. `DialogActions` takes the
+  // label as a required prop rather than defaulting it, so "are you sure?" --
+  // which tells the reader nothing about what they agreed to -- cannot be
+  // reached by forgetting a prop, and a destructive action has to say `danger`
+  // explicitly to render as one.
+  assert.match(text, /export function DialogActions/);
+  assert.match(text, /confirmLabel: string;/, "the confirm label must be required, not defaulted");
+  assert.match(text, /weight=\{danger \? "danger" : "primary"\}/);
+  assert.match(text, /\{busy \? "Memproses\.\.\." : confirmLabel\}/, "a busy confirm must not read as idle");
 });
 
 test("the empty state does not claim success or failure", async () => {

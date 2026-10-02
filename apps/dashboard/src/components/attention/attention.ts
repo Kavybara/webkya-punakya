@@ -88,16 +88,6 @@ export function attentionTotal(items: AttentionItem[]) {
   return items.filter((item) => item.tone !== "info").reduce((sum, item) => sum + item.count, 0);
 }
 
-/** The split the owner console's Operations filter is built on, in queue terms. */
-export function attentionSideTotals(items: AttentionItem[]) {
-  const actionable = items.filter((item) => item.tone !== "info");
-  return {
-    you: actionable.filter((item) => item.side === "you").reduce((sum, item) => sum + item.count, 0),
-    system: actionable.filter((item) => item.side === "system").reduce((sum, item) => sum + item.count, 0),
-    total: actionable.reduce((sum, item) => sum + item.count, 0),
-  };
-}
-
 /**
  * The one piece of arithmetic that decides what the status pill says.
  *
