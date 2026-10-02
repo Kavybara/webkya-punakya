@@ -75,6 +75,40 @@ export function registerAccountRoutes(app, deps) {
     };
   }
 
+  /**
+   * The listing view of an account: identity and lifecycle, no secrets.
+   *
+   * The listing is what every screen loads, and the owner branch used to
+   * return the raw rows -- so opening "Manajemen Akun" put every password, PIN,
+   * OTP and reset link for every account into the browser, while the page
+   * claimed the endpoint withheld them. The `?view=overview` the page sent was
+   * never read by the server, so there was nothing behind the claim.
+   *
+   * The owner keeps access, because the owner is the reason these records
+   * exist -- it just arrives on demand, for one named account, through
+   * `GET /api/accounts/:id/credentials`, which records the read.
+   *
+   * `canvaLink` is a secret here even though it does not look like one: a
+   * Canva pool link is the credential for every account in the pool, so
+   * handing it over hands over all of them.
+   */
+  function redactListingSecrets(account = {}) {
+    return {
+      ...account,
+      password: "",
+      pin: "",
+      signInCode: "",
+      verificationCode: "",
+      resetLink: "",
+      householdLink: "",
+      otpEmail: "",
+      canvaLink: "",
+      // The delivery snapshot embeds the credentials the reseller is meant to
+      // send on, so a listing that carries it carries them in a second place.
+      deliveryTemplateSnapshot: null,
+    };
+  }
+
   function redactExpiredAccountSecrets(account = {}) {
     const access = accountCredentialAccessStatus(account);
     if (access.allowed) return account;
@@ -279,7 +313,75 @@ export function registerAccountRoutes(app, deps) {
   app.get("/api/accounts", requireAuth(["owner", "reseller"]), async (req, res) => {
     const db = await readDbSnapshot();
     const accounts = visibleManagedAccountsForAuth(db, req.auth);
-    res.json(req.auth?.role === "reseller" ? accounts.map(redactExpiredAccountSecrets) : accounts);
+    // Both roles get the listing view. For the reseller this is additive on
+    // top of `redactExpiredAccountSecrets`, which still withdraws the secrets
+    // of an expired or replaced account even from the owner.
+    res.json(
+      (req.auth?.role === "reseller" ? accounts.map(redactExpiredAccountSecrets) : accounts)
+        .map(redactListingSecrets),
+    );
+  });
+
+  /**
+   * One account's credentials, fetched because somebody asked for that account.
+   *
+   * The listing deliberately does not carry secrets, so this is the only way to
+   * read one -- and it is deliberately not free. Every read appends an activity
+   * entry naming the account and the reader, because the answer to "who saw
+   * this customer's password" should not be "nobody knows".
+   *
+   * Owner-only. A reseller's own credentials already reach them through the
+   * reseller pages, which are scoped to their own accounts; this endpoint is
+   * for the business owner looking across the whole book.
+   */
+  app.get("/api/accounts/:id/credentials", requireAuth(["owner"]), async (req, res, next) => {
+    try {
+      const accountId = String(req.params.id || "").trim();
+      const record = await updateDb((db) => {
+        const account = (db.managedAccounts || []).find((item) => item.id === accountId);
+        if (!account) return { statusCode: 404, error: "Akun tidak ditemukan" };
+        db.activities = db.activities || [];
+        db.activities.unshift({
+          id: makeId("act"),
+          type: "account",
+          title: "Kredensial akun dibuka owner",
+          description: `Kredensial ${account.product || "akun"} ${account.email || account.loginPhone || account.id} dilihat owner${account.reseller ? ` untuk reseller ${account.reseller}` : ""}.`,
+          createdAt: nowText(),
+          resellerId: account.resellerId || "",
+          accountId: account.id,
+          orderId: account.orderId || account.sourceOrderId || "",
+        });
+        return {
+          statusCode: 200,
+          body: {
+            accountId: account.id,
+            email: account.email || "",
+            loginPhone: account.loginPhone || "",
+            password: account.password || "",
+            pin: account.pin || "",
+            signInCode: account.signInCode || "",
+            verificationCode: account.verificationCode || "",
+            resetLink: account.resetLink || "",
+            householdLink: account.householdLink || "",
+            otpEmail: account.otpEmail || "",
+            canvaLink: account.canvaLink || "",
+            profile: account.profile || "",
+            product: account.product || "",
+            variant: account.variant || "",
+            reseller: account.reseller || "",
+            status: account.status || "",
+            expiresAt: account.expiresAt || "",
+          },
+        };
+      });
+      if (record.statusCode === 404) {
+        res.status(404).json({ error: record.error });
+        return;
+      }
+      res.json(record.body);
+    } catch (cause) {
+      next(cause);
+    }
   });
 
   app.post("/api/accounts", requireAuth(["owner"]), async (req, res) => {

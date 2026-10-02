@@ -220,6 +220,10 @@ test("account route module preserves ownership and lookup permissions", () => {
       "POST /api/accounts/:id/delivery/copied",
       "GET /api/accounts/:id/audit",
       "GET /api/accounts",
+      // Owner-only by design. The listing deliberately withholds credentials,
+      // so this is the one route that returns them -- see
+      // account-credential-exposure.test.mjs for why the listing cannot.
+      "GET /api/accounts/:id/credentials",
       "POST /api/accounts",
       "PUT /api/accounts/:id",
       "GET /api/owner/account-access/accounts",
@@ -233,8 +237,9 @@ test("account route module preserves ownership and lookup permissions", () => {
   assert.deepEqual(routes[2].handlers[0].roles, ["reseller"]);
   assert.deepEqual(routes[3].handlers[0].roles, ["reseller"]);
   assert.deepEqual(routes[5].handlers[0].roles, ["owner", "reseller"]);
-  assert.deepEqual(routes[10].handlers[0].roles, ["reseller"]);
-  for (const index of [4, 6, 7, 8, 9, 11]) assert.deepEqual(routes[index].handlers[0].roles, ["owner"]);
+  assert.deepEqual(routes[6].handlers[0].roles, ["owner"], "credentials are owner-only");
+  assert.deepEqual(routes[11].handlers[0].roles, ["reseller"]);
+  for (const index of [4, 7, 8, 9, 10, 12]) assert.deepEqual(routes[index].handlers[0].roles, ["owner"]);
 });
 
 test("owner account access can lookup every visible account without reseller tool permissions", async () => {

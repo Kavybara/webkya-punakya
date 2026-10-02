@@ -621,6 +621,34 @@ export type AccountAuditResult = {
   timeline: Array<{ id: string; type: string; title: string; detail: string; createdAt: string; source: string }>;
 };
 
+/**
+ * One account's credentials, fetched only because that account was opened.
+ *
+ * A separate type from `ApiAccount` on purpose. The listing endpoint blanks
+ * every secret, so a row and a credential are different shapes with different
+ * lifetimes -- a credential exists in the browser for as long as its dialog is
+ * open and not one moment longer.
+ */
+export type AccountCredentials = {
+  accountId: string;
+  email: string;
+  loginPhone: string;
+  password: string;
+  pin: string;
+  signInCode: string;
+  verificationCode: string;
+  resetLink: string;
+  householdLink: string;
+  otpEmail: string;
+  canvaLink: string;
+  profile: string;
+  product: string;
+  variant: string;
+  reseller: string;
+  status: string;
+  expiresAt: string;
+};
+
 export type WhatsappRental = {
   id: string;
   groupJid?: string;
@@ -1236,6 +1264,15 @@ export const api = {
   accounts(options?: { view?: "overview" | "full" | "light" }) {
     const view = options?.view && options.view !== "full" ? `?view=${encodeURIComponent(options.view)}` : "";
     return request<ApiAccount[]>(`/accounts${view}`);
+  },
+  /**
+   * One account's credentials, fetched because this one account was opened.
+   *
+   * The listing deliberately withholds every secret, so this is the only route
+   * that returns one -- and it is owner-only and audited server-side.
+   */
+  accountCredentials(id: string) {
+    return request<AccountCredentials>(`/accounts/${encodeURIComponent(id)}/credentials`);
   },
   warrantyClaims() {
     return request<WarrantyClaim[]>("/warranty-claims");
