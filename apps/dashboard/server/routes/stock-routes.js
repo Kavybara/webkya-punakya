@@ -106,6 +106,14 @@ export function registerStockRoutes(app, deps) {
           pin: "-",
           status: "available",
           stockType: "link_pool",
+          /*
+           * A pool is one row standing for many accounts. The reseller branch
+           * has always set this; the owner branch left it undefined, and the
+           * overview's stock summary falls back to 1 per row -- so a pool
+           * holding 10 unclaimed accounts counted as 1 and "Stok siap"
+           * understated by nine, on the page whose whole job is that number.
+           */
+          availableCount: available,
           linkPoolId: pool.id,
           sheetSource: "google_sheets",
           sheetPool: pool.poolKey || pool.key || "",
