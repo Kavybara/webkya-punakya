@@ -52,8 +52,18 @@ function paymentLabel(order: ApiOrder) {
   return "Menunggu";
 }
 
+// The three statuses that mean "delivery did not happen", kept as one list
+// because the label, the filter and the overview tile all have to agree on it.
+// `abandoned` is what the fulfillment repair job writes once it has retried 80
+// times and stopped: the customer paid, nothing was delivered, and no future
+// pass will ever select the order again. It is the one delivery state only the
+// owner can clear, via `retry-delivery`, which re-runs fulfillment and resets
+// the status when it succeeds. Excluding it here made the overview's "Delivery
+// gagal" tile promise rows this page would not show.
+const FAILED_DELIVERY_STATUSES = ["failed", "needs_redelivery", "abandoned"];
+
 function fulfillmentLabel(order: ApiOrder) {
-  if (["failed", "needs_redelivery"].includes(String(order.deliveryStatus || ""))) return "Gagal";
+  if (FAILED_DELIVERY_STATUSES.includes(String(order.deliveryStatus || ""))) return "Gagal";
   if (order.deliveryStatus === "sent" || order.orderStatus === "completed") return "Selesai";
   if (order.orderStatus === "processing" || isPaid(order)) return "Diproses";
   if (order.orderStatus === "cancelled") return "Dibatalkan";
@@ -66,7 +76,7 @@ function matchesStatus(order: ApiOrder, status: string) {
   if (status === "processing") return order.orderStatus === "processing";
   if (status === "completed") return order.orderStatus === "completed";
   if (status === "expired") return order.qrisStatus === "expired" || order.orderStatus === "cancelled";
-  if (status === "delivery-failed") return ["failed", "needs_redelivery"].includes(String(order.deliveryStatus || ""));
+  if (status === "delivery-failed") return FAILED_DELIVERY_STATUSES.includes(String(order.deliveryStatus || ""));
   return true;
 }
 

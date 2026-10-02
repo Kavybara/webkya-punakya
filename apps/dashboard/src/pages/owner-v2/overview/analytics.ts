@@ -57,8 +57,18 @@ export function paymentLabel(order: ApiOrder) {
   return "Menunggu";
 }
 
+/*
+ * The statuses that mean "delivery did not happen". `abandoned` belongs here:
+ * the fulfillment repair job gives up on it after 80 attempts, so nothing in the
+ * backend will ever retry it again and only the owner can, via the orders page.
+ * Reading only "failed" here showed an abandoned order as "Diproses" on the
+ * overview's recent-orders table, which is the one place a paid customer
+ * looking like still-handled is worst.
+ */
+export const FAILED_DELIVERY_STATUSES = ["failed", "needs_redelivery", "abandoned"];
+
 export function fulfillmentLabel(order: ApiOrder) {
-  if (order.deliveryStatus === "failed") return "Gagal";
+  if (FAILED_DELIVERY_STATUSES.includes(String(order.deliveryStatus || ""))) return "Gagal";
   if (order.orderStatus === "completed" || order.deliveryStatus === "sent") return "Selesai";
   if (order.orderStatus === "processing" || isPaid(order)) return "Diproses";
   if (order.orderStatus === "cancelled") return "Dibatalkan";
@@ -400,10 +410,13 @@ export function buildAttentionQueue(orders: ApiOrder[], operations: OperationsCe
   const live = orders.filter((order) => !isSmokeTest(order));
   const nowMs = now.getTime();
 
-  // `needs_redelivery` counts too, and it has to: the orders page filters
-  // "Delivery gagal" on both values, so a count that read only `failed` would
-  // promise fewer rows than the link delivers. A tile whose number disagrees
-  // with the page it opens is worse than no tile.
+  // All three statuses count, and they have to: the orders page filters
+  // "Delivery gagal" on the same three, so a count that read only `failed`
+  // would promise fewer rows than the link delivers. A tile whose number
+  // disagrees with the page it opens is worse than no tile. `abandoned` is the
+  // one worth naming -- the repair job gave up on it after 80 attempts, so
+  // nothing else in the system will ever retry it, and it counts as attention
+  // precisely because only the owner can still clear it.
   //
   // Cancelled orders are excluded from both rows below. They are neither a
   // delivery failure nor money awaiting delivery: the order was called off, and
@@ -414,7 +427,7 @@ export function buildAttentionQueue(orders: ApiOrder[], operations: OperationsCe
   // the entire content of both rows, which made the header claim four things
   // needed handling when there were two.
   const isCancelled = (order: ApiOrder) => String(order.orderStatus || "").toLowerCase() === "cancelled";
-  const isLiveDeliveryFailure = (order: ApiOrder) => !isCancelled(order) && ["failed", "needs_redelivery", "abandoned"].includes(String(order.deliveryStatus || ""));
+  const isLiveDeliveryFailure = (order: ApiOrder) => !isCancelled(order) && FAILED_DELIVERY_STATUSES.includes(String(order.deliveryStatus || ""));
   const deliveryFailed = live.filter(isLiveDeliveryFailure);
   const failedIds = new Set(deliveryFailed.map((order) => order.id));
   // Excludes the delivery-failed set, and that exclusion is the whole point.
