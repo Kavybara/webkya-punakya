@@ -152,8 +152,15 @@ export function registerOrderRoutes(app, deps) {
   app.post("/api/orders", requireAuth(["owner", "reseller"]), async (req, res) => {
     const created = await updateDb(async (db) => {
       assertOrderIntakeOpen(db);
-      const product = getProduct(db, req.body.productId) || db.products[0];
-      const variant = product?.variants?.find((item) => item.id === req.body.variantId) || product?.variants?.[0];
+      // No fallback to `db.products[0]` / `variants[0]` here. `getProduct` is an
+      // exact id lookup, so a fallback only ever fires when the id did not
+      // resolve -- and the guard below cannot catch that, because the fallback
+      // entry is itself a real, active, orderable product. The result was a
+      // 201 with a live QRIS charge and reserved stock for whichever product
+      // happened to be first in the catalog. A stale client or a typo must be
+      // a 400, not a wrong order.
+      const product = getProduct(db, req.body.productId);
+      const variant = product?.variants?.find((item) => item.id === req.body.variantId);
       if (!product || product.isArchived || product.isActive === false || !variant || !isVariantOrderable(product, variant)) {
         const error = new Error("Produk atau varian tidak aktif untuk order");
         error.status = 400;
@@ -328,8 +335,8 @@ export function registerOrderRoutes(app, deps) {
   app.post("/api/orders/smoke-test", requireAuth(["owner"]), async (req, res) => {
     const created = await updateDb(async (db) => {
       assertOrderIntakeOpen(db);
-      const product = getProduct(db, req.body.productId) || db.products[0];
-      const variant = product?.variants?.find((item) => item.id === req.body.variantId) || product?.variants?.[0];
+      const product = getProduct(db, req.body.productId);
+      const variant = product?.variants?.find((item) => item.id === req.body.variantId);
       if (!product || product.isArchived || product.isActive === false || !variant || !isVariantOrderable(product, variant)) {
         const error = new Error("Produk atau varian tidak aktif untuk smoke test");
         error.status = 400;

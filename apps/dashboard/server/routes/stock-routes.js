@@ -129,8 +129,12 @@ export function registerStockRoutes(app, deps) {
 
   app.post("/api/stock", requireAuth(["owner"]), async (req, res) => {
     const created = await updateDb((db) => {
-      const product = getProduct(db, req.body.productId) || db.products[0];
-      const variant = product?.variants?.find((item) => item.id === req.body.variantId) || product?.variants?.[0];
+      // No `db.products[0]` fallback -- see the note in `POST /api/orders`.
+      // Filing credentials under a product the owner never named is how a
+      // catalogue gets quietly wrong, and the stock pool is the one place
+      // that mistake is impossible to undo.
+      const product = getProduct(db, req.body.productId);
+      const variant = product?.variants?.find((item) => item.id === req.body.variantId);
       if (!product || !variant) {
         const error = new Error("Produk atau varian tidak valid");
         error.status = 400;
