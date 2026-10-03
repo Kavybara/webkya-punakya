@@ -25,6 +25,7 @@ import {
   resellerAccountStatusLabel,
 } from "../../../lib/resellerAccounts";
 import { OWNER_WHATSAPP } from "../../../lib/ownerContact";
+import { Link } from "react-router-dom";
 import {
   Badge,
   DetailRow,
@@ -278,6 +279,29 @@ function ClaimHistory({ claims }: { claims: WarrantyClaim[] }) {
               {claim.ownerNote ? (
                 <p className="reseller-v2-warranty-claim-note">
                   <b>Catatan Owner:</b> {claim.ownerNote}
+                </p>
+              ) : null}
+              {/*
+                A "Diganti" badge on its own tells the reseller their problem was
+                handled, and nothing else. `claim.replacement` was already in
+                this payload -- `safeClaim` copies the whole claim, so
+                `newAccountId` came along with it (warranty-service.js:701-712)
+                -- and nothing read it. The replacement account lands in "Akun
+                Saya" carrying a `?account=` deep link, so the claim can say
+                where the new credentials are instead of leaving the reseller to
+                notice an unfamiliar row in another tab.
+              */}
+              {claim.replacement?.newAccountId ? (
+                <p className="reseller-v2-warranty-claim-note">
+                  <b>Akun pengganti:</b>{" "}
+                  <Link
+                    to={`/reseller-v2/accounts?account=${encodeURIComponent(claim.replacement.newAccountId)}`}
+                  >
+                    Buka di Akun Saya
+                  </Link>
+                  {claim.replacement.createdAt
+                    ? ` (${displayDate(claim.replacement.createdAt)})`
+                    : ""}
                 </p>
               ) : null}
               <p className="reseller-v2-warranty-claim-evidence">

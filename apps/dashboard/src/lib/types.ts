@@ -283,11 +283,28 @@ export type ManagedAccount = {
   expiresAt: string;
   status: "active" | "expiring" | "expired" | "replaced" | "disabled";
   hidden?: boolean;
+  /**
+   * Both directions of a warranty replacement, because a replacement is two
+   * rows and each one only knows half of it.
+   *
+   * The account that was replaced gets `replacedAt` / `replacedByAccountId` /
+   * `replacementReason` (warranty-service.js:632-641). The account that
+   * replaced it gets `replacementOfAccountId` / `replacementCreatedAt`
+   * (lines 562-570) -- and note its own `replacementReason` is deliberately
+   * blank there, because the reason belongs to the failure, not the fix.
+   *
+   * A reseller looking at either row needs the other one, or "Diganti" is a
+   * label with no referent.
+   */
   replacedAt?: string;
   replacedByAccountId?: string;
   replacedByStockId?: string;
   replacementReason?: string;
   replacementDisposition?: string;
+  replacementOfAccountId?: string;
+  replacementOfStockId?: string;
+  replacementId?: string;
+  replacementCreatedAt?: string;
   deliveryTemplateSnapshot?: DeliveryTemplateSnapshot | null;
   deliveryTemplateUnreadAt?: string;
   deliveryTemplateOpenedAt?: string;

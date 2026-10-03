@@ -60,6 +60,70 @@ function accountConditionBadge(account: ApiAccount) {
   return null;
 }
 
+/**
+ * The two account rows a warranty replacement leaves behind, and which one
+ * this is.
+ *
+ * The condition badge above cannot cover this case, and it is worth being exact
+ * about why: `accountCondition: "REPLACED"` is written to the *stock* row
+ * (warranty-service.js:645), never to the managed account. The managed account
+ * only gets `status = "replaced"`, which `normalizeResellerAccountStatus` folds
+ * into `inactive` (resellerAccounts.ts:85) -- so the old row used to land under
+ * "Kadaluarsa" wearing a "Tidak Aktif" pill and nothing else, while the new row
+ * appeared as an ordinary active account.
+ *
+ * Both rows are in `accounts`, so resolving the other one is a find, not a
+ * fetch. It is passed in rather than closed over so the helper stays pure.
+ */
+function accountReplacementBadge(account: ApiAccount, accounts: ApiAccount[]) {
+  if (account.replacementOfAccountId) {
+    const replaced = accounts.find((item) => item.id === account.replacementOfAccountId) || null;
+    return {
+      label: "Pengganti",
+      tone: "success" as const,
+      // "Menggantikan" -- this account is the fix for that one.
+      relation: "replaces" as const,
+      related: replaced,
+      at: account.replacementCreatedAt || "",
+      // The reason is stamped on the row that failed, not the row that fixed
+      // it, so it has to be read off `replaced` or it is always empty.
+      reason: replaced?.replacementReason || "",
+    };
+  }
+  if (account.replacedByAccountId) {
+    const successor = accounts.find((item) => item.id === account.replacedByAccountId) || null;
+    return {
+      label: "Diganti",
+      tone: "muted" as const,
+      relation: "replacedBy" as const,
+      related: successor,
+      at: account.replacedAt || "",
+      reason: account.replacementReason || "",
+    };
+  }
+  return null;
+}
+
+/**
+ * How to name the other row of a replacement.
+ *
+ * The identity of a replaced account is deliberately blanked by the server --
+ * `replaced` is terminal in `isTerminalManagedAccountStatus` (index.js:3064), so
+ * `redactExpiredAccountSecrets` (account-routes.js:112) empties its email and
+ * loginPhone, and `accountIdentity` falls through to "-". Falling back to that
+ * would render a confident, empty "Menggantikan akun -". So when the identity
+ * is gone, the order and the expiry say which account it was instead.
+ */
+function relatedAccountLabel(account: ApiAccount | null) {
+  if (!account) return "akun sebelumnya tidak ada di daftar ini";
+  const identity = accountIdentity(account);
+  if (identity !== "-") return identity;
+  const order = account.orderId || account.sourceOrderId;
+  if (order) return `akun lama untuk pesanan ${order}`;
+  if (account.expiresAt) return `akun lama (berlaku sampai ${dateTime(account.expiresAt)})`;
+  return "akun lama";
+}
+
 function accountAllowsCredentialAccess(account: ApiAccount) {
   return ["active", "expiring"].includes(normalizeResellerAccountStatus(account));
 }
@@ -230,6 +294,7 @@ export default function ResellerV2AccountsPage() {
      and counting it would put a permanently amber pill on a healthy panel. */
   const accountsAttention = accountSummary.expiring + accountSummary.expired;
   const selectedCondition = selected ? accountConditionBadge(selected) : null;
+  const selectedReplacement = selected ? accountReplacementBadge(selected, accounts) : null;
   useEffect(() => {
     const accountId = searchParams.get("account") || "";
     if (!accountId || loading || autoOpenedRef.current === accountId) return;
@@ -338,6 +403,7 @@ export default function ResellerV2AccountsPage() {
             {filtered.map((account) => {
               const status = accountStatus(account);
               const condition = accountConditionBadge(account);
+              const replacement = accountReplacementBadge(account, accounts);
               return (
                 <button
                   type="button"
@@ -358,6 +424,7 @@ export default function ResellerV2AccountsPage() {
                       {status.label}
                     </Badge>
                     {condition ? <Badge tone={condition.tone}>{condition.label}</Badge> : null}
+                    {replacement ? <Badge tone={replacement.tone}>{replacement.label}</Badge> : null}
                   </div>
                 </button>
               );
@@ -418,6 +485,35 @@ export default function ResellerV2AccountsPage() {
                 <dt>Kondisi akun</dt>
                 <dd><Badge tone={selectedCondition.tone}>{selectedCondition.label}</Badge></dd>
               </div> : null}
+              {/*
+                The three questions a replacement raises, answered in the order
+                they are asked: which account, since when, and why.
+
+                Without this the WhatsApp message is the only place any of it
+                exists, and it names the successor without naming the failure --
+                so a reseller holding several accounts of the same product has
+                no way to tell which dead row this new one belongs to.
+              */}
+              {selectedReplacement ? <>
+                <div>
+                  <dt>{selectedReplacement.relation === "replaces" ? "Menggantikan" : "Diganti oleh"}</dt>
+                  <dd>
+                    {selectedReplacement.relation === "replaces"
+                      ? relatedAccountLabel(selectedReplacement.related)
+                      : selectedReplacement.related
+                        ? `${accountIdentity(selectedReplacement.related)} (${selectedReplacement.related.product}${selectedReplacement.related.variant ? ` - ${selectedReplacement.related.variant}` : ""})`
+                        : "akun pengganti tidak ada di daftar ini"}
+                  </dd>
+                </div>
+                {selectedReplacement.at ? <div>
+                  <dt>Waktu penggantian</dt>
+                  <dd>{dateTime(selectedReplacement.at)}</dd>
+                </div> : null}
+                {selectedReplacement.reason ? <div>
+                  <dt>Alasan penggantian</dt>
+                  <dd>{selectedReplacement.reason}</dd>
+                </div> : null}
+              </> : null}
             </dl>
             <div className="reseller-v2-credential-block">
               <header>
