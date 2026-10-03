@@ -7378,6 +7378,30 @@ function buildDeliveryAuditQueue(db) {
         href: operationLink({ orderId: order.id }),
       });
     }
+
+    // The S&K leg is a second, independent message (fulfillment-notification-
+    // service.js:142-147), so it can fail while the account message succeeds.
+    // Its status was recorded correctly and read by nothing, which meant a
+    // customer could be left holding an account and no way to prove ownership,
+    // with an order the dashboard showed as fully delivered.
+    //
+    // Kept separate from the item above rather than merged: one is "the account
+    // message did not arrive", the other is "the account arrived but the S&K
+    // did not". They need different checks on the owner's side, and folding
+    // them together would make a half-delivery indistinguishable from a
+    // fully-failed one.
+    if ((delivery === "sent" || status === "completed") && order.whatsappSnkNotificationStatus === "failed") {
+      issues.push({
+        id: `delivery-snk-failed-${order.id}`,
+        severity: "high",
+        kind: "notification",
+        title: "SnK gagal terkirim padahal akun sudah dikirim",
+        detail: truncText(order.whatsappSnkNotificationError || `Pesan SnK untuk ${order.id} gagal terkirim. Customer sudah dapat akunnya tanpa bukti kepemilikan.`, 220),
+        createdAt: order.whatsappSnkNotificationSentAt || order.whatsappNotificationSentAt || order.fulfillmentSentAt || order.paidAt || order.createdAt || "",
+        orderId: order.id,
+        href: operationLink({ orderId: order.id }),
+      });
+    }
   }
 
   const sorted = issues.sort(compareQueueItems);
