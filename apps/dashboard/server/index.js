@@ -105,6 +105,7 @@ import {
   googleSheetsSyncHealth,
 } from "./services/google-sheets-sync-policy-service.js";
 import { evaluateCatalogPrecheck } from "./services/catalog-precheck-service.js";
+import { isLatePaymentRecoveryCandidate } from "./services/late-payment-recovery.js";
 import {
   createPublicTrackingLimiter,
   ensureOrderTrackingToken,
@@ -9353,13 +9354,30 @@ scheduleJob("sheets-audit", runReadOnlySheetsAuditJob, 30_000, 10 * 60 * 1000);
 
 let pakasirPaymentSyncRunning = false;
 
+/**
+ * How many payments one scheduled tick will ask the provider about.
+ *
+ * Shared by both passes in `runPakasirPaymentSyncJob` so a late arrival can
+ * never crowd out a live payment: the live loop runs first and the recovery
+ * loop only fills whatever budget is left.
+ */
+const PAKASIR_SYNC_CHECK_LIMIT = 8;
+
 async function runPakasirPaymentSyncJob() {
   if (pakasirPaymentSyncRunning) return;
   pakasirPaymentSyncRunning = true;
   try {
-    await updateDb(async (db) => {
-      const refs = [];
+    const recovered = await updateDb(async (db) => {
+      const targets = [];
       const ordersByRef = new Map((db.orders || []).map((order) => [order.paymentRef, order]));
+      const dueForCheck = (payment, order) => {
+        const nextCheckAt = toDateTime(payment.nextPaymentCheckAt || order.nextPaymentCheckAt || "");
+        return !(nextCheckAt && nextCheckAt.getTime() > Date.now());
+      };
+      // Live payments first, on the path that has always run. They get the
+      // whole per-tick budget before a single late arrival is considered --
+      // a payment that is about to clear must never be queued behind one that
+      // has already missed its deadline.
       for (const payment of db.payments || []) {
         if (payment.provider !== "pakasir") continue;
         const order = ordersByRef.get(payment.ref);
@@ -9372,24 +9390,53 @@ async function runPakasirPaymentSyncJob() {
         ) continue;
         const status = String(payment.status || order.qrisStatus || "").toLowerCase();
         if (!["pending", "created", "waiting_payment", ""].includes(status)) continue;
-        const nextCheckAt = toDateTime(payment.nextPaymentCheckAt || order.nextPaymentCheckAt || "");
-        if (nextCheckAt && nextCheckAt.getTime() > Date.now()) continue;
-        refs.push(payment.ref);
-        if (refs.length >= 8) break;
+        if (!dueForCheck(payment, order)) continue;
+        targets.push({ ref: payment.ref, allowLatePaymentRecovery: false });
+        if (targets.length >= PAKASIR_SYNC_CHECK_LIMIT) break;
       }
-      for (const ref of refs) {
-        await reconcilePakasirPaymentInDb(db, ref, {
+      // Then the late arrivals: payments for orders cancelled within the
+      // twenty-four hours that follow their own deadline (see
+      // `late-payment-recovery.js`). Previously these were skipped outright,
+      // which meant a payment landing after its own expiry survived only if the
+      // Pakasir webhook happened to arrive. Both remaining recovery paths --
+      // the webhook and the owner's manual reconcile -- are push-based, so a
+      // lost webhook left the customer's money with the platform and nothing
+      // anywhere recorded that it was ever owed.
+      const seen = new Set(targets.map((target) => target.ref));
+      for (const payment of db.payments || []) {
+        if (payment.provider !== "pakasir" || seen.has(payment.ref)) continue;
+        const order = ordersByRef.get(payment.ref);
+        if (!order) continue;
+        if (!isLatePaymentRecoveryCandidate(payment, order, { now: Date.now(), toDateTime })) continue;
+        if (!dueForCheck(payment, order)) continue;
+        targets.push({ ref: payment.ref, allowLatePaymentRecovery: true });
+        if (targets.length >= PAKASIR_SYNC_CHECK_LIMIT) break;
+      }
+      for (const target of targets) {
+        await reconcilePakasirPaymentInDb(db, target.ref, {
           throttleMs: 15_000,
           source: "scheduled_pakasir_sync",
-          allowLatePaymentRecovery: false,
+          allowLatePaymentRecovery: target.allowLatePaymentRecovery,
         });
       }
-      return { checked: refs.length };
+      return {
+        checked: targets.length,
+        // Counted as selected, not as recovered: most of these are expired
+        // orders that never get paid, and calling that a recovery would put a
+        // number on the health card the code cannot actually support.
+        lateChecked: targets.filter((target) => target.allowLatePaymentRecovery).length,
+      };
     });
     await reportOperationalHealth({
       key: "pakasir_sync",
       label: "Pemeriksaan pembayaran",
       ok: true,
+      // Reported so late-payment watching is visible rather than invisible.
+      // Without it, the fact that a recovery pass runs at all -- and that it is
+      // still looking at an order from three hours ago -- is guesswork.
+      detail: recovered.lateChecked > 0
+        ? `${recovered.checked} diperiksa, ${recovered.lateChecked} lewat masa QRIS`
+        : "",
     });
   } catch (error) {
     console.warn(`[Pakasir] payment sync skipped: ${error.message || error}`);

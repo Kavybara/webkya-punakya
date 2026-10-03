@@ -1,3 +1,5 @@
+import { LATE_PAYMENT_RECHECK_MS, orderIsExpired } from "./late-payment-recovery.js";
+
 export function createPaymentReconciliationService(deps) {
   const {
     activeResellerByWhatsapp,
@@ -37,7 +39,13 @@ export function createPaymentReconciliationService(deps) {
     return "";
   }
 
-  function paymentCheckBackoffMs(attempts = 1) {
+  function paymentCheckBackoffMs(attempts = 1, isLate = false) {
+    // An expired order is not a payment that failed to clear; it is a payment
+    // whose order is already cancelled, being watched in case it turns up
+    // anyway. Escalating that toward the live ten-minute ceiling spends the
+    // provider's rate limit on an outcome that is overwhelmingly "nothing
+    // happened" -- see `LATE_PAYMENT_RECHECK_MS`.
+    if (isLate) return LATE_PAYMENT_RECHECK_MS;
     const steps = [15_000, 30_000, 60_000, 120_000, 300_000, 600_000];
     return steps[Math.min(steps.length - 1, Math.max(0, Number(attempts || 1) - 1))];
   }
@@ -45,7 +53,9 @@ export function createPaymentReconciliationService(deps) {
   function recordPaymentCheck(payment, order, detail, checkedAt) {
     const attempts = Number(payment.paymentCheckAttempts || 0) + 1;
     const providerStatus = String(detail?.status || detail?.transaction?.status || (detail?.paid ? "paid" : "pending")).toLowerCase();
-    const nextCheckAt = detail?.paid ? "" : new Date(Date.now() + paymentCheckBackoffMs(attempts)).toISOString();
+    const nextCheckAt = detail?.paid
+      ? ""
+      : new Date(Date.now() + paymentCheckBackoffMs(attempts, orderIsExpired(order))).toISOString();
     payment.providerLastCheckedAt = checkedAt;
     payment.lastPaymentCheckAt = checkedAt;
     payment.paymentCheckAttempts = attempts;
