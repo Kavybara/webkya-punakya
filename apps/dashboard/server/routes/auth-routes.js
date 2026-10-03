@@ -365,7 +365,15 @@ export function registerAuthRoutes(app, deps) {
         return;
       }
 
+      // Charged exactly like the registration endpoint further down, and for
+      // the same reason: this handler sends a real WhatsApp OTP to the account's
+      // own phone, so the number of messages one caller can trigger is the thing
+      // worth bounding. `assertLoginAllowed` only *reads* the limiter's counters,
+      // and `recordLoginFailure` is their only writer -- without the charge the
+      // gate below can never close, and every request both message-bombs the
+      // customer and mints a fresh 5-guess reset record.
       assertLoginAllowed(req, normalizeLoginIdentifier(identifier));
+      recordLoginFailure(req, normalizeLoginIdentifier(identifier));
       const dbForSend = await readDb();
       const botConfigured = Boolean(
         firstUsableSecret(dbForSend.settings?.whatsappBotToken, process.env.WHATSAPP_BOT_TOKEN)
