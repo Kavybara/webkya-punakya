@@ -123,6 +123,7 @@ export function registerResellerRoutes(app, deps) {
       const duplicate = findDuplicateReseller(db, input, current.id);
       if (duplicate) throwDuplicateResellerError(duplicate);
       const previousDeposit = Number(current.deposit || 0);
+      const wasActive = current.isActive !== false;
       const reseller = {
         ...current,
         ...input,
@@ -133,6 +134,28 @@ export function registerResellerRoutes(app, deps) {
         allowedAccessTools: normalizeResellerAccessTools(input.allowedAccessTools, current.allowedAccessTools),
       };
       delete reseller.password;
+
+      // `sessionVersion` is the only revocation lever `requireAuth` has -- it
+      // compares the token's `sv` against the stored value and never reads
+      // `isActive`. So without a bump here, the owner's two revocation tools
+      // do not revoke anything:
+      //
+      //   - Resetting a stolen reseller's password leaves the attacker's cookie
+      //     valid for the rest of its TTL, which is 30 days under
+      //     `remember: true`.
+      //   - Setting `isActive: false` leaves a dealer believed to be abusing
+      //     the platform reading account data until that cookie expires.
+      //
+      // Both are owner-driven, so the intent to cut access is already explicit
+      // in the request; carrying it out is the route's job. Scoped to those two
+      // triggers on purpose: an owner correcting a typo in a name must not log
+      // a working reseller out of a session they did nothing wrong in.
+      const revokedByOwnerPasswordReset = req.auth.role === "owner" && Boolean(requestedPassword);
+      const revokedByDeactivation = wasActive && reseller.isActive === false;
+      if (revokedByOwnerPasswordReset || revokedByDeactivation) {
+        reseller.sessionVersion = Number(current.sessionVersion || 0) + 1;
+      }
+
       db.resellers[index] = reseller;
       const nextDeposit = Number(reseller.deposit || 0);
       if (req.auth.role === "owner" && previousDeposit !== nextDeposit) {
