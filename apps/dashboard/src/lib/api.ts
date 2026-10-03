@@ -1192,7 +1192,13 @@ export const api = {
     return request<{ ok: boolean; order?: ApiOrder; reply?: string }>(`/orders/${encodeURIComponent(id)}/approve-manual`, { method: "POST", body: payload });
   },
   retryDelivery(id: string) {
-    return request<{ ok: boolean; order?: ApiOrder; reply?: string }>(`/orders/${encodeURIComponent(id)}/retry-delivery`, { method: "POST" });
+    // `delivery.skipped` is the whole point of reading this. Re-running a
+    // delivery that already succeeded is refused by the fulfilment guard, and
+    // the server reports that refusal as `{ sent: true, skipped: true }` --
+    // which reads as success if the caller only looks at `sent`. Without the
+    // flag in the type, the owner page has nothing to tell "sent" apart from
+    // "nothing happened", and shows a green toast for the second case.
+    return request<{ ok: boolean; order?: ApiOrder; reply?: string; delivery?: { sent?: boolean; skipped?: boolean; reason?: string } }>(`/orders/${encodeURIComponent(id)}/retry-delivery`, { method: "POST" });
   },
   rerenderDeliveryTemplate(id: string) {
     return request<ApiOrder>(`/orders/${encodeURIComponent(id)}/delivery-template/rerender`, { method: "POST" });

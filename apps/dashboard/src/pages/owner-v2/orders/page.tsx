@@ -218,13 +218,27 @@ export default function OwnerConsoleOrdersPage() {
     try {
       if (kind === "mark-paid") await api.markOrderPaid(order.id);
       if (kind === "approve-manual") await api.approveOrderManual(order.id, { reason: actionReason.trim() });
-      if (kind === "retry-delivery") await api.retryDelivery(order.id);
+      let deliverySkipped = false;
+      if (kind === "mark-paid") await api.markOrderPaid(order.id);
+      if (kind === "approve-manual") await api.approveOrderManual(order.id, { reason: actionReason.trim() });
+      if (kind === "retry-delivery") {
+        const result = await api.retryDelivery(order.id);
+        // The fulfilment guard refuses to re-send to a customer who already has
+        // the credentials, and says so with `skipped`. Reporting that as a
+        // successful send is how the owner ends up believing a message went out
+        // that never did.
+        deliverySkipped = Boolean(result?.delivery?.skipped);
+      }
       if (kind === "repair-sheets") await api.repairOrderSheets(order.id);
       if (kind === "rerender-template") await api.rerenderDeliveryTemplate(order.id);
       await loadOrders(true);
       await openOrderDetail(order);
       setPendingAction(null);
-      setToast(`${actionText(kind).button} berhasil dijalankan.`);
+      setToast(
+        deliverySkipped
+          ? "Pengiriman dilewati: pesan sudah pernah terkirim ke customer ini."
+          : `${actionText(kind).button} berhasil dijalankan.`,
+      );
     } catch (executeError) {
       setActionError(executeError instanceof Error ? executeError.message : "Tindakan gagal dijalankan.");
     } finally {
