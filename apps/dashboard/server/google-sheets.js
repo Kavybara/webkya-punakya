@@ -2748,6 +2748,15 @@ function availableSheetRow(row = {}) {
   };
 }
 
+/**
+ * Conditions that mean something is wrong and must survive a sync.
+ *
+ * The list mirrors BLOCKING_CONDITIONS, deliberately not imported: this guards a
+ * write that the availability check downstream already treats as blocking, so a
+ * disagreement between the two would be a new bug rather than a caught one.
+ */
+const PRESERVED_ON_BLANK_CONDITION = new Set(["BERMASALAH", "DIPERIKSA", "REPLACED", "DISABLED"]);
+
 export function syncManagedAccountCondition(db, stock = {}, condition = {}) {
   let updated = 0;
   for (const account of db.managedAccounts || []) {
@@ -2757,6 +2766,21 @@ export function syncManagedAccountCondition(db, stock = {}, condition = {}) {
         && String(account.sheetStockKey || "").trim() === String(stock.sheetStockKey || "").trim()
       );
     if (!linked || account.hidden || account.returnedToStockAt) continue;
+    const currentCondition = String(account.accountCondition || "").trim().toUpperCase();
+    // A blank cell is not an assertion that the account is fine -- it is an
+    // absence, and `normalizeAccountCondition` carries `empty` so a caller can
+    // tell the two apart. Overwriting a blocking flag with it would let a sync
+    // clear the one condition the owner never wrote down.
+    //
+    // This is reachable, not theoretical. `triggerWarrantyStockReview`
+    // (warranty-service.js:130-151) stamps DIPERIKSA on the stock and the
+    // managed account together, and `warranty-routes.js:116` then sets
+    // `warrantyReviewBlocked = !reviewSync.ok` -- i.e. the lock exists precisely
+    // when the write of DIPERIKSA into the sheet failed. The cell is blank at that
+    // moment. The stock row survives because `stockForVariant` (stock-groups.js:448)
+    // honours `warrantyReviewBlocked`; the account did not, so the reseller saw a
+    // review-locked account return to a healthy "NORMAL".
+    if (condition.empty && PRESERVED_ON_BLANK_CONDITION.has(currentCondition)) continue;
     const nextCondition = condition.value || "NORMAL";
     const nextRaw = condition.empty ? "" : condition.raw || nextCondition;
     const nextKnown = condition.known !== false;
