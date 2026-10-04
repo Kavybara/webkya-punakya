@@ -5,6 +5,7 @@ import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import { api, type ApiProduct } from "../../../lib/api";
 import { formatRupiah } from "../../../lib/format";
 import { sortedPriceEntries } from "../../../lib/durations";
+import { orderLockStatus, productStatus } from "../../../lib/labels";
 import { Badge, Dialog, DialogActions, Field, MetricRow, Notice } from "../../../components/ui";
 import { systemStateFor } from "../../../components/attention";
 
@@ -69,6 +70,42 @@ export function applyPriceEdits<T extends { id: string; prices: Record<string, n
     return { ...variant, prices };
   });
 }
+
+/**
+ * Prices the owner typed that cannot be stored, named so the message can say which one.
+ *
+ * `applyPriceEdits` drops anything that is not a positive number, and it dropped
+ * them silently: the Save button reported success, the dialog closed, and the
+ * price the owner had just corrected was still the old one. On a price field that
+ * is the difference between a correction landing and a correction evaporating,
+ * and the owner has no way to tell which happened -- the row simply looks as it
+ * did before they touched it.
+ *
+ * An empty field is not an error. It is the documented way to stop offering a
+ * duration, and `applyPriceEdits` deletes the key rather than writing `0`, so the
+ * public catalogue stops advertising it. Zero is likewise not an error for the
+ * same reason: the create form seeds `price: "0"` and a product priced at
+ * nothing is a legitimate state to be in until it is filled in.
+ *
+ * So the only real failure is a negative price, or a value the browser's number
+ * input accepted but `Number` cannot read.
+ */
+export function invalidPriceEdits(edits: PriceEdits): string[] {
+  const problems: string[] = [];
+  for (const [key, raw] of Object.entries(edits)) {
+    const duration = key.slice(key.indexOf("::") + 2);
+    const trimmed = String(raw ?? "").trim();
+    if (!trimmed) continue;
+    const amount = Number(trimmed);
+    if (Number.isFinite(amount) && amount >= 0) continue;
+    problems.push(
+      Number.isFinite(amount)
+        ? `Harga ${duration} tidak boleh negatif. Kosongkan kolomnya jika durasi ini tidak dijual lagi.`
+        : `Harga ${duration} harus berupa angka.`,
+    );
+  }
+  return problems;
+}
 const ownerTemplatePlaceholders = ["product_name", "variant_name", "duration", "email", "password", "profile", "rental_end"];
 const templatePreviewDurations = [
   { label: "Preview Bulanan", value: "1 Bulan", days: 30 },
@@ -104,27 +141,56 @@ export default function OwnerConsoleProductsPage() {
   const [templatePreview, setTemplatePreview] = useState("");
   const [templateWarnings, setTemplateWarnings] = useState<string[]>([]);
   const [templateCopySource, setTemplateCopySource] = useState("");
+  const [templateLoadedSource, setTemplateLoadedSource] = useState("");
+  const [templateCopyConfirm, setTemplateCopyConfirm] = useState(false);
   const [templatePreviewDuration, setTemplatePreviewDuration] = useState("1 Bulan");
-  const load = useCallback(async () => { setLoading(true); setError(""); try { setProducts(await api.products()); } catch (cause) { setError(cause instanceof Error ? cause.message : "Produk gagal dimuat."); } finally { setLoading(false); } }, []);
+  /*
+   * `editing` is a snapshot taken when the dialog opened, and the freeze
+   * buttons live *inside* that dialog -- so freezing a variant, or the whole
+   * product, reloaded the table while the dialog went on holding the values it
+   * had before. `save()` then spread that snapshot back over the update payload,
+   * and the server takes the client's `orderLock` in preference to the stored
+   * one (`normalizeOrderLockInput` reads `source.enabled` first and only falls
+   * back to the database). So: freeze a variant, type a price, press Save, and
+   * the freeze is silently gone. The same applies to `deliveryTemplate`, which
+   * the template editor rewrites.
+   *
+   * Re-pointing the open dialog at whatever the latest load returned closes the
+   * window. It lives in `load` rather than in each caller so that a reload from
+   * anywhere -- a lock, a template save, the manual refresh button -- repairs the
+   * snapshot, and no new caller can forget to.
+   */
+  const load = useCallback(async () => { setLoading(true); setError(""); try { const rows = await api.products(); setProducts(rows); setEditing((current) => (current ? rows.find((row) => row.id === current.id) ?? current : current)); } catch (cause) { setError(cause instanceof Error ? cause.message : "Produk gagal dimuat."); } finally { setLoading(false); } }, []);
   useEffect(() => { load().catch(() => undefined); }, [load]);
   function openCreate() { setForm(emptyForm()); setFormError(""); setEditing(null); setPriceEdits({}); }
   function openEdit(row: ApiProduct) { setEditing(row); setFormError(""); setPriceEdits({}); setForm({ name: row.name, code: row.code, category: row.category, description: row.description, isActive: row.isActive, resellerOnly: Boolean(row.resellerOnly), needsProfile: row.needsProfile, needsPin: row.needsPin, variantName: "", variantCode: "", price: "0" }); }
   const requiredFields = useCallback(() => templateRequired.split(",").map((field) => field.trim()).filter(Boolean), [templateRequired]);
+  /*
+   * Opening the template editor used to `setEditing(undefined)` on the way in,
+   * which closed the product dialog and threw away every price the owner had
+   * typed into it -- no prompt, no message, and the dialog was the only place
+   * those edits existed. The template editor stacks on top of the product
+   * dialog instead, so closing it returns the owner to their unsaved prices.
+   */
   async function openTemplate(product: ApiProduct, variant: ProductVariant) {
     setBusy(true);
     setTemplateError("");
     setTemplatePreview("");
     setTemplateWarnings([]);
+    setTemplateCopyConfirm(false);
     try {
       const config = await api.deliveryTemplate(product.id, variant.id);
       setTemplateTarget({ product, variant });
       setTemplateSource(config.source);
+      // The baseline `templateUnsaved` compares against. Without it the page
+      // cannot tell an edited template from a freshly loaded one, and the copy
+      // confirmation would either never appear or always appear.
+      setTemplateLoadedSource(config.source);
       setTemplateRequired(config.requiredFields.map((field) => Array.isArray(field) ? field.join("|") : field).join(", "));
       setTemplateVersion(config.version);
       setTemplatePlaceholders(ownerTemplatePlaceholders.filter((field) => config.placeholders.includes(field)));
       setTemplateCopySource("");
       setTemplatePreviewDuration("1 Bulan");
-      setEditing(undefined);
     } catch (cause) {
       setTemplateError(cause instanceof Error ? cause.message : "Template pengiriman gagal dimuat.");
     } finally {
@@ -191,14 +257,30 @@ export default function OwnerConsoleProductsPage() {
       setBusy(false);
     }
   }
-  async function copyTemplate() {
+  /*
+   * Copying replaced the textarea in one step and then said so in a warning
+   * strip: "Periksa lalu simpan perubahan Anda". By then the work was gone, and
+   * the message was phrased as advice for the future rather than as the reason
+   * the editor had just emptied. So a template that had been edited since it
+   * loaded now asks first. An untouched editor copies straight through --
+   * there is nothing to lose, and a confirmation there would only teach the
+   * owner to click through dialogs.
+   */
+  const templateUnsaved = Boolean(templateTarget && templateSource !== templateLoadedSource);
+  async function copyTemplate(confirmed = false) {
     if (!templateTarget || !templateCopySource) return;
+    if (templateUnsaved && !confirmed) {
+      setTemplateCopyConfirm(true);
+      return;
+    }
+    setTemplateCopyConfirm(false);
     const [sourceProductId, sourceVariantId] = templateCopySource.split("::");
     setBusy(true);
     try {
       await api.copyDeliveryTemplate(templateTarget.product.id, templateTarget.variant.id, { sourceProductId, sourceVariantId });
       const config = await api.deliveryTemplate(templateTarget.product.id, templateTarget.variant.id);
       setTemplateSource(config.source);
+      setTemplateLoadedSource(config.source);
       setTemplateRequired(config.requiredFields.map((field) => Array.isArray(field) ? field.join("|") : field).join(", "));
       setTemplateVersion(config.version);
       setTemplatePreview("");
@@ -210,15 +292,15 @@ export default function OwnerConsoleProductsPage() {
       setBusy(false);
     }
   }
-  async function save() { if (!form.name.trim() || !form.code.trim() || (!editing && (!form.variantName.trim() || !form.variantCode.trim()))) { setFormError("Nama, kode produk, dan variant awal wajib diisi."); return; } setFormError(""); setBusy(true); try { const payload: Omit<ApiProduct, "id"> = editing ? { ...editing, name: form.name, code: form.code, category: form.category, description: form.description, isActive: form.isActive, resellerOnly: form.resellerOnly, needsProfile: form.needsProfile, needsPin: form.needsPin, variants: applyPriceEdits(editing.variants, priceEdits) } : { name: form.name, code: form.code, category: form.category, description: form.description, isActive: form.isActive, resellerOnly: form.resellerOnly, needsProfile: form.needsProfile, needsPin: form.needsPin, variants: [{ id: `var-${Date.now().toString(36)}`, code: form.variantCode, name: form.variantName, description: "", isActive: true, prices: { "1 Bulan": Number(form.price || 0) }, snk: "" }] }; editing ? await api.updateProduct(editing.id, payload) : await api.createProduct(payload); setEditing(undefined); setPriceEdits({}); setMessage("Produk berhasil disimpan."); await load(); } catch (cause) { setFormError(cause instanceof Error ? cause.message : "Produk gagal disimpan."); } finally { setBusy(false); } }
+  async function save() { if (!form.name.trim() || !form.code.trim() || (!editing && (!form.variantName.trim() || !form.variantCode.trim()))) { setFormError("Nama, kode produk, dan variant awal wajib diisi."); return; } const badPrices = invalidPriceEdits(priceEdits); if (badPrices.length) { setFormError(badPrices.join(" ")); return; } const createPrice = Number(form.price); if (!editing && form.price.trim() && (!Number.isFinite(createPrice) || createPrice < 0)) { setFormError("Harga 1 bulan harus berupa angka dan tidak boleh negatif."); return; } setFormError(""); setBusy(true); try { const payload: Omit<ApiProduct, "id"> = editing ? { ...editing, name: form.name, code: form.code, category: form.category, description: form.description, isActive: form.isActive, resellerOnly: form.resellerOnly, needsProfile: form.needsProfile, needsPin: form.needsPin, variants: applyPriceEdits(editing.variants, priceEdits) } : { name: form.name, code: form.code, category: form.category, description: form.description, isActive: form.isActive, resellerOnly: form.resellerOnly, needsProfile: form.needsProfile, needsPin: form.needsPin, variants: [{ id: `var-${Date.now().toString(36)}`, code: form.variantCode, name: form.variantName, description: "", isActive: true, prices: { "1 Bulan": Number.isFinite(createPrice) ? createPrice : 0 }, snk: "" }] }; editing ? await api.updateProduct(editing.id, payload) : await api.createProduct(payload); setEditing(undefined); setPriceEdits({}); setMessage("Produk berhasil disimpan."); await load(); } catch (cause) { setFormError(cause instanceof Error ? cause.message : "Produk gagal disimpan."); } finally { setBusy(false); } }
   async function executeAction() { if (!action) return; setActionError(""); setBusy(true); try { if (action.type === "archive") await api.archiveProduct(action.product.id, !action.product.isArchived); if (action.type === "delete") await api.deleteProduct(action.product.id); if (action.type === "lock") await api.setProductOrderLock(action.product.id, { enabled: !action.product.orderLock?.enabled, reason: reason.trim() }); if (action.type === "variant-lock") await api.setVariantOrderLock(action.product.id, action.variant.id, { enabled: !action.variant.orderLock?.enabled, reason: reason.trim() }); setAction(null); setReason(""); setMessage("Perubahan produk diterapkan."); await load(); } catch (cause) { setActionError(cause instanceof Error ? cause.message : "Aksi produk gagal."); } finally { setBusy(false); } }
   const columns = useMemo<Array<DataColumn<ApiProduct>>>(() => [
     { id: "product", header: "Produk", value: (row) => `${row.name} ${row.code}`, sortable: true, cell: (row) => <span className="console-product-cell"><strong>{row.name}</strong><small>{row.code} / {row.category}</small></span> },
     { id: "variants", header: "Variant", value: (row) => row.variants.length, sortable: true },
     { id: "price", header: "Harga mulai", value: (row) => { const prices = row.variants.flatMap((variant) => Object.values(variant.prices)).filter((value) => value > 0); return prices.length ? Math.min(...prices) : 0; }, cell: (row) => { const prices = row.variants.flatMap((variant) => Object.values(variant.prices)).filter((value) => value > 0); return prices.length ? formatRupiah(Math.min(...prices)) : "-"; } },
-    { id: "status", header: "Status", value: (row) => row.isArchived ? "Archived" : row.isActive ? "Aktif" : "Nonaktif", sortable: true, cell: (row) => <Badge tone={row.isArchived ? "muted" : row.isActive ? "success" : "warning"}>{row.isArchived ? "Archived" : row.isActive ? "Aktif" : "Nonaktif"}</Badge> },
-    { id: "lock", header: "Order", value: (row) => row.orderLock?.enabled ? "Frozen" : "Open", cell: (row) => <Badge tone={row.orderLock?.enabled ? "danger" : "success"}>{row.orderLock?.enabled ? "Frozen" : "Open"}</Badge> },
-    { id: "actions", header: "Aksi", value: () => "", cell: (row) => <div className="console-row-actions"><button type="button" onClick={() => openEdit(row)} aria-label={`Edit ${row.name}`}><Edit3 size={14} /></button><button type="button" onClick={() => { setAction({ type: "lock", product: row }); setReason(row.orderLock?.reason || ""); }} aria-label={`${row.orderLock?.enabled ? "Buka" : "Kunci"} ${row.name}`}>{row.orderLock?.enabled ? <UnlockKeyhole size={14} /> : <LockKeyhole size={14} />}</button><button type="button" onClick={() => setAction({ type: "archive", product: row })} aria-label={`Archive ${row.name}`}><Archive size={14} /></button><button type="button" onClick={() => setAction({ type: "delete", product: row })} aria-label={`Hapus ${row.name}`}><Trash2 size={14} /></button></div> },
+    { id: "status", header: "Status", value: (row) => productStatus(row).label, sortable: true, cell: (row) => <Badge tone={productStatus(row).tone}>{productStatus(row).label}</Badge> },
+    { id: "lock", header: "Pemesanan", value: (row) => orderLockStatus(row.orderLock).label, cell: (row) => <Badge tone={orderLockStatus(row.orderLock).tone}>{orderLockStatus(row.orderLock).label}</Badge> },
+    { id: "actions", header: "Aksi", value: () => "", cell: (row) => <div className="console-row-actions"><button type="button" onClick={() => openEdit(row)} aria-label={`Edit ${row.name}`}><Edit3 size={14} /></button><button type="button" onClick={() => { setAction({ type: "lock", product: row }); setReason(row.orderLock?.reason || ""); }} aria-label={`${row.orderLock?.enabled ? "Buka" : "Kunci"} ${row.name}`}>{row.orderLock?.enabled ? <UnlockKeyhole size={14} /> : <LockKeyhole size={14} />}</button><button type="button" onClick={() => setAction({ type: "archive", product: row })} aria-label={`${row.isArchived ? "K|archivekan" : "Arsipkan"} ${row.name}`}><Archive size={14} /></button><button type="button" onClick={() => setAction({ type: "delete", product: row })} aria-label={`Hapus ${row.name}`}><Trash2 size={14} /></button></div> },
   ], []);
   const filters = useMemo<Array<DataFilter<ApiProduct>>>(() => [{ id: "category", label: "Kategori", options: [...new Set(products.map((row) => row.category))].map((value) => ({ label: value, value })), value: (row) => row.category }], [products]);
   /* Order lock is the owner's own decision, so unlike a reserved account
@@ -229,10 +311,10 @@ export default function OwnerConsoleProductsPage() {
      number. */
   const frozenCount = products.filter((row) => row.orderLock?.enabled && row.isActive && !row.isArchived).length;
   return <ConsoleShell title="Produk" description="Kelola katalog, variant, dan safe mode pemesanan." refreshing={loading} attentionCount={frozenCount} systemState={systemStateFor(frozenCount, { error: Boolean(error), loading })} onRefresh={load}>
-    <MetricRow items={[{ label: "Total produk", value: products.length }, { label: "Aktif", value: products.filter((row) => row.isActive && !row.isArchived).length, tone: "success" }, { label: "Archived", value: products.filter((row) => row.isArchived).length }, { label: "Order frozen", value: products.filter((row) => row.orderLock?.enabled).length, tone: "warning" }]} />
+    <MetricRow items={[{ label: "Total produk", value: products.length }, { label: "Aktif", value: products.filter((row) => row.isActive && !row.isArchived).length, tone: "success" }, { label: "Diarsipkan", value: products.filter((row) => row.isArchived).length }, { label: "Pemesanan dikunci", value: products.filter((row) => row.orderLock?.enabled).length, tone: "warning" }]} />
     {error ? <Notice tone="danger">{error}</Notice> : null}{message ? <Notice>{message}</Notice> : null}
     <section className="console-panel"><div className="console-panel-header"><div><span>Katalog</span><h2>Daftar produk</h2></div><div className="console-panel-toolbar-actions"><button type="button" onClick={openCreate}><PackagePlus size={15} /> Tambah produk</button></div></div><DataTable rows={products} columns={columns} filters={filters} rowKey={(row) => row.id} loading={loading} error={error} initialPageSize={10} /></section>
-    {editing !== undefined ? <Dialog open title={editing ? "Edit produk" : "Tambah produk"} eyebrow="Katalog" onClose={() => setEditing(undefined)} wide footer={<DialogActions onCancel={() => setEditing(undefined)} onConfirm={save} confirmLabel="Simpan produk" busy={busy} />}>{formError ? <Notice tone="danger">{formError}</Notice> : null}<div className="console-resource-form-grid"><Field label="Nama"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field><Field label="Kode"><input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} /></Field><Field label="Kategori"><input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} /></Field><Field label="Status"><select value={form.isActive ? "active" : "inactive"} onChange={(e) => setForm({ ...form, isActive: e.target.value === "active" })}><option value="active">Aktif</option><option value="inactive">Nonaktif</option></select></Field><Field label="Deskripsi"><textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field><Field label="Aturan"><div className="ui-checkbox-stack"><label><input type="checkbox" checked={form.resellerOnly} onChange={(e) => setForm({ ...form, resellerOnly: e.target.checked })} /> Reseller only</label><label><input type="checkbox" checked={form.needsProfile} onChange={(e) => setForm({ ...form, needsProfile: e.target.checked })} /> Butuh profil</label><label><input type="checkbox" checked={form.needsPin} onChange={(e) => setForm({ ...form, needsPin: e.target.checked })} /> Butuh PIN</label></div></Field>{!editing ? <><Field label="Variant awal"><input value={form.variantName} onChange={(e) => setForm({ ...form, variantName: e.target.value })} /></Field><Field label="Kode variant"><input value={form.variantCode} onChange={(e) => setForm({ ...form, variantCode: e.target.value })} /></Field><Field label="Harga 1 bulan"><input type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} /></Field></> : <div className="console-variant-locks">{editing.variants.map((variant) => <article key={variant.id}><div className="console-variant-title"><strong>{variant.name}</strong><small>{variant.code}</small></div><Badge tone={variant.deliveryTemplate ? "success" : "warning"}>{variant.deliveryTemplate ? `Template v${variant.deliveryTemplateVersion || 1}` : "Belum ada template"}</Badge><div className="console-variant-prices">{sortedPriceEntries(variant.prices).map(([duration, amount]) => <Field key={duration} label={duration}><input type="number" min="0" step="1000" value={priceEdits[priceEditKey(variant.id, duration)] ?? String(amount)} placeholder={String(amount)} onChange={(e) => setPriceEdits({ ...priceEdits, [priceEditKey(variant.id, duration)]: e.target.value })} /></Field>)}</div><div className="console-row-actions console-variant-actions"><button type="button" onClick={() => openTemplate(editing, variant)}><FileText size={14} /> Template</button><button type="button" onClick={() => { setReason(variant.orderLock?.reason || ""); setAction({ type: "variant-lock", product: editing, variant }); }}>{variant.orderLock?.enabled ? <UnlockKeyhole size={14} /> : <LockKeyhole size={14} />} {variant.orderLock?.enabled ? "Buka" : "Freeze"}</button></div></article>)}</div>}</div></Dialog> : null}
+    {editing !== undefined ? <Dialog open title={editing ? "Edit produk" : "Tambah produk"} eyebrow="Katalog" onClose={() => setEditing(undefined)} wide footer={<DialogActions onCancel={() => setEditing(undefined)} onConfirm={save} confirmLabel="Simpan produk" busy={busy} />}>{formError ? <Notice tone="danger">{formError}</Notice> : null}<div className="console-resource-form-grid"><Field label="Nama"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field><Field label="Kode"><input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} /></Field><Field label="Kategori"><input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} /></Field><Field label="Status"><select value={form.isActive ? "active" : "inactive"} onChange={(e) => setForm({ ...form, isActive: e.target.value === "active" })}><option value="active">Aktif</option><option value="inactive">Nonaktif</option></select></Field><Field label="Deskripsi"><textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field><Field label="Aturan"><div className="ui-checkbox-stack"><label><input type="checkbox" checked={form.resellerOnly} onChange={(e) => setForm({ ...form, resellerOnly: e.target.checked })} /> Reseller only</label><label><input type="checkbox" checked={form.needsProfile} onChange={(e) => setForm({ ...form, needsProfile: e.target.checked })} /> Butuh profil</label><label><input type="checkbox" checked={form.needsPin} onChange={(e) => setForm({ ...form, needsPin: e.target.checked })} /> Butuh PIN</label></div></Field>{!editing ? <><Field label="Variant awal"><input value={form.variantName} onChange={(e) => setForm({ ...form, variantName: e.target.value })} /></Field><Field label="Kode variant"><input value={form.variantCode} onChange={(e) => setForm({ ...form, variantCode: e.target.value })} /></Field><Field label="Harga 1 bulan"><input type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} /></Field></> : <div className="console-variant-locks">{editing.variants.map((variant) => <article key={variant.id}><div className="console-variant-title"><strong>{variant.name}</strong><small>{variant.code}</small></div><Badge tone={variant.deliveryTemplate ? "success" : "warning"}>{variant.deliveryTemplate ? `Template v${variant.deliveryTemplateVersion || 1}` : "Belum ada template"}</Badge><div className="console-variant-prices">{sortedPriceEntries(variant.prices).map(([duration, amount]) => <Field key={duration} label={duration}><input type="number" min="0" step="1000" value={priceEdits[priceEditKey(variant.id, duration)] ?? String(amount)} placeholder={String(amount)} onChange={(e) => setPriceEdits({ ...priceEdits, [priceEditKey(variant.id, duration)]: e.target.value })} /></Field>)}</div><div className="console-row-actions console-variant-actions"><button type="button" onClick={() => openTemplate(editing, variant)}><FileText size={14} /> Template</button><button type="button" onClick={() => { setReason(variant.orderLock?.reason || ""); setAction({ type: "variant-lock", product: editing, variant }); }}>{variant.orderLock?.enabled ? <UnlockKeyhole size={14} /> : <LockKeyhole size={14} />} {variant.orderLock?.enabled ? "Buka" : "Kunci"}</button></div></article>)}</div>}</div></Dialog> : null}
     {templateTarget ? <Dialog open title="Template Pengiriman" eyebrow={`${templateTarget.product.name} / ${templateTarget.variant.name}`} onClose={() => setTemplateTarget(null)} wide footer={<DialogActions onCancel={() => setTemplateTarget(null)} onConfirm={saveTemplate} confirmLabel="Simpan template" busy={busy} />}>
       {templateError ? <Notice tone="danger">{templateError}</Notice> : null}
       <div className="console-template-editor">
@@ -240,11 +322,19 @@ export default function OwnerConsoleProductsPage() {
         <Field label="Plain text template"><textarea className="console-template-textarea" value={templateSource} onChange={(event) => setTemplateSource(event.target.value)} spellCheck={false} /></Field>
         <div><span className="console-template-label">Sisipkan placeholder</span><div className="console-template-placeholders">{templatePlaceholders.map((field) => <button type="button" key={field} onClick={() => insertPlaceholder(field)}>{`{{${field}}}`}</button>)}</div></div>
         <Field label="Field wajib (pisahkan koma, gunakan | untuk alternatif)"><input value={templateRequired} onChange={(event) => setTemplateRequired(event.target.value)} placeholder="email|login_identifier, password, rental_end" /></Field>
-        <div className="console-template-actions"><button type="button" onClick={previewTemplate} disabled={busy}><FileText size={14} /> Preview Template</button><select value={templatePreviewDuration} onChange={(event) => setTemplatePreviewDuration(event.target.value)} aria-label="Durasi preview">{templatePreviewDurations.map((duration) => <option key={duration.value} value={duration.value}>{duration.label}</option>)}</select><select value={templateCopySource} onChange={(event) => setTemplateCopySource(event.target.value)}><option value="">Pilih varian sumber</option>{products.flatMap((product) => product.variants.map((variant) => ({ product, variant }))).filter(({ product, variant }) => product.id !== templateTarget.product.id || variant.id !== templateTarget.variant.id).map(({ product, variant }) => <option key={`${product.id}:${variant.id}`} value={`${product.id}::${variant.id}`}>{product.name} / {variant.name}</option>)}</select><button type="button" onClick={copyTemplate} disabled={!templateCopySource || busy}><Copy size={14} /> Salin dari Varian Lain</button></div>
+        <div className="console-template-actions"><button type="button" onClick={previewTemplate} disabled={busy}><FileText size={14} /> Preview Template</button><select value={templatePreviewDuration} onChange={(event) => setTemplatePreviewDuration(event.target.value)} aria-label="Durasi preview">{templatePreviewDurations.map((duration) => <option key={duration.value} value={duration.value}>{duration.label}</option>)}</select><select value={templateCopySource} onChange={(event) => setTemplateCopySource(event.target.value)}><option value="">Pilih varian sumber</option>{products.flatMap((product) => product.variants.map((variant) => ({ product, variant }))).filter(({ product, variant }) => product.id !== templateTarget.product.id || variant.id !== templateTarget.variant.id).map(({ product, variant }) => <option key={`${product.id}:${variant.id}`} value={`${product.id}::${variant.id}`}>{product.name} / {variant.name}</option>)}</select><button type="button" onClick={() => copyTemplate().catch(() => undefined)} disabled={!templateCopySource || busy}><Copy size={14} /> Salin dari Varian Lain</button></div>
         {templateWarnings.length ? <Notice tone={templateWarnings.some((item) => /tidak valid|belum ditutup|tidak dikenal|kosong/i.test(item)) ? "danger" : "warning"}>{templateWarnings.join(" ")}</Notice> : null}
         <div className="console-template-preview"><header><strong>Preview Template</strong><span>Data preview — bukan data pelanggan asli</span></header>{templatePreview ? <pre>{templatePreview}</pre> : <p>Preview otomatis muncul setelah template diisi.</p>}</div>
       </div>
     </Dialog> : null}
-    {action ? <Dialog open title={action.type === "delete" ? "Hapus produk" : action.type === "archive" ? "Ubah status arsip" : action.type === "variant-lock" ? action.variant.orderLock?.enabled ? "Buka varian" : "Freeze varian" : action.product.orderLock?.enabled ? "Buka pemesanan" : "Freeze pemesanan"} eyebrow={action.type === "variant-lock" ? `${action.product.name} / ${action.variant.name}` : action.product.name} onClose={() => setAction(null)} footer={<DialogActions onCancel={() => setAction(null)} onConfirm={executeAction} confirmLabel="Konfirmasi" busy={busy} danger={action.type === "delete"} />}>{actionError ? <Notice tone="danger">{actionError}</Notice> : null}{action.type === "lock" || action.type === "variant-lock" ? <Field label="Alasan"><textarea value={reason} onChange={(e) => setReason(e.target.value)} /></Field> : <Notice tone={action.type === "delete" ? "danger" : "warning"}>{action.type === "delete" ? "Produk akan dihapus melalui endpoint owner yang sudah ada. Tindakan ini tidak dapat dibatalkan." : "Status arsip produk akan diubah tanpa menghapus data historis."}</Notice>}</Dialog> : null}
+    {/*
+     * Renders after the template editor, so it is the top of the overlay stack
+     * -- which is what the owner needs to act on first. Closing it returns to
+     * the editor with the typed template intact.
+     */}
+    {templateCopyConfirm ? <Dialog open title="Ganti dengan template lain?" eyebrow={templateTarget ? `${templateTarget.product.name} / ${templateTarget.variant.name}` : "Template"} onClose={() => setTemplateCopyConfirm(false)} footer={<DialogActions onCancel={() => setTemplateCopyConfirm(false)} onConfirm={() => copyTemplate(true).catch(() => undefined)} confirmLabel="Salin dan ganti" busy={busy} danger />}>
+      <Notice tone="warning">Template yang Anda sunting akan diganti seluruhnya dengan isi varian yang dipilih. Perubahan yang belum disimpan akan hilang.</Notice>
+    </Dialog> : null}
+    {action ? <Dialog open title={action.type === "delete" ? "Hapus produk" : action.type === "archive" ? "Ubah status arsip" : action.type === "variant-lock" ? action.variant.orderLock?.enabled ? "Buka varian" : "Kunci varian" : action.product.orderLock?.enabled ? "Buka pemesanan" : "Kunci pemesanan"} eyebrow={action.type === "variant-lock" ? `${action.product.name} / ${action.variant.name}` : action.product.name} onClose={() => setAction(null)} footer={<DialogActions onCancel={() => setAction(null)} onConfirm={executeAction} confirmLabel="Konfirmasi" busy={busy} danger={action.type === "delete"} />}>{actionError ? <Notice tone="danger">{actionError}</Notice> : null}{action.type === "lock" || action.type === "variant-lock" ? <Field label="Alasan"><textarea value={reason} onChange={(e) => setReason(e.target.value)} /></Field> : <Notice tone={action.type === "delete" ? "danger" : "warning"}>{action.type === "delete" ? "Produk akan dihapus melalui endpoint owner yang sudah ada. Tindakan ini tidak dapat dibatalkan." : "Status arsip produk akan diubah tanpa menghapus data historis."}</Notice>}</Dialog> : null}
   </ConsoleShell>;
 }

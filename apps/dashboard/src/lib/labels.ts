@@ -176,6 +176,37 @@ export function accountStatus(value?: string | null): Label {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Product catalogue                                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Whether a product can still be bought.
+ *
+ * `isArchived` wins over `isActive`, because a product can be archived without
+ * ever being switched off. Reporting an archived product as merely inactive
+ * hides the reason it stopped selling -- which is the only thing the owner
+ * would want to know before un-archiving it.
+ */
+export function productStatus(product: { isActive?: boolean; isArchived?: boolean }): Label {
+  if (product.isArchived) return { label: "Diarsipkan", tone: "muted" };
+  if (!product.isActive) return { label: "Nonaktif", tone: "warning" };
+  return { label: "Aktif", tone: "success" };
+}
+
+/**
+ * Whether ordering is frozen.
+ *
+ * "Dikunci", not "Dibekukan". Freezing is a deliberate act -- a supplier pulled
+ * out, a price is wrong, a delivery template is being fixed -- and "beku" reads
+ * as cold storage rather than a switch the owner threw. The inverse is
+ * "Terbuka" rather than "Open", which is the English word the column used to
+ * show a product that is simply selling normally.
+ */
+export function orderLockStatus(lock?: { enabled?: boolean } | null): Label {
+  return lock?.enabled ? { label: "Dikunci", tone: "danger" } : { label: "Terbuka", tone: "success" };
+}
+
+/* -------------------------------------------------------------------------- */
 /* Orders                                                                     */
 /* -------------------------------------------------------------------------- */
 
