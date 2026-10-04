@@ -396,6 +396,10 @@
 .console-access-result > strong { color: var(--text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: clamp(18px, 2vw, 28px); line-height: 1.35; overflow-wrap: anywhere; white-space: pre-wrap; }
 .console-access-result > strong.is-empty { color: var(--text-secondary); font-family: inherit; font-size: 12px; font-weight: 500; }
 .console-access-result > p, .console-access-result > small { margin: 0; color: var(--text-muted); font-size: 10px; line-height: 1.55; }
+/* The identity line sits between the code and the auto-hide note on purpose:
+   it is the one thing that says whose credential this is, so it is sized like
+   a label rather than like the fine print it used to share a rule with. */
+.console-access-result > p.console-access-result-account { color: var(--text-secondary); font-size: 11px; font-weight: 620; overflow-wrap: anywhere; }
 .console-access-result .console-secondary-button { width: fit-content; }
 .console-access-account-list { max-height: 610px; overflow-y: auto; scrollbar-color: var(--border-strong) transparent; }
 .console-access-account { display: grid; width: 100%; min-height: 68px; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 10px 16px; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; transition: background 200ms var(--ease-out-expo); }

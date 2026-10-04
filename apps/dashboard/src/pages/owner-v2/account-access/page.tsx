@@ -3,6 +3,7 @@ import { Check, CircleAlert, Clipboard, KeyRound, Link2, Mail, RefreshCw, Search
 import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import { Badge, Button, MetricRow, Notice } from "../../../components/ui";
 import { systemStateFor } from "../../../components/attention";
+import { accountStatus, type Label } from "../../../lib/labels";
 import {
   api,
   type AccountAccessLookupResult,
@@ -27,22 +28,38 @@ function accountTarget(account: OwnerAccountAccessAccount, provider: Provider) {
   return provider === "disney" ? String(account.loginPhone || account.email || "").trim() : String(account.email || "").trim().toLowerCase();
 }
 
-function statusTone(account: OwnerAccountAccessAccount) {
-  const status = String(account.status || "active").toLowerCase();
-  if (["expired", "replaced", "disabled"].includes(status)) return "danger" as const;
-  if (account.expiresAt) {
-    const remaining = new Date(account.expiresAt).getTime() - Date.now();
-    if (Number.isFinite(remaining) && remaining <= 7 * 24 * 60 * 60 * 1000) return "warning" as const;
-  }
-  return "success" as const;
-}
+/** Inside this window an active account is reported as ending soon. */
+const EXPIRY_WARNING_MS = 7 * 24 * 60 * 60 * 1000;
 
-function statusLabel(account: OwnerAccountAccessAccount) {
-  const status = String(account.status || "active").toLowerCase();
-  if (status === "expired") return "Kedaluwarsa";
-  if (status === "replaced") return "Diganti";
-  if (status === "disabled") return "Tidak aktif";
-  return statusTone(account) === "warning" ? "Hampir berakhir" : "Aktif";
+/**
+ * An account's status, plus the one judgement the stored value cannot make.
+ *
+ * The words and the colours come from `lib/labels`, like every other status in
+ * the console. What this page adds is the expiry window: an `active` account
+ * whose expiry is inside a week is not "Aktif" in any sense an owner needs, and
+ * no column in the store knows that.
+ *
+ * It used to define its own answers instead -- "Kedaluwarsa" for `expired`,
+ * "Diganti" for `replaced`, "Tidak aktif" for `disabled` -- which put a sixth
+ * set of words on a status the rest of the product already names three ways.
+ * "Kedaluwarsa" was the worst of them: it is the word the order vocabulary
+ * reserves for a QRIS payment that timed out, so an account that simply ran
+ * out of days read as an unpaid order.
+ */
+function accountAccessStatus(account: OwnerAccountAccessAccount): Label {
+  const base = accountStatus(account.status);
+  const stored = String(account.status || "active").trim().toLowerCase();
+
+  // Only `active` can be improved on by the clock. An account already replaced
+  // or disabled is in trouble whatever its expiry date says, and warning about
+  // its date instead of its state would point the owner at the wrong problem.
+  if (stored !== "active" || !account.expiresAt) return base;
+
+  const remaining = new Date(account.expiresAt).getTime() - Date.now();
+  if (Number.isFinite(remaining) && remaining <= EXPIRY_WARNING_MS) {
+    return { label: "Segera berakhir", tone: "warning" };
+  }
+  return base;
 }
 
 function lookupErrorText(result: AccountAccessLookupResult) {
@@ -68,6 +85,8 @@ export default function OwnerConsoleAccountAccessPage() {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [updatedAt, setUpdatedAt] = useState("");
   const requestRef = useRef(0);
+  const copyTimerRef = useRef<number | null>(null);
+  const COPY_STATE_MS = 1800;
 
   const tools = provider === "disney" ? disneyTools : netflixTools;
 
@@ -99,12 +118,37 @@ export default function OwnerConsoleAccountAccessPage() {
     return () => window.clearTimeout(timer);
   }, [result]);
 
+  // The credential auto-hide above is cleared by its own effect. The copy
+  // confirmation's timer is not -- it belongs to an event, not to a value, so
+  // there is no dependency that would ever retire it. Without this it fires
+  // 1.8s after the owner has navigated away, into a component that no longer
+  // exists.
+  useEffect(() => clearCopyTimer, []);
+
+  /**
+   * Cancel a pending "Tersalin" reset.
+   *
+   * Without this the timer survives a tool switch, a provider switch, and the
+   * unmount of the page itself, and fires 1.8s later into whatever is on screen
+   * now. It is harmless in isolation -- it only writes "idle" -- but it is the
+   * same class of omission as the untracked timers the reveal fix removed, and
+   * leaving one behind while fixing the others makes the next reader unsure
+   * which timers in this file are owned.
+   */
+  const clearCopyTimer = () => {
+    if (copyTimerRef.current !== null) {
+      window.clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = null;
+    }
+  };
+
   /*
-   * Switching provider, switching tool, or typing a different target all make
-   * whatever is on screen wrong, so they all go through one function.
+   * Switching provider, switching tool, typing a different target, or picking a
+   * different account from the list all make whatever is on screen wrong, so
+   * they all go through one function.
    *
    * This is `reseller-v2/access`'s `clearResult`, copied because the omission
-   * was a bug twice over in this file:
+   * was a bug three times over in this file:
    *
    *   - The page bumped `requestRef` without clearing `lookupLoading`. The
    *     in-flight lookup then failed its own `finally` check and never cleared
@@ -114,12 +158,19 @@ export default function OwnerConsoleAccountAccessPage() {
    *     matched its request id, and rendered -- under the label of the tool that
    *     had just been selected. A sign-in code displayed as "Reset password" is
    *     worse than no code, because the owner stops looking.
+   *   - Picking an account from the list bumped nothing either, which is the
+   *     worst of the three. The handler set the query and blanked the result,
+   *     so the owner saw a lookup for account A vanish and the input switch to
+   *     account B -- then A's sign-in code arrived, still matched its own
+   *     request id, and rendered under B. Two different customers' credentials
+   *     on one screen, with the input naming the wrong one.
    *
    * Incrementing the request id is what makes the in-flight response stale; the
    * rest is what stops it being visible if it arrives anyway.
    */
   const clearResult = () => {
     requestRef.current += 1;
+    clearCopyTimer();
     setLookupLoading(false);
     setResult(null);
     setLookupError("");
@@ -128,6 +179,7 @@ export default function OwnerConsoleAccountAccessPage() {
 
   const changeProvider = (nextProvider: Provider) => {
     requestRef.current += 1;
+    clearCopyTimer();
     setProvider(nextProvider);
     setTool(nextProvider === "disney" ? "disney_otp" : "signin");
     setQuery("");
@@ -145,7 +197,7 @@ export default function OwnerConsoleAccountAccessPage() {
       if (!target) continue;
       const key = target.toLowerCase();
       const existing = unique.get(key);
-      if (!existing || (statusTone(existing) !== "success" && statusTone(account) === "success")) unique.set(key, account);
+      if (!existing || (accountAccessStatus(existing).tone !== "success" && accountAccessStatus(account).tone === "success")) unique.set(key, account);
     }
     return [...unique.values()]
       .filter((account) => !search || [accountTarget(account, provider), account.product, account.variant, account.profile].join(" ").toLowerCase().includes(search))
@@ -185,6 +237,11 @@ export default function OwnerConsoleAccountAccessPage() {
    * they had copied a code they had not. `copyState` is what the kit's
    * `CopyButton` does with the same problem, kept here because this button is a
    * `Button weight="secondary"` and not a kit component.
+   *
+   * The reset timer is now owned. Pressing copy, switching tool, and leaving
+   * the page all clear it, so "Tersalin" can never outlive the value it was
+   * confirming -- which matters here specifically, because the confirmation
+   * refers to a credential that may already have been cleared off the screen.
    */
   const copyResult = async () => {
     const value = String(result?.result.value || "");
@@ -195,11 +252,15 @@ export default function OwnerConsoleAccountAccessPage() {
     } catch {
       setCopyState("failed");
     }
-    window.setTimeout(() => setCopyState("idle"), 1800);
+    clearCopyTimer();
+    copyTimerRef.current = window.setTimeout(() => {
+      copyTimerRef.current = null;
+      setCopyState("idle");
+    }, COPY_STATE_MS);
   };
 
-  const activeCount = accounts.filter((account) => statusTone(account) === "success").length;
-  /* `statusTone` already encodes the judgement: expired, replaced or
+  const activeCount = accounts.filter((account) => accountAccessStatus(account).tone === "success").length;
+  /* `accountAccessStatus` already encodes the judgement: expired, replaced or
      disabled is a problem, and anything expiring inside a week is a
      problem that is about to become one. So the attention count is the
      complement of the active count -- one filter, two answers, which is
@@ -262,7 +323,21 @@ export default function OwnerConsoleAccountAccessPage() {
                   <Badge tone={resultValue ? "success" : "warning"}>{resultValue ? "Ditemukan" : "Belum tersedia"}</Badge>
                 </div>
                 <strong className={resultValue ? "" : "is-empty"}>{resultValue || lookupErrorText(result)}</strong>
-                <p>{[result.account.product, result.account.variant, result.account.profile].filter(Boolean).join(" - ")}</p>
+                {/*
+                 * Which account. Without it the only thing on screen naming an
+                 * account is the search input, which the owner can edit freely
+                 * and which this panel does not observe -- a code fetched for
+                 * one customer could be read as belonging to another, and the
+                 * number below is the thing they hand to a customer. So the
+                 * answer travels with the code instead of being inferred from
+                 * the field next to it.
+                 *
+                 * Read off `result.account`, not off the live `provider`: the
+                 * provider tab decides which field is the identity, and a
+                 * reader should never have to reconstruct that mapping to know
+                 * whose code they are looking at.
+                 */}
+                <p className="console-access-result-account">{[result.account.email, result.account.loginPhone, result.account.product, result.account.variant, result.account.profile].map((part) => String(part || "").trim()).filter(Boolean).join(" - ")}</p>
                 {resultValue ? <Button weight="secondary" onClick={() => copyResult().catch(() => undefined)}>{copyState === "copied" ? <Check size={16} /> : copyState === "failed" ? <CircleAlert size={16} /> : result.result.kind === "link" ? <Link2 size={16} /> : <Clipboard size={16} />}{copyState === "copied" ? "Tersalin" : copyState === "failed" ? "Gagal" : result.result.kind === "link" ? "Salin Link" : "Salin Kode"}</Button> : null}
                 <small>Hasil otomatis dihapus dari layar setelah 60 detik dan tidak disimpan di browser.</small>
               </div>
@@ -281,10 +356,10 @@ export default function OwnerConsoleAccountAccessPage() {
             {!accountsLoading && !accountsError && !visibleAccounts.length ? <div className="console-access-state">Tidak ada akun yang cocok.</div> : null}
             {!accountsLoading && !accountsError ? visibleAccounts.map((account) => {
               const target = accountTarget(account, provider);
-              return <button key={`${account.id}-${target}`} type="button" className="console-access-account" onClick={() => { setQuery(target); setLookupError(""); setResult(null); }}>
+              return <button key={`${account.id}-${target}`} type="button" className="console-access-account" onClick={() => { clearResult(); setQuery(target); }}>
                 <span className="console-access-account-icon">{provider === "disney" ? <Smartphone size={16} /> : <Mail size={16} />}</span>
                 <span><strong>{target}</strong><small>{[account.product, account.variant, account.profile].filter(Boolean).join(" - ")}</small></span>
-                <Badge tone={statusTone(account)}>{statusLabel(account)}</Badge>
+                <Badge tone={accountAccessStatus(account).tone}>{accountAccessStatus(account).label}</Badge>
               </button>;
             }) : null}
           </div>
