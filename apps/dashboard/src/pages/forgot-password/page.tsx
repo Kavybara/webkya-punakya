@@ -172,10 +172,10 @@ export default function ForgotPasswordPage() {
         <form className="auth-form" onSubmit={submitVerify} noValidate>
           <div className="auth-destination"><span>Kode dikirim ke</span><strong>{maskResetDestination(identifier)}</strong></div>
           {message ? <p className="auth-notice is-success">{message}</p> : null}
-          <OtpInput id="reset-otp" label="Kode verifikasi 6 digit" value={code} onChange={(value) => { setCode(value); setError(""); }} error={error} disabled={loading} />
+          <OtpInput id="reset-otp" label="Kode verifikasi 6 digit" value={code} onChange={(value) => { setCode(value); setError(""); }} error={error} disabled={loading} aria-busy={loading || undefined} />
           <div className="auth-resend">
             <span>Kode berlaku sesuai waktu yang ditentukan sistem.</span>
-            <button type="button" disabled={loading || resendCountdown > 0} onClick={() => void requestCode(true)}>
+            <button type="button" disabled={loading || resendCountdown > 0} aria-busy={loading || undefined} onClick={() => void requestCode(true)}>
               {resendCountdown > 0 ? `Kirim ulang (${resendCountdown}s)` : "Kirim Ulang"}
             </button>
           </div>

@@ -163,7 +163,7 @@ export default function OwnerConsoleIntegrationConfigurePage() {
   ].filter((ready) => !ready).length;
 
   const saveButton = (section: IntegrationSection, label: string) => (
-    <Button weight="primary" className="console-config-save" disabled={Boolean(busy)} onClick={() => void save(section)}>
+    <Button weight="primary" className="console-config-save" disabled={Boolean(busy)} loading={busy === section} onClick={() => void save(section)}>
       <Save size={14} /> {label}
     </Button>
   );
@@ -230,8 +230,8 @@ export default function OwnerConsoleIntegrationConfigurePage() {
           icon={<Mail size={18} />}
           actions={
             <div className="console-config-actions">
-              <Button weight="secondary" disabled={Boolean(busy)} onClick={() => void save("gmail")}>Simpan Gmail</Button>
-              <Button weight="primary" disabled={Boolean(busy)} onClick={() => void connectGmail()}>
+              <Button weight="secondary" disabled={Boolean(busy)} loading={busy === "gmail"} onClick={() => void save("gmail")}>Simpan Gmail</Button>
+              <Button weight="primary" disabled={Boolean(busy)} loading={busy === "gmail-oauth"} onClick={() => void connectGmail()}>
                 Hubungkan OAuth <ExternalLink size={14} />
               </Button>
             </div>
@@ -269,7 +269,7 @@ export default function OwnerConsoleIntegrationConfigurePage() {
           icon={<Sheet size={18} />}
           actions={
             <div className="console-config-actions">
-              <Button weight="secondary" disabled={Boolean(busy)} onClick={() => void save("googleSheets")}>Simpan Sheets</Button>
+              <Button weight="secondary" disabled={Boolean(busy)} loading={busy === "googleSheets"} onClick={() => void save("googleSheets")}>Simpan Sheets</Button>
               <Button weight="primary" disabled={Boolean(busy)} onClick={() => setConfirmTemplate(true)}>Buat template</Button>
             </div>
           }

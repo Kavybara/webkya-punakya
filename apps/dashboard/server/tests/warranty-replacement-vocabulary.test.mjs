@@ -262,7 +262,11 @@ test("the picker no longer pre-selects the first candidate", () => {
 
   // ...and the button it feeds was already disabled on an empty selection, so
   // nothing new has to be wired up for the removal to be safe.
-  assert.match(source, /disabled=\{!candidateId \|\| busy \|\| !ownerNote\.trim\(\)\} onClick=\{\(\) => setConfirmReplace\(true\)\}/);
+  //
+  // A bounded gap between the two attributes, not a literal space: Phase 5 added
+  // an `aria-busy` here, and this assertion is about *which* guard disables the
+  // button, not about attribute order.
+  assert.match(source, /disabled=\{!candidateId \|\| busy \|\| !ownerNote\.trim\(\)\}[\s\S]{0,90}?onClick=\{\(\) => setConfirmReplace\(true\)\}/);
 });
 
 test("an empty picker says so, rather than looking broken", () => {

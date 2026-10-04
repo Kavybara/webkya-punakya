@@ -10,6 +10,7 @@ import type { CheckoutField } from "../../lib/types";
 import { formatRupiah } from "../../lib/format";
 import { useQrisQr } from "../../lib/useQrisQr";
 import { qrisPayloadFrom } from "../../lib/qrisQr";
+import { useOverlayFocus } from "../../components/ui/Overlay";
 import "./products.css";
 
 type CheckoutStep = "catalog" | "details" | "payment" | "process" | "done";
@@ -357,6 +358,7 @@ export default function ProductsPage() {
   const [credentialsVisible, setCredentialsVisible] = useState(false);
   const [copiedValue, setCopiedValue] = useState("");
   const [qrExpanded, setQrExpanded] = useState(false);
+  const qrClose = useCallback(() => setQrExpanded(false), []);
   const submitLockRef = useRef(false);
   const paymentRefreshLockRef = useRef(false);
   const verifiedCheckoutSessionRef = useRef("");
@@ -593,14 +595,10 @@ export default function ProductsPage() {
     setQrExpanded(false);
   }, [step]);
 
-  useEffect(() => {
-    if (!qrExpanded) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setQrExpanded(false);
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [qrExpanded]);
+  // The Escape listener this used to carry is now inside `useOverlayFocus`,
+  // along with the focus trap and the restore. Left in place it would have been
+  // a second window-level Escape handler for the same overlay -- harmless today,
+  // but two of them is how the drawer-behind-the-dialog bug happened.
 
   useEffect(() => {
     setTouched({ customer: false, customerData: false, whatsapp: false });
@@ -875,6 +873,17 @@ export default function ProductsPage() {
   // Drawn here, from the provider's raw string -- never fetched as an image
   // from the provider or from anyone else. See lib/qrisQr.ts.
   const qrSrc = useQrisQr(qrisPayloadFrom(payment));
+  // The enlarged-QRIS lightbox is a dialog, so it owes the keyboard reader what
+  // every other one gets: focus moves in, Tab stays in, Escape dismisses, and
+  // focus returns to the button that opened it. It had its own Escape listener
+  // and nothing else, so a keyboard user who opened the QR kept tabbing through
+  // the checkout form hidden behind it. The kit's hook exists for exactly this
+  // case -- a dialog whose chrome is not a title bar -- and it is declared here
+  // rather than beside the state because it needs `qrSrc`.
+  const { panelRef: qrPanelRef, closeRef: qrCloseRef } = useOverlayFocus(
+    qrExpanded && Boolean(qrSrc),
+    qrClose,
+  );
   const fulfillment = splitFulfillmentDisplayText(createdOrder?.fulfillmentText || "");
   const stockRaceDeposit = createdOrder?.deliveryStatus === "stock_unavailable_deposit";
   const depositUsed = Number(createdOrder?.depositUsed || payment?.depositUsed || 0);
@@ -1200,7 +1209,7 @@ export default function ProductsPage() {
                   <button
                     type="button"
                     onClick={submitOrder}
-                    disabled={submitting || !selection || resellerCheck.status === "checking" || resellerCheck.status === "invalid"}
+                    disabled={submitting || !selection || resellerCheck.status === "checking" || resellerCheck.status === "invalid"} aria-busy={submitting || undefined}
                     className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[var(--text-primary)] px-4 text-sm font-semibold text-[var(--text-inverse)] transition-colors hover:bg-[color-mix(in_srgb,var(--status-success)_84%,black)] disabled:cursor-not-allowed disabled:bg-[var(--bg-raised)] disabled:text-[var(--text-muted)]"
                   >
                     {submitting ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-[color-mix(in_srgb,var(--text-on-inverse)_22%,transparent)] border-t-[var(--text-on-inverse)]" aria-hidden="true" /> : <ArrowRight size={16} aria-hidden="true" />}
@@ -1305,11 +1314,14 @@ export default function ProductsPage() {
                   </div>
                 </div>
                 {qrExpanded && qrSrc ? (
-                  <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[color-mix(in_srgb,var(--bg-canvas)_76%,transparent)] p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="QRIS diperbesar" onClick={() => setQrExpanded(false)}>
-                    <div className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4" onClick={(event) => event.stopPropagation()}>
+                  <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[color-mix(in_srgb,var(--bg-canvas)_76%,transparent)] p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="QRIS diperbesar" onClick={qrClose}>
+                    {/* `ref` on the panel, not the scrim: the trap must walk the
+                        lightbox's own controls. The scrim keeps a click handler
+                        instead, so a click inside the panel does not dismiss. */}
+                    <div ref={qrPanelRef} className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4" onClick={(event) => event.stopPropagation()}>
                       <div className="flex items-center justify-between gap-3">
                         <div><p className="font-semibold text-[var(--text-primary)]">QRIS Pembayaran</p><p className="mt-1 break-all font-mono text-xs text-[var(--text-muted)]">{createdOrder?.id}</p></div>
-                        <button type="button" onClick={() => setQrExpanded(false)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-primary)]" aria-label="Tutup QRIS">
+                        <button ref={qrCloseRef} type="button" onClick={qrClose} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-primary)]" aria-label="Tutup QRIS">
                           <X size={20} aria-hidden="true" />
                         </button>
                       </div>
@@ -1556,7 +1568,7 @@ export default function ProductsPage() {
                       ))}
                     </div>
 
-                    <button type="button" onClick={startCatalogOrder} disabled={prechecking} className="catalog-primary mt-4 w-full disabled:cursor-wait disabled:bg-[var(--bg-raised)] disabled:text-[var(--text-muted)]">
+                    <button type="button" onClick={startCatalogOrder} disabled={prechecking} aria-busy={prechecking || undefined} className="catalog-primary mt-4 w-full disabled:cursor-wait disabled:bg-[var(--bg-raised)] disabled:text-[var(--text-muted)]">
                       Pesan Sekarang
                     </button>
                         </>

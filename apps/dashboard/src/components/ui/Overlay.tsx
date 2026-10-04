@@ -313,17 +313,23 @@ export function DialogActions({
   confirmDisabled?: boolean;
   disabledReason?: string;
 }) {
-  const blocked = busy || confirmDisabled;
   return (
     <div className="ui-dialog-actions" aria-busy={busy || undefined}>
+      {/* Cancel stays plain `disabled`, not `loading`: it is not doing the work,
+          and marking it busy would tell a screen reader that the control the
+          reader reaches for to escape is itself mid-request. */}
       <Button weight="secondary" onClick={onCancel} disabled={busy}>Batal</Button>
       {/* `title` only, not visible text: the reason is rendered by the caller as
           a `Notice` in the dialog body, where it is readable by everyone and not
-          only by a mouse user who waits for a tooltip. */}
+          only by a mouse user who waits for a tooltip. `loading` carries the
+          busy half -- it disables and marks busy in one declaration -- and
+          `confirmDisabled` the impossible half, so the two can never be
+          conflated into one flag again. */}
       <Button
         weight={danger ? "danger" : "primary"}
         onClick={onConfirm}
-        disabled={blocked}
+        loading={busy}
+        disabled={confirmDisabled}
         title={confirmDisabled && disabledReason ? disabledReason : undefined}
       >
         {busy ? <LoaderCircle className="ui-spin" size={15} /> : null}

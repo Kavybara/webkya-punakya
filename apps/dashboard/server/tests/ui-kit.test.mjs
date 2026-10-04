@@ -469,10 +469,25 @@ test("the one button defaults to type=button, and has a component behind its sty
   // type="button" rather than the HTML default of submit: both consoles are
   // forms, and a button meant to close a panel that silently submits the form
   // behind it only misbehaves for whoever clicks it last.
+  //
+  // The assertion is about *ordering* -- `type` before the spread, so a caller
+  // can still pass their own. The line may carry attributes after the spread
+  // (Phase 5 added `disabled` and `aria-busy` there), so the match runs to the
+  // closing `>` rather than demanding it immediately after `{...rest}`.
   assert.match(
     text,
-    /<button type="button" className=\{classes\} \{\.\.\.rest\}>/,
+    /<button type="button" className=\{classes\} \{\.\.\.rest\}[^>]*>/,
     "Button must set type=button before spreading, so an explicit type still wins",
   );
   assert.match(text, /weight\?: ButtonWeight/, "the weight must be part of the public props");
+
+  // `loading` is the prop that makes the busy state impossible to half-declare:
+  // disabled and aria-busy derive from it, so a caller cannot forget the one
+  // that tells a screen reader work is underway.
+  assert.match(text, /loading\?: boolean;/, "loading must be part of the public props");
+  assert.match(
+    text,
+    /disabled=\{disabled \|\| loading\}[\s\S]{0,120}?aria-busy=\{loading \|\| undefined\}/,
+    "loading must drive both the disabled state and aria-busy",
+  );
 });

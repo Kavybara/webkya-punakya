@@ -453,6 +453,14 @@
   .console-panel-toolbar-actions :is(button, a) { min-height: 44px; flex: 0 0 auto; }
   .console-resource-form-grid { grid-template-columns: 1fr; }
   .console-template-actions { grid-template-columns: 1fr; }
+  /* The variant lock rows live inside the product dialog, which goes fullscreen
+     at 640px -- so their content box is 360px minus the body's 48px of padding,
+     312px. Three columns with floors of 170px and 190px plus a 190px actions
+     block do not fit that, and the row scrolled sideways instead of stacking.
+     Each cell takes its own line rather than being squeezed to unreadable. */
+  .console-variant-locks article { grid-template-columns: minmax(0, 1fr); gap: 11px; }
+  .console-variant-locks .console-variant-actions { justify-content: flex-start; min-width: 0; flex-wrap: wrap; }
+  .console-variant-locks button { min-width: 0; flex: 1 1 auto; min-height: 44px; }
   .console-resource-field.is-full { grid-column: auto; }
   .console-access-body { padding: 16px; }
   .console-access-provider { width: 100%; }

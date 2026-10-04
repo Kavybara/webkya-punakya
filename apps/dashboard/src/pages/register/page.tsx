@@ -183,10 +183,10 @@ export default function RegisterPage() {
         <form className="auth-form" onSubmit={verifyOtp} noValidate>
           <div className="auth-destination"><span>Kode dikirim ke</span><strong>{maskWhatsapp(form.whatsapp)}</strong></div>
           {message ? <p className="auth-notice is-success">{message}</p> : null}
-          <OtpInput id="register-otp" label="Kode verifikasi 6 digit" value={code} onChange={(value) => { setCode(value); setError(""); }} error={error} disabled={loading} />
+          <OtpInput id="register-otp" label="Kode verifikasi 6 digit" value={code} onChange={(value) => { setCode(value); setError(""); }} error={error} disabled={loading} aria-busy={loading || undefined} />
           <div className="auth-resend">
             <span>{expiresInSeconds ? `Kode berlaku sekitar ${Math.ceil(expiresInSeconds / 60)} menit.` : "Kode memiliki masa berlaku terbatas."}</span>
-            <button type="button" disabled={loading || resendCountdown > 0} onClick={() => void sendRegistrationCode(true)}>{resendCountdown > 0 ? `Kirim ulang (${resendCountdown}s)` : "Kirim Ulang"}</button>
+            <button type="button" disabled={loading || resendCountdown > 0} aria-busy={loading || undefined} onClick={() => void sendRegistrationCode(true)}>{resendCountdown > 0 ? `Kirim ulang (${resendCountdown}s)` : "Kirim Ulang"}</button>
           </div>
           <div className="auth-form-actions">
             <button type="button" className="auth-button is-secondary" onClick={changeNumber}>Ubah Nomor</button>

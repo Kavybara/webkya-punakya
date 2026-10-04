@@ -368,9 +368,16 @@ test("DialogActions can disable its confirm, which it could not before", () => {
 
   // `busy` means "wait", `confirmDisabled` means "impossible" -- they cannot be
   // the same flag, or a caller cannot tell a temporary state from a permanent
-  // one, and the Cancel button would grey out with the reason.
-  assert.match(source, /const blocked = busy \|\| confirmDisabled;/);
+  // one, and the Cancel button would grey out with the reason. Phase 5 stopped
+  // folding them into one local and handed the busy half to the kit's
+  // `loading` prop, which derives disabled *and* aria-busy from it; the
+  // assertion is that the two still reach the confirm as separate inputs.
+  assert.match(source, /loading=\{busy\}/);
+  assert.match(source, /disabled=\{confirmDisabled\}/);
+  // Cancel is the control a reader reaches for to escape, so it must not be
+  // announced as busy -- it is not the thing doing the work.
   assert.match(source, /weight="secondary" onClick=\{onCancel\} disabled=\{busy\}>Batal<\/Button>/);
+  assert.doesNotMatch(source, /onClick=\{onCancel\} loading=\{busy\}/);
 });
 
 /* -------------------------------------------------------------------------- */

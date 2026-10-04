@@ -106,7 +106,7 @@ export default function OwnerConsoleSettingsPage() {
           title="Profil owner"
           icon={<UserRound size={18} />}
           action={
-            <Button weight="primary" disabled={Boolean(busy)} onClick={() => void saveProfile()}>
+            <Button weight="primary" disabled={Boolean(busy)} loading={busy === "profile"} onClick={() => void saveProfile()}>
               <Save size={15} /> {busy === "profile" ? "Menyimpan..." : "Simpan profil"}
             </Button>
           }
@@ -130,7 +130,7 @@ export default function OwnerConsoleSettingsPage() {
           title="Ubah password"
           icon={<KeyRound size={18} />}
           action={
-            <Button weight="primary" disabled={Boolean(busy)} onClick={() => void changePassword()}>
+            <Button weight="primary" disabled={Boolean(busy)} loading={busy === "password"} onClick={() => void changePassword()}>
               <KeyRound size={15} /> {busy === "password" ? "Memproses..." : "Ubah password"}
             </Button>
           }

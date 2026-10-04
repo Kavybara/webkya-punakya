@@ -930,6 +930,24 @@
       animation-timeline: view();
       animation-range: entry 4% cover 22%;
     }
+
+    /* Bento cells settle on their own, per cell, so a grid arrives as a
+       sequence rather than as one block. The range starts later and ends
+       sooner than the shared rule above: a bento grid is usually the whole
+       first screen, so `entry 4%` would have every visible cell animating at
+       once on load, which reads as a flicker rather than a settle. `entry 12%`
+       leaves the cells already on screen at rest and animates only the ones
+       the reader actually scrolls to.
+
+       `.ui-bento-cell.is-link` is excluded: it carries a hover transform, and
+       an animation on `transform` owns that property for the length of the
+       timeline -- the lift would be silently suppressed while the cell was in
+       view, then snap in when it left. */
+    .ui-bento-cell:not(.is-link) {
+      animation: ui-reveal linear both;
+      animation-timeline: view();
+      animation-range: entry 12% cover 20%;
+    }
   }
 }
 

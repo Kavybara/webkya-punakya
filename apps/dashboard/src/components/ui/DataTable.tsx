@@ -164,7 +164,7 @@ export function DataTable<Row>({
               <button
                 type="button"
                 className={bulkAction.danger ? "is-danger" : ""}
-                disabled={bulkAction.busy}
+                disabled={bulkAction.busy} aria-busy={bulkAction.busy || undefined}
                 onClick={() => bulkAction.onClick(selectedRows, () => setSelected(new Set()))}
               >
                 {bulkAction.busy ? "Memproses..." : bulkAction.label}

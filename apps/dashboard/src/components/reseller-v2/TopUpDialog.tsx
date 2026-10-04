@@ -124,7 +124,7 @@ export function TopUpDialog({
   const [payment, setPayment] = useState<ApiPayment | null>(null);
   const [orderId, setOrderId] = useState("");
   /* A ref, not the `submitting` state above.
-     `disabled={submitting}` does not close the window this button has: React
+     `disabled={submitting} aria-busy={submitting || undefined}` does not close the window this button has: React
      has to re-render before the attribute lands, and two clicks inside that
      window both reach `submit`. The second request is not a duplicate that
      fails quietly -- for `qris_auto` it calls `createPakasirQris`, which makes
@@ -273,7 +273,7 @@ export function TopUpDialog({
           <button
             type="button"
             onClick={onClose}
-            disabled={submitting}
+            disabled={submitting} aria-busy={submitting || undefined}
             aria-label="Tutup Top Up"
           >
             <X size={19} />
@@ -464,14 +464,14 @@ export function TopUpDialog({
                   </p>
                 ) : null}
                 <div className="reseller-v2-topup-actions">
-                  <button type="button" onClick={onClose} disabled={submitting}>
+                  <button type="button" onClick={onClose} disabled={submitting} aria-busy={submitting || undefined}>
                     Batal
                   </button>
                   <button
                     type="button"
                     className="is-primary"
                     onClick={submit}
-                    disabled={submitting || !available}
+                    disabled={submitting || !available} aria-busy={submitting || undefined}
                   >
                     {submitting ? (
                       <>

@@ -642,7 +642,7 @@ export default function ResellerV2WarrantyPage() {
                   setError("");
                   setSent(false);
                 }}
-                disabled={loading || !accounts.length}
+                disabled={loading || !accounts.length} aria-busy={loading || undefined}
               >
                 {accounts.map((account) => (
                   <option key={account.id} value={account.id}>
