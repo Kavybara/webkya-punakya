@@ -215,15 +215,23 @@ test("a delivered account is not sent to the endpoint that would reject it", () 
 
   // `release-reservation` throws "Stok ini tidak sedang reserved" for anything
   // that is not reserved, so routing a sold row through it would turn every
-  // reopen into a 400. Built from a string rather than written as a literal,
-  // because a regex literal cannot start with `}` -- the parser reads it as a
-  // block. `\s*` rather than a space, because the two branches are on separate
-  // lines here.
-  assert.match(
+  // reopen into a 400. It still takes that path only for `reserved`.
+  assert.match(release, /if \(subject\.status === "reserved"\) \{\s*const released = await api\.releaseStockReservation/);
+
+  // The sold path used to be `api.updateStock(id, { status: "available" })`,
+  // which asserted the outcome and left no trace. Phase 6 gives it its own
+  // endpoint, so a sold unit gets the same linked-account guard as a
+  // reservation release and the server picks the resulting status.
+  assert.match(release, /const released = await api\.releaseStock\(subject\.id, \{ reason: releaseReason\.trim\(\) \}\)/);
+  assert.doesNotMatch(
     release,
-    new RegExp('\\} else \\{\\s*await api\\.updateStock\\(subject\\.id, \\{ status: "available" \\}\\);'),
-    "a sold row must take the plain update path, because the guarded endpoint refuses it",
+    /api\.updateStock\(subject\.id, \{ status: "available" \}\)/,
+    "a sold row is being written straight to available again",
   );
+
+  // And the reason is not optional -- an audit line with an empty reason says
+  // only that something happened.
+  assert.match(release, /if \(subject\.status !== "reserved" && !releaseReason\.trim\(\)\)/);
 });
 
 test("the reopen dialog tells the owner which of the two cases they are in", () => {
@@ -237,8 +245,17 @@ test("the reopen dialog tells the owner which of the two cases they are in", () 
     source,
     /editing\.status === "reserved" \? <Notice tone="warning">Sistem akan menolak selama masih ada akun harian aktif/,
   );
-  // A delivered account has none, and saying otherwise would be a lie.
-  assert.match(source, /server tidak melakukan apa pun untuk mencegahnya/);
+
+  // A delivered account used to be warned that the server does nothing at all,
+  // which was true of the `updateStock` call this dialog used to make. It is
+  // not true any more: the release endpoint refuses while a linked daily
+  // account is live. What the server genuinely cannot know is whether the
+  // customer has stopped using the credentials, so that is what it says.
+  assert.doesNotMatch(source, /server tidak melakukan apa pun untuk mencegahnya/);
+  assert.match(source, /server tidak bisa tahu apakah pelanggan lama sudah berhenti memakainya/);
+
+  // The reason field, and only for the branch that requires one.
+  assert.match(source, /editing\.status === "reserved" \? null : <Field label="Alasan pengembalian" required/);
 });
 
 test("every dialog opener clears the shared error", () => {

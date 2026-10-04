@@ -7703,22 +7703,6 @@ function buildWalletLedger(db) {
     });
   }
 
-  for (const claim of db.warrantyClaims || []) {
-    if (!["failed", "pending"].includes(String(claim.replacementSyncStatus || "").toLowerCase())) continue;
-    items.push({
-      id: `manual-warranty-sync-${claim.id}`,
-      severity: claim.replacementSyncStatus === "failed" ? "high" : "medium",
-      kind: "warranty_sync",
-      title: `Sinkronisasi penggantian garansi ${claim.id} ${claim.replacementSyncStatus === "failed" ? "gagal" : "belum selesai"}`,
-      detail: "Penggantian sudah dikunci di database. Buka Warranty Center dan coba sinkronisasi ulang tanpa memilih stok lain.",
-      createdAt: claim.replacementSyncFailedAt || claim.replacementSyncStartedAt || claim.updatedAt || claim.createdAt || "",
-      orderId: claim.orderId || "",
-      accountId: claim.replacement?.newAccountId || claim.accountId || "",
-      stockId: claim.replacement?.newStockId || "",
-      href: "/owner-v2/warranty",
-    });
-  }
-
   const resellerSummaries = Array.from(summaryByReseller.values())
     .sort((left, right) => Number(right.currentBalance || 0) - Number(left.currentBalance || 0));
   const allEntries = [...entries].sort(compareQueueItems);
@@ -8080,6 +8064,33 @@ function buildManualQueue(db, reconcile, expiry, wallet, whatsappHealth, reselle
       orderId: claim.orderId || "",
       accountId: claim.accountId || "",
       stockId: claim.stockId || "",
+      href: "/owner-v2/warranty",
+    });
+  }
+
+  /* This loop used to sit at the tail of `buildWalletLedger`, pushing onto a
+     bare `items` that function never declared. `buildWalletLedger` returns a
+     ledger -- credits, debits, balances -- and a queue item is neither, so the
+     block was pasted into the wrong function by whoever added it. Because
+     `warranty-service.js` sets `replacementSyncStatus` to "pending" on every
+     manual replacement, the bug was not dormant: the first dealer whose
+     warranty replacement awaited sync threw `ReferenceError: items is not
+     defined`, which failed the whole Operations Center request and, in Phase
+     6, the reseller's balance ledger too. Both call this function. It is here
+     now, beside the other warranty queue loop, where `items` exists. */
+  for (const claim of db.warrantyClaims || []) {
+    const syncStatus = String(claim.replacementSyncStatus || "").toLowerCase();
+    if (!["failed", "pending"].includes(syncStatus)) continue;
+    items.push({
+      id: `manual-warranty-sync-${claim.id}`,
+      severity: syncStatus === "failed" ? "high" : "medium",
+      kind: "warranty_sync",
+      title: `Sinkronisasi penggantian garansi ${claim.id} ${syncStatus === "failed" ? "gagal" : "belum selesai"}`,
+      detail: "Penggantian sudah dikunci di database. Buka Warranty Center dan coba sinkronisasi ulang tanpa memilih stok lain.",
+      createdAt: claim.replacementSyncFailedAt || claim.replacementSyncStartedAt || claim.updatedAt || claim.createdAt || "",
+      orderId: claim.orderId || "",
+      accountId: claim.replacement?.newAccountId || claim.accountId || "",
+      stockId: claim.replacement?.newStockId || "",
       href: "/owner-v2/warranty",
     });
   }
@@ -8757,6 +8768,7 @@ registerStockRoutes(app, {
   normalizeWhatsappNumber,
   notifyResellerAccountChanged,
   nowText,
+  ownerProfile,
   pushAccountsToGoogleSheets,
   readDb,
   requireAuth,
@@ -8945,6 +8957,7 @@ registerOrderRoutes(app, {
 
 registerResellerRoutes(app, {
   authReseller,
+  buildWalletLedger,
   createDepositTopupOrder,
   createPakasirQris,
   defaultResellerAccessTools,
@@ -9470,9 +9483,26 @@ async function runExpiredOrderMaintenanceJob() {
   }
 }
 
+/*
+ * How long an activity stays in the live `activities` array.
+ *
+ * This was 5 days, chosen when the array was housekeeping for a noisy log and
+ * nothing read it. Two things changed. The owner console and the dealer panel
+ * both read this trail, and Phase 6 put money and stock-release records in it --
+ * "this account went back on sale" is not something that stops being true after
+ * a week. Archiving moves the row to `archivedActivities`, which still exists
+ * and is still readable via `?scope=archived`, so nothing is deleted here; this
+ * only decides what the default view shows.
+ *
+ * 30 days. `archivedActivities` is capped at 5000 entries, so the archive is
+ * bounded regardless, and the live array stays small enough to read on every
+ * request.
+ */
+const ACTIVITY_ARCHIVE_KEEP_DAYS = 30;
+
 async function runActivityArchiveJob() {
   try {
-    await readMaintenanceService.runActivityArchive({ keepDays: 5 });
+    await readMaintenanceService.runActivityArchive({ keepDays: ACTIVITY_ARCHIVE_KEEP_DAYS });
   } catch (error) {
     console.warn(`[ActivityArchive] maintenance skipped: ${error.message || error}`);
   }

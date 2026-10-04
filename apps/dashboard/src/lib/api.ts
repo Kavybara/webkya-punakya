@@ -1245,6 +1245,14 @@ export const api = {
   releaseStockReservation(id: string) {
     return request<{ ok: boolean; stock: ApiStockItem }>(`/stock/${encodeURIComponent(id)}/release-reservation`, { method: "POST" });
   },
+  // Distinct from releaseStockReservation on purpose: that one drops an
+  // in-flight hold so the unit can be reserved again, and refuses anything that
+  // is not currently `reserved`. This one puts a unit that left the pool
+  // (sold, blocked, expired) back into it, and requires a reason so the
+  // activity log says why rather than only that it happened.
+  releaseStock(id: string, payload: { reason: string }) {
+    return request<{ ok: boolean; stock: ApiStockItem }>(`/stock/${encodeURIComponent(id)}/release`, { method: "POST", body: payload });
+  },
   payment(ref: string) {
     return request<ApiPayment>(`/payments/${encodeURIComponent(ref)}`);
   },
@@ -1281,6 +1289,16 @@ export const api = {
   },
   depositRequests() {
     return request<ApiDepositRequest[]>("/resellers/deposit-requests");
+  },
+  // A reseller's own money, in full. The owner's cross-dealer ledger is a
+  // different shape and still arrives whole inside operationsCenter() -- this
+  // is the only endpoint scoped to a single dealer.
+  balanceHistory() {
+    return request<{
+      balance: number;
+      summary: Pick<WalletLedgerResellerSummary, "totalTopup" | "totalSpent" | "totalRefund" | "totalLateCredit" | "totalOrders"> | null;
+      entries: WalletLedgerEntry[];
+    }>("/resellers/balance-ledger");
   },
   archiveDepositRequests(ids: string[]) {
     return request<{ ok: boolean; archived: number; ids: string[] }>("/resellers/deposit-requests/archive", {

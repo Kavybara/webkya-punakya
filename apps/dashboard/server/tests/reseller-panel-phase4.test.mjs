@@ -398,23 +398,31 @@ test("the active-orders tile counts every open order, not the first three", () =
   assert.match(source, /data\.orders\.filter\(isActiveOrder\)\.slice\(0, 3\)/);
 });
 
-test("the balance-history button does not promise a ledger that does not exist", () => {
+test("the balance-history button leads to a ledger that exists", () => {
   const source = overview();
 
-  // There is no reseller-facing balance ledger: `walletLedger` and
-  // `resellers/deposit-requests` are both `requireAuth(["owner"])`. Pin the
-  // auth, so the day one of them is opened up to resellers this test says so.
-  for (const route of [RESELLER_ROUTES]) {
-    const text = read(route);
-    assert.match(
-      text,
-      /app\.get\("\/api\/resellers\/deposit-requests", requireAuth\(\["owner"\]\)/,
-      "deposit-requests is open to resellers now -- the label can be revisited",
-    );
-  }
+  // `resellers/deposit-requests` is still owner-only and returns every
+  // dealer's requests unscoped, so it cannot back this button. Pin the auth, so
+  // the day somebody opens it up this test says so.
+  const text = read(RESELLER_ROUTES);
+  assert.match(
+    text,
+    /app\.get\("\/api\/resellers\/deposit-requests", requireAuth\(\["owner"\]\)/,
+    "deposit-requests is open to resellers now -- it returns every dealer's rows unscoped",
+  );
+
+  // Phase 6 added the endpoint this button needed. It is reseller-scoped, not
+  // a widened version of the owner-only ledger.
+  assert.match(text, /app\.get\("\/api\/resellers\/balance-ledger", requireAuth\(\["reseller"\]\)/);
 
   assert.match(source, />Riwayat pesanan<\/Button>/);
-  assert.doesNotMatch(source, />Riwayat saldo<\/Button>/);
+  assert.match(source, />Riwayat saldo<\/Button>/);
+  assert.match(source, /onHistory=\{\(\) => navigate\("\/reseller-v2\/saldo"\)\}/);
+
+  // The comment above used to name `walletLedger`, a route that never existed,
+  // and justify a permanent rename on the strength of it. Pin the truth of the
+  // claim instead of the wording.
+  assert.doesNotMatch(source, /`walletLedger`/);
 });
 
 /* -------------------------------------------------------------------------- */

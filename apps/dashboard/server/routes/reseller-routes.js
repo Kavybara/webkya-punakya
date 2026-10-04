@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 export function registerResellerRoutes(app, deps) {
   const {
     authReseller,
+    buildWalletLedger,
     createDepositTopupOrder,
     createPakasirQris,
     defaultResellerAccessTools,
@@ -388,6 +389,77 @@ export function registerResellerRoutes(app, deps) {
   app.get("/api/resellers/deposit-requests", requireAuth(["owner"]), async (req, res) => {
     const db = await readDb();
     res.json((Array.isArray(db.depositRequests) ? db.depositRequests : []).filter((item) => !item.archivedAt));
+  });
+
+  /*
+   * A dealer's own balance history.
+   *
+   * Until now the only place this ledger existed was `buildWalletLedger`, and the
+   * only route that emitted it was `/api/operations/center` -- owner-only. So a
+   * dealer whose money moved could see the number, never the movements. The
+   * Phase 4 comment above the "Riwayat pesanan" button said so out loud and
+   * settled for renaming the button instead of promising history that no
+   * endpoint backed.
+   *
+   * This is that endpoint. `buildWalletLedger` already derives the whole thing
+   * from orders + depositRequests -- order spend, deposit refund, stock-race
+   * credit, late-paid credit, QRIS topup, and manual topup -- so none of that
+   * arithmetic is duplicated here. Two things this route must get right:
+   *
+   * 1. **Filter, then cap.** `buildWalletLedger` sorts and truncates to its
+   *    newest 120 entries across *all* resellers. Slicing that result would hand
+   *    a dealer whichever 120 rows happened to be global-newest, which is both
+   *    the wrong rows and other people's rows. So the whole ledger is rebuilt
+   *    from a DB whose resellers list is already narrowed to the caller --
+   *    every entry and every summary is derived from that reseller's own orders
+   *    and deposits, so the existing cap then truncates only their own history.
+   *
+   * 2. **The caller is the only reseller in that DB.** `authReseller` resolves
+   *    the session; a reseller with a session for an account that no longer
+   *    exists gets an empty ledger rather than an error, matching how
+   *    `/api/resellers` treats the same case.
+   */
+  app.get("/api/resellers/balance-ledger", requireAuth(["reseller"]), async (req, res) => {
+    const db = await readDb();
+    const reseller = authReseller(db, req.auth);
+    if (!reseller) {
+      res.json({ balance: 0, entries: [], summary: null });
+      return;
+    }
+
+    const scoped = { ...db, resellers: [reseller] };
+    const ledger = buildWalletLedger(scoped);
+    const summary = ledger.resellerSummaries.find((item) => item.resellerId === reseller.id) || null;
+
+    // `whatsapp` and `resellerName` are the caller's own, but there is no reason
+    // to echo a phone number back into a page that already knows it.
+    const entries = ledger.entries.map((entry) => ({
+      id: entry.id,
+      type: entry.type,
+      kind: entry.kind,
+      amount: Number(entry.amount || 0),
+      balanceBefore: entry.balanceBefore === undefined ? undefined : Number(entry.balanceBefore),
+      balanceAfter: entry.balanceAfter === undefined ? undefined : Number(entry.balanceAfter),
+      orderId: entry.orderId || "",
+      requestId: entry.requestId || "",
+      createdAt: entry.createdAt || "",
+      status: entry.status || "",
+      detail: entry.detail || "",
+    }));
+
+    res.json({
+      balance: Number(reseller.deposit || 0),
+      summary: summary
+        ? {
+            totalTopup: Number(summary.totalTopup || 0),
+            totalSpent: Number(summary.totalSpent || 0),
+            totalRefund: Number(summary.totalRefund || 0),
+            totalLateCredit: Number(summary.totalLateCredit || 0),
+            totalOrders: Number(summary.totalOrders || 0),
+          }
+        : null,
+      entries,
+    });
   });
 
   app.post("/api/resellers/deposit-requests/archive", requireAuth(["owner"]), async (req, res) => {

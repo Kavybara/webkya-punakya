@@ -84,6 +84,10 @@ export default function OwnerConsoleStockPage() {
   const [showSecret, setShowSecret] = useState(false);
   const [action, setAction] = useState<StockAction>(null);
   const [reopenConfirm, setReopenConfirm] = useState(false);
+  /* Required for the `sold` reopen only. Held outside `form` because it is not
+     a stock field -- it never reaches `PUT /api/stock/:id`, it goes to the
+     release endpoint, which stores it on the activity log and nowhere else. */
+  const [releaseReason, setReleaseReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [assigning, setAssigning] = useState<ApiStockItem | null>(null);
   const [dailyForm, setDailyForm] = useState<DailyForm>({ resellerId: "", variantId: "", startedAt: new Date().toISOString().slice(0, 10), durationDays: "1", buyer: "", device: "" });
@@ -138,32 +142,40 @@ export default function OwnerConsoleStockPage() {
    *     live, and it decides the resulting status itself -- `blocked` when
    *     Google Sheets says the account is unusable, `available` otherwise.
    *   - `sold` cannot use that endpoint at all: it 400s unless the row is
-   *     `reserved`. There is no guarded path for a delivered account, so this
-   *     one stays an explicit `updateStock` -- the dialog below says plainly
-   *     that nothing on the server checks it, rather than implying a safety net
-   *     that does not exist.
+   *     `reserved`. Phase 6 added `POST /api/stock/:id/release` for it, which
+   *     requires a reason, refuses while a linked daily account is still
+   *     active, and also lets the server pick the resulting status instead of
+   *     the client hardcoding `available` -- so a sold row that Google Sheets
+   *     now reports as unusable comes back `blocked` rather than sellable.
    *
    * The confirmation is not decoration in either case: a release means nobody
    * holds these credentials, a refusal means somebody still does, and the owner
    * needs to be told which happened rather than infer it from a toast.
    *
-   * No reason is collected, because there is nowhere to put one: the endpoint
-   * reads no request body, `notes` is never rendered, and Phase 1-5 does not
-   * change backend contracts. A required field that is displayed and then
-   * discarded promises an audit trail that does not exist.
+   * The reason field used to be described in a comment as "nowhere to put one",
+   * and that was true for the `sold` path: it called `updateStock`, which reads
+   * no body, and `notes` is still never rendered. The endpoint exists now, so
+   * a reason is collected for `sold` and stored on the activity log. It is not
+   * offered for `reserved`, because that transition already writes its own
+   * activity entry and the reservation it is undoing has a lifetime of hours.
    */
   async function releaseStock() {
     if (!editing) return;
     const subject = editing;
+    if (subject.status !== "reserved" && !releaseReason.trim()) {
+      setDialogError("Alasan wajib diisi supaya ada catatan kenapa stok ini dikembalikan.");
+      return;
+    }
     setDialogError(""); setBusy(true);
     try {
       if (subject.status === "reserved") {
         const released = await api.releaseStockReservation(subject.id);
         setMessage(`${stockIdentity(subject)} dilepas dari reservasi dan kini berstatus ${stockStatusLabel(released.stock?.status ?? "available").toLowerCase()}.`);
       } else {
-        await api.updateStock(subject.id, { status: "available" });
-        setMessage(`${stockIdentity(subject)} dikembalikan ke pool stok.`);
+        const released = await api.releaseStock(subject.id, { reason: releaseReason.trim() });
+        setMessage(`${stockIdentity(subject)} dikembalikan ke pool stok dan kini berstatus ${stockStatusLabel(released.stock?.status ?? "available").toLowerCase()}.`);
       }
+      setReleaseReason("");
       setEditing(undefined);
       setReopenConfirm(false);
       await load();
@@ -262,12 +274,17 @@ export default function OwnerConsoleStockPage() {
     {reopenConfirm && editing ? <Dialog open title="Kembalikan ke pool stok?" eyebrow={stockIdentity(editing)} onClose={() => setReopenConfirm(false)} footer={<DialogActions onCancel={() => setReopenConfirm(false)} onConfirm={releaseStock} confirmLabel="Lepas dan kembalikan" busy={busy} danger />}>{dialogError ? <Notice tone="danger">{dialogError}</Notice> : null}<Notice tone="danger">{stockIdentity(editing)} sedang berstatus {stockStatusLabel(editing.status).toLowerCase()}. Mengembalikannya ke tersedia akan menawarkannya ke reseller lain, sementara akun yang sama masih dipakai pihak yang sekarang.</Notice>{/*
       The two starting states get different warnings on purpose.
 
-      A reservation has a server-side check, so promising a refusal is true. A
-      delivered account has none -- `release-reservation` rejects anything that
-      is not `reserved`, and no other endpoint guards this -- so telling the
-      owner the system "will refuse if..." would be a promise nothing keeps.
+      Both now have a server-side check, so promising a refusal is true in both
+      cases. The `sold` wording used to say the server does nothing here -- it
+      was accurate then, because the path was `updateStock`. Phase 6 added
+      `POST /api/stock/:id/release`, which refuses while a linked daily account
+      is still active and picks the resulting status itself. What the warning is
+      really for is the check the server cannot do: only the owner knows whether
+      the customer who received these credentials has actually stopped using
+      them.
     */}
-      {editing.status === "reserved" ? <Notice tone="warning">Sistem akan menolak selama masih ada akun harian aktif atau order yang belum selesai. Kalau ditolak, berarti akunnya belum benar-benar bebas.</Notice> : <Notice tone="warning">Akun ini sudah pernah dikirim ke pelanggan, dan server tidak melakukan apa pun untuk mencegahnya. Pastikan dulu pelanggan lama sudah tidak memakai akun ini sebelum dikembalikan.</Notice>}</Dialog> : null}
+      {editing.status === "reserved" ? <Notice tone="warning">Sistem akan menolak selama masih ada akun harian aktif atau order yang belum selesai. Kalau ditolak, berarti akunnya belum benar-benar bebas.</Notice> : <Notice tone="warning">Akun ini sudah pernah dikirim ke pelanggan, dan server tidak bisa tahu apakah pelanggan lama sudah berhenti memakainya. Pastikan dulu sebelum dikembalikan.</Notice>}
+      {editing.status === "reserved" ? null : <Field label="Alasan pengembalian" required hint="Tersimpan di log aktivitas, jadi orang lain bisa tahu kenapa stok ini kembali ke pool."><textarea rows={3} value={releaseReason} onChange={(e) => setReleaseReason(e.target.value)} placeholder="Contoh: pelanggan minta pembatalan, akun dikembalikan oleh pemilik." /></Field>}</Dialog> : null}
     {assigning ? <Dialog open title="Assign stok harian" eyebrow={assigning.email || assigning.loginPhone || assigning.id} onClose={() => setAssigning(null)} wide footer={<DialogActions onCancel={() => setAssigning(null)} onConfirm={assignDaily} confirmLabel="Assign akun" busy={busy} />}>{dialogError ? <Notice tone="danger">{dialogError}</Notice> : null}<div className="console-resource-form-grid"><Field label="Reseller"><select value={dailyForm.resellerId} onChange={(e) => setDailyForm({ ...dailyForm, resellerId: e.target.value })}><option value="">Pilih reseller</option>{resellers.filter((row) => row.isActive).map((row) => <option key={row.id} value={row.id}>{row.name} (@{row.username})</option>)}</select></Field><Field label="Mulai"><input type="date" value={dailyForm.startedAt} onChange={(e) => setDailyForm({ ...dailyForm, startedAt: e.target.value })} /></Field>{/*
       The `hint` on the duration field is the date the assignment will expire.
 

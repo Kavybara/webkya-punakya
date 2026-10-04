@@ -167,24 +167,32 @@ test("reseller route module preserves self-service and owner boundaries", () => 
   const { app, routes } = routeCollector();
   registerResellerRoutes(app, { requireAuth });
 
-  assert.deepEqual(
-    routes.map(({ method, path }) => `${method.toUpperCase()} ${path}`),
-    [
-      "GET /api/resellers",
-      "POST /api/resellers",
-      "PUT /api/resellers/:id",
-      "DELETE /api/resellers/:id",
-      "POST /api/resellers/deposit-request",
-      "GET /api/resellers/deposit-requests",
-      "POST /api/resellers/deposit-requests/archive",
-      "POST /api/resellers/deposit-requests/:id/approve",
-      "POST /api/resellers/deposit-requests/:id/reject",
-    ],
-  );
-  assert.deepEqual(routes[0].handlers[0].roles, ["owner", "reseller"]);
-  assert.deepEqual(routes[2].handlers[0].roles, ["owner", "reseller"]);
-  assert.deepEqual(routes[4].handlers[0].roles, ["reseller"]);
-  for (const index of [1, 3, 5, 6, 7, 8]) assert.deepEqual(routes[index].handlers[0].roles, ["owner"]);
+  // Path *and* role in one table. This used to be a bare list of paths plus a
+  // second set of index numbers, which meant adding a route in the middle
+  // silently shifted every role assertion after it -- and an index that no
+  // longer points at what it used to still passes as long as it happens to be
+  // an owner route. Naming the role beside the path is what makes a wrong gate
+  // visible.
+  const expected = [
+    ["GET /api/resellers", ["owner", "reseller"]],
+    ["POST /api/resellers", ["owner"]],
+    ["PUT /api/resellers/:id", ["owner", "reseller"]],
+    ["DELETE /api/resellers/:id", ["owner"]],
+    ["POST /api/resellers/deposit-request", ["reseller"]],
+    ["GET /api/resellers/deposit-requests", ["owner"]],
+    // A dealer's own money. Scoped inside the handler by rebuilding the ledger
+    // from a db holding only the caller, so this role check is the only thing
+    // standing between one dealer and another's rows.
+    ["GET /api/resellers/balance-ledger", ["reseller"]],
+    ["POST /api/resellers/deposit-requests/archive", ["owner"]],
+    ["POST /api/resellers/deposit-requests/:id/approve", ["owner"]],
+    ["POST /api/resellers/deposit-requests/:id/reject", ["owner"]],
+  ];
+
+  assert.deepEqual(routes.map(({ method, path }) => `${method.toUpperCase()} ${path}`), expected.map(([line]) => line));
+  for (const [index, [, roles]] of expected.entries()) {
+    assert.deepEqual(routes[index].handlers[0].roles, roles, `wrong auth for ${expected[index][0]}`);
+  }
 });
 
 test("deposit request archive keeps reviewed history and rejects pending requests", async () => {
@@ -551,6 +559,10 @@ test("stock route module exposes only summaries to reseller", () => {
       "POST /api/stock",
       "PUT /api/stock/:id",
       "POST /api/stock/:id/release-reservation",
+      // Puts a sold or blocked unit back in the pool. Owner-only, and it is
+      // the reason `PUT /api/stock/:id` no longer accepts `status` blindly:
+      // this is the path where a status change gets a guard and an audit line.
+      "POST /api/stock/:id/release",
       "POST /api/stock/:id/assign-daily",
       "DELETE /api/stock/:id",
     ],

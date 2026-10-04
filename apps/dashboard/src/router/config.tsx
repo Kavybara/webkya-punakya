@@ -60,6 +60,7 @@ const ResellerV2CatalogPage = lazy(
   () => import("../pages/reseller-v2/catalog/page"),
 );
 const ResellerV2OrdersPage = lazy(() => import("../pages/reseller-v2/orders/page"));
+const ResellerV2BalancePage = lazy(() => import("../pages/reseller-v2/balance/page"));
 const ResellerV2AccountsPage = lazy(
   () => import("../pages/reseller-v2/accounts/page"),
 );
@@ -232,6 +233,7 @@ export const routes: RouteObject[] = [
   { path: "/reseller-v2/ringkasan", element: page(ResellerV2OverviewPage) },
   { path: "/reseller-v2/catalog", element: page(ResellerV2CatalogPage) },
   { path: "/reseller-v2/orders", element: page(ResellerV2OrdersPage) },
+  { path: "/reseller-v2/saldo", element: page(ResellerV2BalancePage) },
   { path: "/reseller-v2/accounts", element: page(ResellerV2AccountsPage) },
   { path: "/reseller-v2/access", element: page(ResellerV2AccessPage) },
   { path: "/reseller-v2/guides", element: page(ResellerV2GuidesPage) },

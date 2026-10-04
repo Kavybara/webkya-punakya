@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   PackageCheck,
   ReceiptText,
+  Wallet,
 } from "lucide-react";
 
 export type ResellerNavigationItem = AppShellNavItem & {
@@ -50,6 +51,16 @@ export const resellerNavigation: ResellerNavigationGroup[] = [
         path: "/reseller-v2/orders",
         legacyPath: "/reseller/history",
         icon: ReceiptText,
+      },
+      {
+        /* Its own item, not another name for Pesanan. The orders page answers
+           "what did I buy"; this one answers "where did my deposit go", and it
+           is the only place a dealer can read the running balance after each
+           movement rather than just the balance as it stands today. */
+        label: "Riwayat Saldo",
+        shortLabel: "Saldo",
+        path: "/reseller-v2/saldo",
+        icon: Wallet,
       },
     ],
   },
@@ -143,6 +154,14 @@ export const resellerAuditMap = [
     apis: ["/accounts?view=light", "/account-access/lookup"],
     sensitivity: "Kode akses, link, dan identitas akun.",
     risk: "Lookup wajib tetap diverifikasi server-side.",
+  },
+  {
+    existing: "-",
+    next: "/reseller-v2/saldo",
+    group: "Transaksi",
+    apis: ["/resellers/balance-ledger"],
+    sensitivity: "Saldo dan seluruh pergerakan uang milik reseller itu sendiri.",
+    risk: "Endpoint wajib mengembalikan hanya baris reseller yang sedang login; ledger tidak boleh difilter setelah buildWalletLedger memotong 120 entri terakhir.",
   },
   {
     existing: "-",

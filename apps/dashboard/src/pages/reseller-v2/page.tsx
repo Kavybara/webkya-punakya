@@ -225,7 +225,8 @@ export default function ResellerV2OverviewPage() {
               balance={balance}
               loading={loading}
               onTopUp={openTopUp}
-              onHistory={() => navigate("/reseller-v2/orders")}
+              onOrders={() => navigate("/reseller-v2/orders")}
+              onHistory={() => navigate("/reseller-v2/saldo")}
             />
 
             <BentoStat
@@ -467,6 +468,7 @@ function BalanceCard({
   held,
   loading,
   onTopUp,
+  onOrders,
   onHistory,
 }: {
   span: { col: number; row: number };
@@ -474,6 +476,7 @@ function BalanceCard({
   held?: string;
   loading?: boolean;
   onTopUp: () => void;
+  onOrders: () => void;
   onHistory: () => void;
 }) {
   return (
@@ -495,23 +498,28 @@ function BalanceCard({
       </div>
       <div className="ui-balance-actions">
         <Button weight="primary" onClick={onTopUp}>Top Up</Button>
-        {/* "Riwayat saldo", not "Riwayat pesanan".
+        {/* Two buttons, because there are two questions. "Riwayat pesanan"
+           answers what was bought -- order ids, products, totals. "Riwayat
+           saldo" answers where the money went, which is the question a dealer
+           actually has when they are looking at this cell, and it is the one
+           that had no answer at all.
 
-           It was `Riwayat saldo` and it navigated to `/reseller-v2/orders`,
-           which is the *purchase* history: order ids, products, totals. A
-           dealer pressing it to find out where their deposit went found a
-           list of what they bought instead.
+           Phase 4 renamed the second button to "Riwayat pesanan" because both
+           controls pointed at `/reseller-v2/orders` and one label for one
+           destination was the honest thing to do at the time. The reasoning
+           named the reason it would stay that way: there was no reseller-facing
+           balance ledger to point it at, since every wallet view
+           (`buildWalletLedger` through `GET /api/operations/center`, and
+           `GET /api/resellers/deposit-requests`) was `requireAuth(["owner"])`.
+           An earlier version of that comment also claimed the block was gated
+           by a route named `walletLedger`, which never existed.
 
-           The label now names the destination rather than the promise, because
-           the promise cannot be kept without an endpoint. There is no
-           reseller-facing balance ledger: `walletLedger` and
-           `resellers/deposit-requests` are both `requireAuth(["owner"])`, so
-           a dealer genuinely cannot be shown a deposit history today. Adding
-           one is Phase 6 work and needs the owner's confirmation -- it is a
-           new route, and the brief explicitly forbids new Express endpoints
-           before then. Renaming the button is the whole honest fix available
-           now; renaming the route is not. */}
-        <Button weight="secondary" onClick={onHistory}>Riwayat pesanan</Button>
+           Phase 6 added `GET /api/resellers/balance-ledger`, owner-approved,
+           scoped to the calling dealer. So the promise is now kept by an
+           endpoint rather than withdrawn by renaming, and both buttons lead
+           where they say they do. */}
+        <Button weight="secondary" onClick={onOrders}>Riwayat pesanan</Button>
+        <Button weight="secondary" onClick={onHistory}>Riwayat saldo</Button>
       </div>
     </BentoCell>
   );

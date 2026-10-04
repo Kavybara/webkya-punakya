@@ -1,0 +1,73 @@
+/*
+ * The reseller's balance history.
+ *
+ * Same rule as orders.css: every selector here is prefixed
+ * `reseller-v2-balance-`. The kit owns `.ui-`; a feature page that reaches into
+ * it is how the kit ends up carrying a rule that only makes sense on one screen.
+ *
+ * Colours come from tokens in `src/styles/tokens.css`. Nothing here names a hex
+ * value -- this is a money page, and money colour is semantic colour: green
+ * means the balance grew, and neither of those is decoration.
+ */
+
+.reseller-v2-balance {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.reseller-v2-balance-muted {
+  color: var(--text-muted);
+}
+
+/* --- direction of travel -------------------------------------------------- *
+ * A ledger row has to be readable without arithmetic. `+` and the success
+ * colour say the balance grew; `-` and the danger colour say it shrank. The
+ * tabular figures keep the column aligned so two amounts can be compared by
+ * eye, which is the whole reason this page exists. */
+
+.reseller-v2-balance-credit,
+.reseller-v2-balance-debit {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.reseller-v2-balance-credit {
+  color: var(--status-success);
+}
+
+.reseller-v2-balance-debit {
+  color: var(--text-primary);
+}
+
+/* --- the kind cell --------------------------------------------------------- *
+ * Two lines: the machine type rendered in Indonesian, then the server's own
+ * sentence. The second line is why this page can exist at all -- it is the
+ * explanation of *why* this movement happened, not a restatement of the label
+ * above it. */
+
+.reseller-v2-balance-kind {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.reseller-v2-balance-kind small {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* An order id is a reference, not a control. The quiet button is the kit's own
+   -- the class is composed by Button.tsx from `weight`, not written here, so
+   this rule only trims the chrome a row reference does not need. */
+.reseller-v2-balance-ref {
+  min-height: 0;
+  padding: 2px 6px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  letter-spacing: 0.01em;
+}
