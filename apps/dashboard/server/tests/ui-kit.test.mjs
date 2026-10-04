@@ -118,6 +118,114 @@ test("the ui kit keeps the capabilities only one console had", async () => {
   assert.match(text, /\{busy \? "Memproses\.\.\." : confirmLabel\}/, "a busy confirm must not read as idle");
 });
 
+/*
+ * The three overlay defects that only show up while someone is using the
+ * product, not in a screenshot.
+ *
+ * The caret bug is the one worth writing down. `useOverlayFocus` used to take
+ * `[onClose, open]` as its dependency list, and every page in the product
+ * passes `onClose={() => setDialog(null)}` -- a new function identity on every
+ * parent render. A parent re-renders on every keystroke in the dialog's own
+ * form and on every tick of the duration preview timer, so the effect was torn
+ * down and rebuilt dozens of times while a reseller typed a customer's name.
+ * Its first act is `closeRef.current?.focus()`, so the caret was yanked back to
+ * the X on every character. Typing a 20-character name meant 20 jumps.
+ *
+ * These are source assertions rather than behavioural ones because this suite
+ * runs on Node 20 and cannot import `.ts`/`.tsx` -- mounting the component is
+ * not available here, so the assertions pin the shape that prevents the bug.
+ */
+test("the overlay trap is not re-armed by a parent render", async () => {
+  const { text } = await kit();
+
+  // The dependency list. `onClose` must not be in it, or the effect restarts
+  // on every keystroke and re-focuses the close button.
+  const effectBody = text.slice(text.indexOf("export function useOverlayFocus"));
+  const deps = effectBody.match(/\}, \[([^\]]*)\]\);/);
+  assert.ok(deps, "useOverlayFocus must close its effect with a dependency array");
+  assert.doesNotMatch(deps[1], /onClose/, "`onClose` in the deps is the caret-jumping bug returning");
+  assert.doesNotMatch(deps[1], /busy/, "`busy` in the deps would re-focus the close button mid-submit");
+  assert.match(deps[1], /open/, "the trap must still re-arm when the overlay opens");
+
+  // Both read through refs instead, which is what makes the list above safe.
+  assert.match(effectBody, /onCloseRef\.current = onClose/);
+  assert.match(effectBody, /busyRef\.current = busy/);
+  assert.match(effectBody, /onCloseRef\.current\(\)/, "Escape must call the ref, not the prop");
+});
+
+test("a busy dialog cannot be dismissed out from under its own request", async () => {
+  const { text } = await kit();
+
+  // Escape. `DialogActions busy` greyed the buttons and did nothing about
+  // Escape, so a reader could dismiss a dialog mid-submit and watch the
+  // mutation land anyway.
+  assert.match(
+    text,
+    /if \(busyRef\.current\) return;[\s\S]{0,80}onCloseRef\.current\(\)/,
+    "Escape must not close a dialog whose action is still running",
+  );
+
+  // The backdrop. Same hole, same consequence.
+  assert.match(
+    text,
+    /onMouseDown=\{\(event\) => \{[\s\S]{0,200}?if \(busy\) return;/,
+    "a click on the scrim must not dismiss a busy dialog",
+  );
+
+  // The close button goes inert too -- but through `aria-disabled`, not
+  // `disabled`. It is the trap's first node; disabling it would drop focus
+  // onto <body> and let Tab walk the page behind the dialog.
+  assert.match(text, /aria-disabled=\{busy \|\| undefined\}/);
+  assert.doesNotMatch(
+    text.slice(text.indexOf('className="ui-icon-button"')),
+    /<button[^>]*disabled=\{busy\}/,
+    "the close button must stay focusable while busy",
+  );
+});
+
+test("only the topmost overlay answers Escape", async () => {
+  const { text } = await kit();
+
+  // Every overlay listens on `window`, so a confirm dialog opened on top of a
+  // drawer closed both on one keypress.
+  assert.match(text, /const overlayStack: symbol\[\] = \[\]/, "overlays must track their own stacking order");
+  assert.match(text, /overlayStack\.push\(token\)/);
+  assert.match(
+    text,
+    /if \(overlayStack\[overlayStack\.length - 1\] !== token\) return;/,
+    "a buried overlay must ignore Escape",
+  );
+  assert.match(text, /overlayStack\.lastIndexOf\(token\)/, "unmount must remove its own entry, by identity");
+});
+
+test("the toast queue holds at most three and drops the oldest", async () => {
+  const { text } = await kit();
+
+  assert.match(text, /const MAX_TOASTS = 3/);
+  assert.match(text, /export function useToastQueue/);
+  assert.match(text, /export function ToastStack/);
+  // `slice(-MAX_TOASTS)` keeps the tail, so the newest survives and the head
+  // is the one dropped. Slicing the other way would evict the message about
+  // what the reader just did.
+  assert.match(
+    text,
+    /\[\.\.\.current, entry\]\.slice\(-MAX_TOASTS\)/,
+    "the queue must drop the oldest, not the newest",
+  );
+
+  // Identity is a counter, not the message: the same text can legitimately
+  // arrive twice and a message-keyed list would collapse the two into one node
+  // with the first one's timer still attached.
+  assert.match(text, /sequence\.current \+= 1/);
+
+  // One polite live region for the whole stack, so a joining toast is announced
+  // once instead of interrupting whatever is being read.
+  assert.match(
+    text,
+    /<div className="ui-toast-stack" role="status" aria-live="polite" aria-relevant="additions">/,
+  );
+});
+
 test("the empty state does not claim success or failure", async () => {
   const { text } = await kit();
   const empty = text.slice(text.indexOf("export function EmptyState"), text.indexOf("export function ErrorState"));

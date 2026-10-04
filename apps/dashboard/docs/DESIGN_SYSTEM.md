@@ -187,10 +187,36 @@ the table's job. A page that hand-rolls any of them is rebuilding this.
 
 **`Dialog`** and **`Drawer`** share one implementation with
 `variant: "dialog" | "drawer"`. Both take `wide?`, `title`, `description?`,
-`eyebrow?`, `footer?`, `closeLabel`. **`DialogActions`** lays out a footer.
+`eyebrow?`, `footer?`, `busy?`, `closeLabel`. **`DialogActions`** lays out a
+footer.
 
-**`useOverlayFocus(open, onClose)`** — focus trap plus focus return. Use it for
-any overlay you add; it is the same hook both console overlays use.
+**`useOverlayFocus(open, onClose, busy?)`** — focus trap plus focus return. Use
+it for any overlay you add; it is the same hook both console overlays use.
+
+Three things about that hook are load-bearing, and all three were bugs first:
+
+- **Its dependency list is `[open, token]` and nothing else.** `onClose` and
+  `busy` are read through refs. Every page in the product passes
+  `onClose={() => setDialog(null)}` — a fresh function identity per render — and
+  a parent re-renders on every keystroke in the dialog's own form and on every
+  tick of the duration preview timer. With `onClose` in the list, each of those
+  tore down and rebuilt the effect, and its first act is
+  `closeRef.current?.focus()`. The caret jumped to the X on every character.
+- **Escape and the backdrop are guarded by `busy`.** `DialogActions busy` greyed
+  the buttons and left both live, so a reader could dismiss a dialog mid-submit
+  and watch the mutation land anyway.
+- **Only the topmost overlay answers Escape.** Handlers live on `window`, so a
+  confirm opened on top of a drawer used to close both on one keypress.
+  `overlayStack` holds the mounted overlays and a handler acts only if it owns
+  the last slot; removal is by identity so an out-of-order unmount cannot drop
+  the wrong entry.
+
+Pass `busy` to **both** `DialogActions` and the enclosing `Dialog`/`Drawer`.
+They are two halves of one guard, and setting only the first leaves Escape live.
+
+The close button goes inert through `aria-disabled`, never `disabled`: it is the
+trap's first node, and a disabled button drops focus onto `<body>` and lets Tab
+walk the page behind the dialog.
 
 **`useDismiss(open, onClose)`** — Escape or an outside click closes it, and returns
 the ref to attach. Exported because a popover living in a slot (the notification
@@ -226,6 +252,23 @@ that is load-bearing: the boundary in `main.tsx` wraps `<App />`, so it sits abo
 
 **`Notice`** and **`Toast`**, both taking `Tone`. **`Badge`** —
 `{ children, tone = "default" }`.
+
+**`Toast`** is one message, and most pages have exactly one thing to say.
+**`useToastQueue()` → `{ toasts, push, dismiss, clear }`** with **`ToastStack`**
+is for a page whose action can finish in more than one way — the orders console
+saves the order *and* may report that delivery was skipped, and used to have to
+pick one and drop the other.
+
+The queue holds **three**. Beyond that the panel stops being a confirmation and
+becomes a log. The limit drops the **oldest**: the newest is the one about what
+the reader just did. Identity is an incrementing counter, not the message text,
+because the same message can legitimately arrive twice and a text-keyed list
+would collapse the pair into one node with the first one's timer still attached.
+
+`ToastStack` carries one `role="status" aria-live="polite"` for the whole stack
+with `aria-relevant="additions"`, so a toast joining a stack is announced once as
+part of the region instead of interrupting whatever is being read, and a toast
+quietly expiring does not re-announce itself.
 
 ### Secrets
 
