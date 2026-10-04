@@ -8,7 +8,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
-import { Badge, DetailRow, Dialog, DialogActions, Drawer, Field, LoadingState, MetricRow, Notice, Toast } from "../../../components/ui";
+import { Badge, DetailRow, Dialog, DialogActions, Drawer, Field, LoadingState, MetricRow, Notice, ToastStack, useToastQueue } from "../../../components/ui";
 import { DataTable, type DataColumn, type DataFilter } from "../../../components/ui/DataTable";
 import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import { api, subscribeRealtime, type ApiOrder } from "../../../lib/api";
@@ -87,12 +87,50 @@ function badgeTone(label: string): Tone {
 }
 
 
+/*
+ * The wording of every financial action in this page.
+ *
+ * All five used to be titled "Konfirmasi tindakan" with a button reading
+ * "Konfirmasi" or an English verb lifted from the API method name -- "Mark
+ * paid", "Approve manual", "Retry delivery". None of those say what is about
+ * to happen to money, and a dialog whose title is the same for every action
+ * gives the reader no way to check they opened the one they meant to.
+ *
+ * `reason` marks the two actions that write an audit trail. Marking an order
+ * paid by hand is a claim about money that only this person can vouch for, so
+ * it gets a note for exactly the same reason manual approval already did.
+ */
 function actionText(kind: ActionKind) {
-  if (kind === "mark-paid") return { title: "Tandai pembayaran diterima", detail: "Order akan diproses sebagai pembayaran berhasil. Gunakan hanya setelah pembayaran benar-benar terverifikasi.", button: "Tandai dibayar" };
-  if (kind === "approve-manual") return { title: "Approve pembayaran manual", detail: "Approval dapat memulai fulfillment tanpa konfirmasi otomatis payment gateway.", button: "Approve manual" };
-  if (kind === "retry-delivery") return { title: "Ulangi pengiriman", detail: "Sistem akan mencoba mengirim kembali fulfillment untuk order ini.", button: "Retry delivery" };
-  if (kind === "rerender-template") return { title: "Render ulang template pengiriman", detail: "Snapshot template order ini akan diganti memakai konfigurasi varian terbaru. Credential akun tidak dicatat ke Activity Log.", button: "Render ulang template" };
-  return { title: "Pulihkan assignment Sheets", detail: "Assignment akun akan ditulis ulang ke Google Sheets tanpa mengirim ulang kredensial ke reseller.", button: "Pulihkan Sheets" };
+  if (kind === "mark-paid") return {
+    title: "Tandai lunas",
+    detail: "Pesanan ini akan diproses sebagai pembayaran berhasil. Gunakan hanya setelah pembayaran benar-benar terverifikasi.",
+    button: "Tandai lunas",
+    reason: true,
+  };
+  if (kind === "approve-manual") return {
+    title: "Setujui manual",
+    detail: "Persetujuan manual dapat memulai fulfilmen tanpa konfirmasi otomatis dari payment gateway.",
+    button: "Setujui manual",
+    reason: true,
+  };
+  if (kind === "retry-delivery") return {
+    title: "Kirim ulang",
+    detail: "Sistem akan mencoba mengirim ulang pesan akun ke pelanggan untuk pesanan ini.",
+    button: "Kirim ulang",
+    reason: false,
+  };
+  if (kind === "rerender-template") return {
+    title: "Render ulang template",
+    detail: "Snapshot template pesanan ini akan diganti memakai konfigurasi varian terbaru. Kredensial akun tidak dicatat ke Activity Log.",
+    button: "Render ulang template",
+    reason: false,
+  };
+  return {
+    title: "Pulihkan Sheets",
+    detail: "Penugasan akun akan ditulis ulang ke Google Sheets tanpa mengirim ulang kredensial ke reseller.",
+    button: "Pulihkan Sheets",
+    reason: false,
+  };
 }
 
 export default function OwnerConsoleOrdersPage() {
@@ -112,7 +150,11 @@ export default function OwnerConsoleOrdersPage() {
   const [actionReason, setActionReason] = useState("");
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState("");
-  const [toast, setToast] = useState("");
+  // A queue, not a string. One action can finish in more than one way --
+  // `retry-delivery` either sends the message or reports that the guard
+  // declined to -- and the single slot forced a choice between telling the
+  // owner what happened and telling them it was fine.
+  const { toasts, push: pushToast, dismiss: dismissToast } = useToastQueue();
   const detailRequestRef = useRef(0);
 
   const closeOrderDetail = useCallback(() => {
@@ -201,25 +243,39 @@ export default function OwnerConsoleOrdersPage() {
 
   function requestAction(kind: ActionKind, order: ApiOrder) {
     setActionError("");
-    setActionReason(kind === "approve-manual" ? String(order.manualApprovalReason || "") : "");
+    setActionReason(
+      // Only the reason-taking actions get the textarea, and the manual
+      // approval arrives carrying whatever the previous approval said -- so a
+      // re-approval does not start from an empty box.
+      actionText(kind).reason && kind === "approve-manual"
+        ? String(order.manualApprovalReason || "")
+        : "",
+    );
     setPendingAction({ kind, order });
   }
 
   async function executeAction() {
     if (!pendingAction || actionBusy) return;
     const { kind, order } = pendingAction;
-    if (kind === "approve-manual" && !actionReason.trim()) {
-      setActionError("Alasan approval wajib diisi.");
+    // Both money actions need a note. Manual approval already did; marking an
+    // order paid by hand is the same kind of claim -- a person vouching for a
+    // payment no gateway confirmed -- and it wrote its audit trail with no
+    // explanation attached.
+    if (actionText(kind).reason && !actionReason.trim()) {
+      setActionError("Alasan wajib diisi.");
       return;
     }
     setActionBusy(true);
     setActionError("");
     try {
+      // Exactly one call per action. This block used to run `markOrderPaid`
+      // and `approveOrderManual` twice, back to back: a duplicate money-path
+      // write and a duplicate manual approval on every single use of the
+      // button, from a confirm dialog that said "Konfirmasi" and asked for no
+      // reason on the mark-paid half.
       if (kind === "mark-paid") await api.markOrderPaid(order.id);
       if (kind === "approve-manual") await api.approveOrderManual(order.id, { reason: actionReason.trim() });
       let deliverySkipped = false;
-      if (kind === "mark-paid") await api.markOrderPaid(order.id);
-      if (kind === "approve-manual") await api.approveOrderManual(order.id, { reason: actionReason.trim() });
       if (kind === "retry-delivery") {
         const result = await api.retryDelivery(order.id);
         // The fulfilment guard refuses to re-send to a customer who already has
@@ -233,11 +289,18 @@ export default function OwnerConsoleOrdersPage() {
       await loadOrders(true);
       await openOrderDetail(order);
       setPendingAction(null);
-      setToast(
-        deliverySkipped
-          ? "Pengiriman dilewati: pesan sudah pernah terkirim ke customer ini."
-          : `${actionText(kind).button} berhasil dijalankan.`,
-      );
+      if (deliverySkipped) {
+        // A warning, not a success. Nothing was sent -- the guard declined --
+        // and the previous code reported it through the same green toast as
+        // every real success, which is the one way this page could teach an
+        // owner to trust a toast it should not have.
+        pushToast(
+          "Pengiriman dilewati: pesan sudah pernah terkirim ke pelanggan ini.",
+          "warning",
+        );
+      } else {
+        pushToast(`${actionText(kind).button} berhasil dijalankan.`, "success");
+      }
     } catch (executeError) {
       setActionError(executeError instanceof Error ? executeError.message : "Tindakan gagal dijalankan.");
     } finally {
@@ -330,11 +393,11 @@ export default function OwnerConsoleOrdersPage() {
 
             {selectedOrder.deliveryError ? <Notice tone="danger">{selectedOrder.deliveryError}</Notice> : null}
             <div className="console-order-actions">
-              {!isPaid(selectedOrder) && selectedOrder.qrisStatus !== "expired" ? <button type="button" onClick={() => requestAction("mark-paid", selectedOrder)}><CircleDollarSign size={16} /> Mark paid</button> : null}
-              {selectedOrder.orderStatus !== "completed" && String(selectedOrder.qrisStatus) !== "manual" ? <button type="button" onClick={() => requestAction("approve-manual", selectedOrder)}><CheckCircle2 size={16} /> Approve manual</button> : null}
-              {fulfillmentLabel(selectedOrder) === "Gagal" ? <button type="button" onClick={() => requestAction("retry-delivery", selectedOrder)}><RefreshCw size={16} /> Retry delivery</button> : null}
-              {selectedOrder.orderStatus === "completed" && deliveredCount === 0 ? <button type="button" onClick={() => requestAction("repair-sheets", selectedOrder)}><PackageCheck size={16} /> Pulihkan Sheets</button> : null}
-              {selectedOrder.orderStatus === "completed" && deliveredCount > 0 ? <button type="button" onClick={() => requestAction("rerender-template", selectedOrder)}><RefreshCw size={16} /> Render ulang template</button> : null}
+              {!isPaid(selectedOrder) && selectedOrder.qrisStatus !== "expired" ? <button type="button" onClick={() => requestAction("mark-paid", selectedOrder)}><CircleDollarSign size={16} /> {actionText("mark-paid").button}</button> : null}
+              {selectedOrder.orderStatus !== "completed" && String(selectedOrder.qrisStatus) !== "manual" ? <button type="button" onClick={() => requestAction("approve-manual", selectedOrder)}><CheckCircle2 size={16} /> {actionText("approve-manual").button}</button> : null}
+              {fulfillmentLabel(selectedOrder) === "Gagal" ? <button type="button" onClick={() => requestAction("retry-delivery", selectedOrder)}><RefreshCw size={16} /> {actionText("retry-delivery").button}</button> : null}
+              {selectedOrder.orderStatus === "completed" && deliveredCount === 0 ? <button type="button" onClick={() => requestAction("repair-sheets", selectedOrder)}><PackageCheck size={16} /> {actionText("repair-sheets").button}</button> : null}
+              {selectedOrder.orderStatus === "completed" && deliveredCount > 0 ? <button type="button" onClick={() => requestAction("rerender-template", selectedOrder)}><RefreshCw size={16} /> {actionText("rerender-template").button}</button> : null}
             </div>
           </>
         ) : null}
@@ -342,16 +405,42 @@ export default function OwnerConsoleOrdersPage() {
 
       <Dialog
         open={Boolean(pendingAction)}
-        title="Konfirmasi tindakan"
+        title={pendingAction ? actionText(pendingAction.kind).title : ""}
         eyebrow="Tindakan sensitif"
         onClose={() => setPendingAction(null)}
+        busy={actionBusy}
       >
         {pendingAction ? (
           <>
-            <p className="ui-dialog-lead">{actionText(pendingAction.kind).title}</p>
             <p className="ui-dialog-note">{actionText(pendingAction.kind).detail}</p>
-            {pendingAction.kind === "approve-manual" ? (
-              <Field label="Alasan approval" hint="Tersimpan pada audit log order." required>
+
+            {/* What is about to happen, to whom, and for how much.
+                Every one of these actions moves money or sends a customer a
+                credential, and the dialog used to carry only a sentence of
+                prose and -- for the mark-paid path -- a confirm button that
+                said "Konfirmasi". Nothing on screen let the owner check they
+                had the right order open, which is the one check a money action
+                has to survive. */}
+            <dl className="ui-detail-list">
+              <DetailRow label="Order ID">{pendingAction.order.id}</DetailRow>
+              <DetailRow label="Pelanggan">{pendingAction.order.customer || "-"}</DetailRow>
+              <DetailRow label="Reseller">{pendingAction.order.resellerName || pendingAction.order.reseller || "Direct"}</DetailRow>
+              <DetailRow label="Produk">
+                {pendingAction.order.product} / {pendingAction.order.variant} / {pendingAction.order.duration || "-"}
+              </DetailRow>
+              <DetailRow label="Total">{formatRupiah(Number(pendingAction.order.total || 0))}</DetailRow>
+              <DetailRow label="Referensi pembayaran">{pendingAction.order.paymentRef || "-"}</DetailRow>
+              <DetailRow label="Metode">
+                {pendingAction.order.paymentMethod || (Number(pendingAction.order.depositUsed || 0) ? "Deposit" : "QRIS")}
+              </DetailRow>
+            </dl>
+
+            {actionText(pendingAction.kind).reason ? (
+              <Field
+                label="Alasan"
+                hint="Tersimpan pada audit log pesanan. Cukup satu kalimat yang bisa diaudit kembali."
+                required
+              >
                 <textarea
                   value={actionReason}
                   onChange={(event) => setActionReason(event.target.value)}
@@ -372,7 +461,7 @@ export default function OwnerConsoleOrdersPage() {
         ) : null}
       </Dialog>
 
-      <Toast message={toast} tone="success" onClose={() => setToast("")} />
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </ConsoleShell>
   );
 }

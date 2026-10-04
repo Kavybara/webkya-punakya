@@ -8,6 +8,24 @@ async function source(path) {
   return readFile(new URL(path, root), "utf8");
 }
 
+/**
+ * The same helper as `auth-no-blur.test.mjs`, for the same reason.
+ *
+ * These suites assert on raw source, and this codebase explains itself at
+ * length in comments -- including, quite reasonably, comments that *quote the
+ * string a test forbids*. A test that says "the generic confirm title must be
+ * gone" will then pass or fail on whether the author remembered to avoid
+ * writing it in prose nearby, which measures nothing. Strip the comments first,
+ * so the assertions read the code and only the code.
+ */
+function withoutComments(text) {
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, " "))
+    .split("\n")
+    .map((line) => (/^\s*(\/\/|\*|\/\*)/.test(line) ? "" : line))
+    .join("\n");
+}
+
 test("Owner Console is lazy-loaded on a separate rollback-safe route", async () => {
   const router = await source("router/config.tsx");
   assert.match(router, /lazy\(\(\) => import\("\.\.\/pages\/owner-v2\/page"\)\)/);
@@ -156,7 +174,82 @@ test("Owner Console orders reuses existing APIs and masks fulfillment credential
   assert.match(orders, /api\.repairOrderSheets\(/);
   assert.doesNotMatch(orders, /\.password\b|\.pin\b|\.fulfillmentText\b|\.snkText\b/);
   assert.match(orders, /Kredensial akun disembunyikan/);
-  assert.match(orders, /Konfirmasi tindakan/);
+});
+
+/*
+ * The money path of the orders console.
+ *
+ * The duplicate call is the one that mattered. `executeAction` ran
+ * `markOrderPaid` and `approveOrderManual` twice, back to back: two writes to
+ * the order and its audit trail for every use of the button, from a dialog
+ * titled "Konfirmasi tindakan" that asked for no reason on the mark-paid half.
+ * Asserting the *count* rather than the presence is the point -- the old
+ * assertion could not tell one call from two.
+ */
+test("a financial action on an order is written exactly once", async () => {
+  const orders = withoutComments(await source("pages/owner-v2/orders/page.tsx"));
+
+  for (const [call, label] of [
+    ["api.markOrderPaid(", "mark paid"],
+    ["api.approveOrderManual(", "manual approval"],
+    ["api.retryDelivery(", "retry delivery"],
+    ["api.repairOrderSheets(", "sheets repair"],
+    ["api.rerenderDeliveryTemplate(", "template re-render"],
+  ]) {
+    const count = orders.split(call).length - 1;
+    assert.equal(count, 1, `${label} must be called exactly once, saw ${count}`);
+  }
+});
+
+test("an order confirm says what is affected before it asks", async () => {
+  const orders = withoutComments(await source("pages/owner-v2/orders/page.tsx"));
+
+  // The generic title is gone. It was the same string for all five actions,
+  // so a reader could not tell which one they had opened.
+  assert.doesNotMatch(orders, /Konfirmasi tindakan/);
+  assert.doesNotMatch(orders, /confirmLabel="Konfirmasi"/);
+
+  // Every action names itself, in the dialog title and on the button.
+  for (const verb of ["Tandai lunas", "Setujui manual", "Kirim ulang", "Pulihkan Sheets"]) {
+    assert.ok(orders.includes(`"${verb}"`) || orders.includes(`button: "${verb}"`),
+      `the confirm for ${verb} must be named, not generic`);
+  }
+
+  // The five facts a money action has to be checkable against.
+  for (const field of [
+    "Order ID",
+    "Pelanggan",
+    "Produk",
+    "Total",
+    "Referensi pembayaran",
+  ]) {
+    assert.ok(orders.includes(`label="${field}"`), `the confirm must show ${field}`);
+  }
+  assert.match(orders, /formatRupiah\(Number\(pendingAction\.order\.total/,
+    "the total in the confirm must be the order's own, in rupiah");
+
+  // Marking an order paid by hand is a person vouching for a payment no gateway
+  // confirmed. It wrote its audit trail with no explanation attached.
+  assert.match(orders, /reason: true/, "both money actions must require a reason");
+  assert.match(orders, /actionText\(kind\)\.reason && !actionReason\.trim\(\)/);
+});
+
+test("a skipped delivery is never reported as a success", async () => {
+  const orders = withoutComments(await source("pages/owner-v2/orders/page.tsx"));
+
+  // The fulfilment guard declines to re-send to a customer who already has the
+  // credentials. That used to go out through the same green toast as every real
+  // success, which is the one way this page could teach an owner to trust a
+  // toast it should not have.
+  assert.match(
+    orders,
+    /pushToast\(\s*"Pengiriman dilewati[\s\S]{0,80}?"warning",?\s*\)/,
+    "a skipped delivery must be a warning, not a success",
+  );
+  // And the toast must be able to carry both, which a single string could not.
+  assert.match(orders, /useToastQueue\(\)/);
+  assert.match(orders, /<ToastStack toasts=\{toasts\} onDismiss=\{dismissToast\}/);
+  assert.doesNotMatch(orders, /tone="success" onClose=\{\(\) => setToast\(""\)\}/);
 });
 
 test("Owner Console keeps a responsive drawer and honours reduced motion", async () => {

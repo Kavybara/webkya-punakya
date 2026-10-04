@@ -70,16 +70,23 @@ test("a skipped retry says so instead of reporting success", () => {
   const page = read(ORDERS_PAGE);
 
   // The toast is the whole defect: it is what the owner reads as confirmation
-  // that the customer has their credentials.
+  // that the customer has their credentials. Both branches must exist -- a
+  // skipped send and a real send have to read differently.
   assert.match(
     page,
-    /deliverySkipped\s*\?\s*[\s\S]{0,160}?dilewati[\s\S]{0,160}?:\s*`\$\{actionText\(kind\)\.button\} berhasil dijalankan\.`/,
-    "the success toast is unconditional, so a skipped send is still announced as delivered",
+    /Pengiriman dilewati[\s\S]{0,120}?"warning"/,
+    "a skipped retry must be reported as a warning, not as the success it used to borrow",
   );
   assert.match(
     page,
-    /Pengiriman dilewati/,
-    "a skipped retry needs to tell the owner plainly that nothing was sent",
+    /else\s*\{[\s\S]{0,160}?berhasil dijalankan\.`\s*,\s*"success"/,
+    "the success toast must be reserved for a send that actually happened",
+  );
+  // The page has to be able to carry both at once, which is why this is a queue.
+  assert.match(
+    page,
+    /useToastQueue\(\)/,
+    "one action can finish two ways, so the page needs a queue rather than a single string",
   );
 });
 
