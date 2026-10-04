@@ -185,6 +185,47 @@ Kalau `RUNTIME_PATH` dan `RUNTIME_DIR` di `.env` menunjuk folder berbeda,
 tabel di `DEPLOYMENT.md` menjelaskan mana yang dipakai proses mana — **cek ini
 dulu**, karena salah tempat berarti database yang dipulihkan tidak dibaca.
 
+### Jalur cepat — VPS baru, kondisi bersih
+
+Kalau VPS-nya **sudah mati total** dan kamu memang menyalakan dari nol, bagian
+2–7 di atas tidak perlu dibaca. Yang perlu kamu jalankan hanya ini:
+
+```bash
+# 1. Download File Backup dari WhatsApp ke komputer.
+#    Kalau berakhiran .enc, decrypt dulu (bagian 3). Kalau tidak, langsung tar.
+
+# 2. Upload ke VPS baru
+scp "File Backup.tar.gz" root@178.83.188.210:/root/
+
+# 3. Di VPS baru
+cd /path/ke/proyek        # extract di sini
+tar xzf /root/File Backup.tar.gz -C .
+npm install
+npm run web:build
+npm start
+```
+
+Selesai. Arsipnya **self-contained** — source project, `.env`, `kavya-db.json`,
+`whatsapp-database/`, `baileys-auth/`, dan `dist/` hasil build semuanya ikut
+dalam satu file itu. Tidak ada langkah tersembunyi di luar `npm install`.
+
+Yang tidak ikut hanya `node_modules`, `.git`, `coverage`, dan `tmp` — dan
+`node_modules` memang harus dipasang ulang di server mana pun.
+
+Dua hal yang perlu kamu tahu, bukan langkah tambahan:
+
+- **`.enc` atau bukan?** Kalau file yang kamu terima **tidak** berakhiran `.enc`,
+  jangan jalankan decrypt — langsung `tar xzf`. Backup terjadwal mengirim file
+  polos, jadi file yang paling sering kamu terima justru yang tidak terenkripsi.
+- **Cek `.env` setelah extract.** Arsip membawa `.env` dari waktu backup dibuat.
+  Kalau kamu sudah mengganti password Sheets atau token sejak itu, yang kembali
+  adalah versi lama — dan sistem akan jalan normal dengan kredensial usang tanpa
+  error apa pun.
+
+Kalau ternyata VPS lama masih hidup dan masih bisa di-ssh, **jangan pakai jalur
+ini** — langkah 5 (simpan data lama dulu) itu wajib, kalau tidak transaksinya
+hilang.
+
 ---
 
 ## 8. Verifikasi setelah hidup

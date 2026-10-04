@@ -149,6 +149,49 @@ test("the checklist tells the owner to check backup health after restoring", () 
   );
 });
 
+test("the quick path claims a self-contained archive, and it is", () => {
+  // The quick path tells an owner with a dead server that extract-upload-run is
+  // enough. That is only true if the archive really carries what a fresh server
+  // needs, and this is checked against the payload builder rather than trusted:
+  // if `.env` or the built assets fall out of the bundle, a restore to a new VPS
+  // starts up with no Sheets credentials and no dist, and fails in a way that
+  // looks like a code problem rather than a missing file.
+  const payloadBuilder = readFileSync(new URL("../../../../packages/shared/runtime-backup.mjs", import.meta.url), "utf8");
+  const quickPath = runbook.slice(runbook.indexOf("### Jalur cepat"), runbook.indexOf("## 8."));
+
+  assert.ok(quickPath.length > 0, "RESTORE.md has no quick path for a clean new VPS");
+  assert.match(quickPath, /npm install/, "the one step that genuinely cannot be skipped should be in the quick path");
+
+  // The bundle walk excludes directories by name. Anything absent from this list
+  // is swept up by `readProjectSourceBundle`, which is what carries the repo.
+  const excluded = payloadBuilder.slice(
+    payloadBuilder.indexOf("async function readProjectSourceBundle"),
+    payloadBuilder.indexOf("function activeRentalCount"),
+  );
+
+  // Must survive: the two files a fresh server cannot start without. `.env`
+  // carries the Sheets and WhatsApp credentials, and `dist` is the built app --
+  // the first is unrecoverable anywhere else, the second would need a build step
+  // the quick path does not mention. Note `dist` is gitignored, so it is easy to
+  // assume it is excluded from backups too. It is not.
+  for (const mustSurvive of ["dist", ".env"]) {
+    assert.ok(
+      !excluded.includes(`"${mustSurvive}"`),
+      `${mustSurvive} is now excluded from the backup. The quick path's "self-contained" claim and its missing-files note both need correcting.`,
+    );
+  }
+
+  // And the inverse, which the quick path promises in writing: these stay out so
+  // the archive does not recurse into its own backups or carry a node_modules
+  // tree. If one is ever added, "only npm install is left" becomes false.
+  for (const mustStayOut of ["node_modules", ".git", "coverage", "tmp", "backups"]) {
+    assert.ok(
+      excluded.includes(`"${mustStayOut}"`),
+      `${mustStayOut} is no longer excluded from the backup. That makes the archive recurse into itself or balloon; RESTORE.md's missing-files note needs correcting.`,
+    );
+  }
+});
+
 test("the one-way claim matches what the sync module actually does", () => {
   // Guard against the doc and the code disagreeing again. Every `db.resellers`
   // reference in the sheets module must be a read, never an assignment.
