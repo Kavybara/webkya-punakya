@@ -17,7 +17,7 @@ stated intent is a token the next person will "fix".
 | The shared component kit | `src/components/ui/` |
 | The signed-in frame | `src/components/ui/AppShell.tsx` + `shell.css` |
 | The kit's own styles | `src/components/ui/ui.css` |
-| The legacy base kit (**still live** — see §7) | `src/components/base/` |
+| The legacy base kit (**one file left** — see §7) | `src/components/base/` |
 
 **Tokens are not in `ui.css` or `shell.css`.** Neither file has a `:root` block;
 both consume the tokens. If you are looking for a colour and cannot find it in
@@ -322,30 +322,27 @@ place of the collapse button. `shell-responsive-visibility.test.mjs` pins it.
 
 ---
 
-## 7. The legacy base kit — still live
+## 7. The legacy base kit — one file left
 
-`src/components/base/` holds three files. **They are not dead code**, and the
-exit condition for removing them has not been met:
+`src/components/base/` is down to a single file:
 
 | File | Live consumers |
 |---|---|
 | `ErrorBoundary.tsx` | `src/main.tsx`, `src/router/index.tsx` |
-| `Card.tsx` | `src/pages/NotFound.tsx` |
-| `Button.tsx` | `src/pages/NotFound.tsx` |
 
-Both files carry a comment saying Phase 6 removes them once the last callers move
-to `ui/`. That has not happened, and this document is where the honest status
-goes: **the migration is still outstanding.**
+`Button.tsx` and `Card.tsx` are **gone**. `pages/NotFound.tsx` was their only
+consumer; it now uses `BentoCell` for the surface and a `Link` carrying
+`.ui-button is-primary` for the call to action.
 
-Note that `ErrorBoundary` has no `ui/` equivalent — it needs porting or a new home
-before `base/` can go. `NotFound.tsx` is the only remaining `Button`/`Card`
-caller and is the cheap half.
+That last part is worth copying. The old page nested a `<Button>` inside a
+`<Link>` — a `<button>` inside an `<a>`, which is invalid HTML and makes a screen
+reader announce two controls where there is one action. `.ui-button` is a plain
+class, not tied to the `Button` component, so the anchor can carry it directly
+and stay one focusable link.
 
-Until then, both kits are live. Two rules keep that from turning into drift:
-
-- **New components go in `ui/`, always.** `base/` is read-only.
-- Both kits already resolve colour through the same tokens, so a component that
-  has not yet migrated still looks like the same product.
+`ErrorBoundary` remains because it has **no `ui/` equivalent**. It needs porting
+or a new home before `base/` can go. Until then, new components go in `ui/` and
+`base/` is read-only.
 
 ---
 
