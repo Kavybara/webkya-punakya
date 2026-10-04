@@ -558,8 +558,15 @@
 .ui-shell-bottom-nav { display: none; }
 
 /* Visibility flips at one breakpoint, and both sides of the flip are stated
-   here so a reader of this file never has to guess which is the default. */
-.ui-shell .is-desktop-only { display: none; }
+   here so a reader of this file never has to guess which is the default.
+
+   The default is the desktop rail, so the mobile-only button is the one that
+   starts hidden. It used to be the other way round, which put the drawer
+   close -- wired to `setDrawerOpen(false)`, a no-op while no drawer is open --
+   on desktop screens in place of the collapse button. Both rail buttons live
+   in one fragment rendered into two asides, so neither can leave the DOM; the
+   desktop rail was fixed by hiding the X, not by removing it. */
+.ui-shell .is-mobile-only { display: none; }
 
 @media (max-width: 1180px) {
   /* The pill is the first thing to go when the topbar runs out of width. It is
