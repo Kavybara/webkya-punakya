@@ -85,7 +85,9 @@ export function ResellerShell({
         .unreadDeliveryCount()
         .then((result) => setUnreadDeliveryCount(Math.max(0, Number(result.count || 0))))
         .catch(() => undefined);
-    loadUnread();
+    // Already `.catch`ed above. The badge is a nicety -- a failed count must
+    // not take down the shell that draws it.
+    void loadUnread();
     return subscribeRealtime(loadUnread);
   }, []);
 

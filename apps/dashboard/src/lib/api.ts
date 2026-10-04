@@ -1,5 +1,5 @@
 import type { Activity, ManagedAccount, Order, Product, ProductVariant, Reseller, StockItem } from "./types";
-import { clearSession, readSession } from "./session";
+import { clearSession } from "./session";
 
 type JsonBody = Record<string, unknown> | Array<unknown> | undefined;
 
@@ -1012,7 +1012,15 @@ async function request<T>(path: string, options: { method?: string; body?: JsonB
   return data as T;
 }
 
-export function subscribeRealtime(callback: () => void) {
+/**
+ * `Promise<void>` is accepted because every subscriber's refresh is a fetch.
+ * `scheduleRefresh` fires from an EventSource callback, where there is no
+ * caller left to await -- the promise is discarded and each caller already
+ * `.catch`es its own failure. Typing this `() => void` instead forced five
+ * call sites to wrap a handled promise in a `void` operator to satisfy a rule
+ * that was complaining about the wrapper, not the call.
+ */
+export function subscribeRealtime(callback: () => void | Promise<void>) {
   if (typeof EventSource === "undefined") return () => undefined;
   const events = new EventSource(apiUrl("/events"), { withCredentials: true });
   let refreshTimer: ReturnType<typeof window.setTimeout> | null = null;
@@ -1020,7 +1028,7 @@ export function subscribeRealtime(callback: () => void) {
     if (refreshTimer) window.clearTimeout(refreshTimer);
     refreshTimer = window.setTimeout(() => {
       refreshTimer = null;
-      callback();
+      void callback();
     }, 150);
   };
   events.addEventListener("db-change", scheduleRefresh);

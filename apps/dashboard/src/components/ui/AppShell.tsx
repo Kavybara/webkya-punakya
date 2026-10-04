@@ -137,7 +137,15 @@ export function AppShell({
   description: string;
   lastUpdated?: string;
   refreshing?: boolean;
-  onRefresh?: () => void;
+  /**
+   * `Promise<void>` is allowed because every caller's reload is async -- it
+   * refetches from the API. The shell only ever calls this from a click
+   * handler, where a returned promise is discarded by design, so awaiting it
+   * here would buy nothing. Declaring `() => void` instead made every one of
+   * those call sites a type error the only escape from which was to wrap the
+   * function in a `void` operator that promised nothing was awaited.
+   */
+  onRefresh?: () => void | Promise<void>;
   /** Sits under the brand, above the navigation. The reseller's balance. */
   sidebarTop?: ReactNode;
   /** Left of the search field. The owner's system status. */
@@ -174,11 +182,11 @@ export function AppShell({
   useEffect(() => {
     const current = readSession();
     if (!current?.role) {
-      navigate(`/login?next=${encodeURIComponent(homePath)}`, { replace: true });
+      void navigate(`/login?next=${encodeURIComponent(homePath)}`, { replace: true });
       return;
     }
     if (current.role !== role) {
-      navigate(deniedPath, { replace: true });
+      void navigate(deniedPath, { replace: true });
       return;
     }
     setAllowed(true);
@@ -210,7 +218,7 @@ export function AppShell({
     // expires on its own.
     clearSession();
     void api.logout().catch(() => undefined);
-    navigate("/login", { replace: true });
+    void navigate("/login", { replace: true });
   }, [navigate]);
 
   const profileRef = useDismiss(profileOpen, closePopovers);

@@ -275,7 +275,7 @@ export default function ResellerV2SettingsPage() {
   function logoutCurrentSession() {
     api.logout().catch(() => undefined);
     clearSession();
-    navigate("/login", { replace: true });
+    void navigate("/login", { replace: true });
   }
 
   return (

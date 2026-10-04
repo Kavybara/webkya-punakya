@@ -43,7 +43,6 @@ import "./FarmVideoBackdrop.css";
  */
 export function FarmVideoBackdrop() {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [canPlay, setCanPlay] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
 
   useEffect(() => {
@@ -61,9 +60,12 @@ export function FarmVideoBackdrop() {
       if (cancelled) return;
       // The poster is what renders if this never fires, so a failure is a still
       // farm rather than a broken hero -- nothing to report and nothing to retry.
+      // `isPlaying` stays false on rejection, which is the whole state the
+      // stylesheet needs: there is no separate "can play" flag to fall out of
+      // sync with it.
       video.play().then(
         () => setIsPlaying(true),
-        () => setCanPlay(false),
+        () => setIsPlaying(false),
       );
     };
 
@@ -116,7 +118,6 @@ export function FarmVideoBackdrop() {
         playsInline
         preload="none"
         tabIndex={-1}
-        onCanPlay={() => setCanPlay(true)}
         data-playing={isPlaying}
       />
       {/* Two scrims, not one. The upper one is weighted for the navbar, where

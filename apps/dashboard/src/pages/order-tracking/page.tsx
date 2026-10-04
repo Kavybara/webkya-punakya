@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Headphones } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AuthFormPanel, AuthInput, AuthSubmitButton } from "../../components/auth/AuthShell";

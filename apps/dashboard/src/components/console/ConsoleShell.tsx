@@ -73,7 +73,8 @@ export function ConsoleShell({
   refreshing?: boolean;
   attentionCount?: number;
   systemState?: SystemState;
-  onRefresh?: () => void;
+  /** See the note on `AppShell`'s `onRefresh` -- every caller's reload is async. */
+  onRefresh?: () => void | Promise<void>;
   children: ReactNode;
 }) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);

@@ -184,7 +184,7 @@ export default function ResellerV2CatalogPage() {
       qty: "1",
       from: "reseller",
     });
-    navigate(`/reseller/checkout?${params.toString()}`, {
+    void navigate(`/reseller/checkout?${params.toString()}`, {
       state: {
         checkoutSelection: selection,
         quantity: 1,

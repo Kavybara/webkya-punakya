@@ -48,21 +48,6 @@ const CREDENTIAL_FIELDS: Array<{ key: keyof AccountCredentials; label: string; s
   { key: "canvaLink", label: "Link pool Canva", secret: true },
 ];
 
-/**
- * Clear the credentials as soon as the drawer closes.
- *
- * Not a nicety. The reason the listing does not carry these is that a set of
- * passwords that is sitting in a React state object survives the click that
- * fetched it: it is still in the DevTools history, still in whatever took a
- * screenshot, still in a heap dump. Closing the drawer is the moment the owner
- * said they were finished, so that is when they go.
- */
-const emptyCredentials = (): AccountCredentials => ({
-  accountId: "", email: "", loginPhone: "", password: "", pin: "", signInCode: "",
-  verificationCode: "", resetLink: "", householdLink: "", otpEmail: "", canvaLink: "",
-  profile: "", product: "", variant: "", reseller: "", status: "", expiresAt: "",
-});
-
 const emptyForm = (): AccountForm => ({ stockId: "", product: "", variant: "", email: "", buyer: "", resellerId: "", reseller: "", whatsapp: "", profile: "", device: "", startedAt: "", expiresAt: "", duration: "", status: "active" });
 function toForm(row: ApiAccount): AccountForm { return { stockId: row.stockId || "", product: row.product || "", variant: row.variant || "", email: row.email || row.loginPhone || "", buyer: row.buyer || "", resellerId: row.resellerId || "", reseller: row.reseller || "", whatsapp: row.whatsapp || "", profile: row.profile || "", device: row.device || "", startedAt: row.startedAt?.slice(0, 16) || "", expiresAt: row.expiresAt?.slice(0, 16) || "", duration: row.duration || "", status: row.status } }
 export default function OwnerConsoleAccountsPage() {

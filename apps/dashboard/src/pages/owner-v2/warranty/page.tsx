@@ -182,7 +182,9 @@ export default function OwnerConsoleWarrantyPage() {
       setSearchParams(next, { replace: true });
       return;
     }
-    openClaim(claim);
+    // `openClaim` fetches the replacement candidates and sets its own error
+    // state on failure, so there is nothing here that could handle a rejection.
+    void openClaim(claim);
     const next = new URLSearchParams(searchParams);
     next.delete("claim");
     setSearchParams(next, { replace: true });
@@ -537,7 +539,7 @@ export default function OwnerConsoleWarrantyPage() {
      the open-claim count just stops competing with the pill for the word
      "attention". */
   const warrantyAttention = activeFailures.length;
-  return <ConsoleShell title="Garansi" description="Periksa klaim, pilih stok satu pool, dan simpan riwayat penggantian akun." refreshing={loading} attentionCount={warrantyAttention} systemState={systemStateFor(warrantyAttention, { error: Boolean(error), loading })} onRefresh={load}>
+  return <ConsoleShell title="Garansi" description="Periksa klaim, pilih stok satu pool, dan simpan riwayat penggantian akun." refreshing={loading} attentionCount={warrantyAttention} systemState={systemStateFor(warrantyAttention, { error: Boolean(error), loading })} onRefresh={async () => { await load(); }}>
     <MetricRow items={[
       { label: "Klaim baru", value: claims.filter((row) => row.status === "submitted").length, tone: "warning" },
       { label: "Sedang diperiksa", value: claims.filter((row) => ["reviewing", "waiting_evidence"].includes(row.status)).length, tone: "info" },

@@ -67,10 +67,10 @@ export default function LoginPage() {
       const next = searchParams.get("next") || "";
       if (session.role === "owner") {
         const destination = next.startsWith("/owner-v2") ? next : "/owner-v2";
-        navigate(destination);
+        void navigate(destination);
         return;
       }
-      navigate(next.startsWith("/reseller-v2") ? next : "/reseller-v2/ringkasan");
+      void navigate(next.startsWith("/reseller-v2") ? next : "/reseller-v2/ringkasan");
     } catch (loginError) {
       setError(safeLoginError(loginError));
     } finally {

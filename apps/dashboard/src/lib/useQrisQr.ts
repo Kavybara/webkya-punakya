@@ -25,7 +25,9 @@ export function useQrisQr(payload: string | null | undefined): string {
     }
     let current = true;
     setSource("");
-    qrisQrDataUrl(value).then((url) => {
+    // `qrisQrDataUrl` catches internally and resolves "" on a payload the
+    // encoder rejects, so there is no rejection to handle here.
+    void qrisQrDataUrl(value).then((url) => {
       if (current) setSource(url);
     });
     return () => {

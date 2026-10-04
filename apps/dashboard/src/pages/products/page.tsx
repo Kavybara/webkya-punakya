@@ -372,7 +372,7 @@ export default function ProductsPage() {
 
   function backToCatalog() {
     if (isResellerCheckout) {
-      navigate("/reseller-v2/catalog");
+      void navigate("/reseller-v2/catalog");
       return;
     }
     setStep("catalog");
@@ -421,7 +421,7 @@ export default function ProductsPage() {
       return;
     }
     if (!productId || !variantId) {
-      if (isResellerCheckout) navigate("/reseller-v2/catalog", { replace: true });
+      if (isResellerCheckout) void navigate("/reseller-v2/catalog", { replace: true });
       return;
     }
     if (!products.length) {
@@ -670,23 +670,6 @@ export default function ProductsPage() {
     return columns;
   }, [columnCount, visibleProducts]);
 
-  function selectPackage(product: CatalogProduct, variant = product.variants[0], duration?: string, price?: number) {
-    const selectedDuration = duration ? { duration, price: Number(price || 0) } : firstDuration(variant);
-    setSelection({
-      product,
-      variant,
-      duration: selectedDuration.duration,
-      price: selectedDuration.price,
-    });
-    setCreatedOrder(null);
-    setPayment(null);
-    setError("");
-    setQuantity(1);
-    setResellerCheck({ status: "idle", message: "" });
-    setStep("details");
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
   function toggleProduct(product: CatalogProduct) {
     const nextOpenId = openProductId === product.id ? "" : product.id;
     setOpenProductId(nextOpenId);
@@ -740,10 +723,10 @@ export default function ProductsPage() {
       });
       const target = `/reseller/checkout?${params.toString()}`;
       if (session?.role === "reseller") {
-        navigate(target);
+        void navigate(target);
         return;
       }
-      navigate(`/login?next=${encodeURIComponent(target)}`);
+      void navigate(`/login?next=${encodeURIComponent(target)}`);
     } catch (cause) {
       // The precheck is advice, not the gate -- creating the order validates
       // stock server-side anyway. So a failed check shows its reason and lets
@@ -864,7 +847,7 @@ export default function ProductsPage() {
       resumedOrderRef.current = order.id;
       const resumeParams = new URLSearchParams(searchParams);
       resumeParams.set("order", order.id);
-      navigate(`${location.pathname}?${resumeParams.toString()}`, {
+      void navigate(`${location.pathname}?${resumeParams.toString()}`, {
         replace: true,
         state: checkoutState || undefined,
       });

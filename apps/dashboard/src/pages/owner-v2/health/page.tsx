@@ -42,7 +42,6 @@ export default function OwnerConsoleHealthPage() {
   useEffect(() => { load().catch(() => undefined); }, [load]);
 
   const checks = useMemo(() => {
-    const maintenance = health?.maintenance || system?.warnings?.find((item) => item.toLowerCase().includes("maintenance"));
     return [
       {
         key: "whatsapp",
