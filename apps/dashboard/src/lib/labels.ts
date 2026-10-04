@@ -152,6 +152,30 @@ export function waConnection(value?: string | null): Label {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Managed account                                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The lifecycle of one delivered account.
+ *
+ * `expired` is "Berakhir" here for the same reason it is on a rental: the
+ * access ran out, which is the normal end. "Kedaluwarsa" would imply somebody
+ * missed a deadline, which is only true of an unpaid order.
+ */
+const ACCOUNT_STATUS: Record<string, Label> = {
+  active: { label: "Aktif", tone: "success" },
+  expiring: { label: "Segera berakhir", tone: "warning" },
+  expired: { label: "Berakhir", tone: "danger" },
+  replaced: { label: "Digantikan", tone: "muted" },
+  disabled: { label: "Dinonaktifkan", tone: "muted" },
+};
+
+export function accountStatus(value?: string | null): Label {
+  const key = String(value ?? "").trim().toLowerCase();
+  return ACCOUNT_STATUS[key] ?? { label: humanise(value), tone: "muted" };
+}
+
+/* -------------------------------------------------------------------------- */
 /* Orders                                                                     */
 /* -------------------------------------------------------------------------- */
 
