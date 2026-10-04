@@ -46,6 +46,7 @@ import { clientKey, resolveTrustProxy } from "./lib/client-ip.js";
 import { createLoginAttemptLimiter } from "./lib/login-attempt-limiter.js";
 import { joinPublicUrl, publicWebsiteUrl } from "./lib/public-url.js";
 import { stockBlockedByAccountCondition } from "./google-sheets/account-condition.js";
+import { assessBackupHealth, backupIntervalMs } from "./services/backup-health.js";
 import { createOrderStockService } from "./services/order-stock-service.js";
 import { createFulfillmentNotificationService } from "./services/fulfillment-notification-service.js";
 import { extractNetflixVerificationCode, hasFifteenMinuteExpiry, hasTenMinuteExpiry, isNetflixAccountChangeVerification } from "./services/account-access-code-service.js";
@@ -6442,6 +6443,14 @@ async function buildSystemStatus(db) {
     integrations: readIntegrationInfo(db, whatsapp, tunnel, gmailRuntimeHealth),
     database,
     backup,
+    // `backup` above counts files sitting on this disk. This says whether the
+    // scheduled backup actually ran and reached the owner -- which the
+    // filesystem cannot answer, and which is the question that matters, because
+    // those files live on the same VPS that would take them down.
+    backupHealth: assessBackupHealth({
+      backupState: db.settings?.backupState,
+      intervalMs: backupIntervalMs(),
+    }),
     warnings: [],
   };
   status.warnings = systemWarnings(status);

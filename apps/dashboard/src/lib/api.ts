@@ -872,6 +872,7 @@ export type SystemStatus = {
     modifiedAt: string;
     version: number;
   };
+  /** Files sitting in the backup directory on this machine. */
   backup?: {
     path: string;
     exists: boolean;
@@ -880,6 +881,28 @@ export type SystemStatus = {
     latestName: string;
     latestSize: number;
     latestAt: string;
+  };
+  /**
+   * Whether the scheduled backup ran and reached the owner.
+   *
+   * Distinct from `backup` above, and the one that answers the real question:
+   * those files live on the same VPS, so their existence says nothing about
+   * whether the owner has a copy. `never_run` means no run has ever been
+   * recorded -- it is a warning, not an absence of data.
+   */
+  backupHealth?: {
+    ok: boolean;
+    /** `none` when healthy, otherwise how loudly to report it. */
+    severity: "none" | "warning" | "error";
+    status: "never_run" | "sent" | "created" | "skipped" | "failed" | "disabled" | string;
+    stale: boolean;
+    neverSent: boolean;
+    ranAt: string;
+    sentAt: string;
+    fileName: string;
+    ageHours: number | null;
+    sinceLastSentHours: number | null;
+    message: string;
   };
   warnings: string[];
 };

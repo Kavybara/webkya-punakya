@@ -7,6 +7,7 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 import QRCode from "qrcode";
 import { autoBackupOnConnect } from "../lib/backup.js";
+import { writeBackupState } from "../lib/backup-state-writer.js";
 import { cleanupTmpDir } from "../lib/runtime.js";
 import { extractInviteCode, getJidFromTarget, normalizeGroupJid, normalizeWhatsAppNumber } from "../lib/jid.js";
 import { logError, logReconnect, logSuccess, logTracking, logWarning } from "../lib/panel-log.js";
@@ -125,6 +126,33 @@ export function createWhatsAppConnection({ config, logger, store, plugins }) {
   let lastScheduledBackupAt = "";
   let lastScheduledBackupStatus = "idle";
   let lastScheduledBackupError = "";
+
+  /*
+   * Publishes each backup outcome into `kavya-db.json` so the owner sees on the
+   * Health Center that backups actually ran.
+   *
+   * Every failure mode below is silent today. `runScheduledBackup` returns
+   * early on "not connected" and on "heavy work paused" without ever creating
+   * an archive, and the reason lives in a variable inside this process -- the
+   * dashboard cannot read it, and if the bot is down there is no process left
+   * to ask. That combination is why a broken backup can go unnoticed for
+   * weeks: the thing that would report it is the thing that stopped working.
+   *
+   * Recording the skip as well as the success is the point. "Ran 6 hours ago and
+   * was skipped because WhatsApp was down" is actionable; a timestamp alone
+   * would look healthy.
+   *
+   * Failures here are swallowed on purpose: recording the state must never be
+   * able to take down the backup loop it is reporting on.
+   */
+  async function recordBackupOutcome(outcome = {}) {
+    if (!config.dashboardDatabasePath) return;
+    try {
+      await writeBackupState(config.dashboardDatabasePath, outcome);
+    } catch (error) {
+      logWarning("Gagal menulis status backup ke database dashboard", error);
+    }
+  }
   let pairingRequestAttempts = 0;
   let pairingRequestTimer = null;
   let lastPairingCodeLogged = "";
@@ -799,6 +827,7 @@ export function createWhatsAppConnection({ config, logger, store, plugins }) {
   async function runScheduledBackup(reason = "whatsapp-scheduled") {
     if (!config.backup?.auto || !config.backup?.scheduled || !config.backup?.intervalMs) {
       lastScheduledBackupStatus = "disabled";
+      await recordBackupOutcome({ status: "disabled", reason: "scheduled_backup_disabled" });
       return { skipped: true, reason: "scheduled_backup_disabled" };
     }
     if (scheduledBackupRunning) {
@@ -807,12 +836,14 @@ export function createWhatsAppConnection({ config, logger, store, plugins }) {
     if (heavyWorkPaused()) {
       lastScheduledBackupStatus = "skipped";
       lastScheduledBackupError = "heavy_work_paused";
+      await recordBackupOutcome({ status: "skipped", reason: "heavy_work_paused" });
       return { skipped: true, reason: "heavy_work_paused" };
     }
     const currentSock = sock;
     if (!isSocketOpen(currentSock)) {
       lastScheduledBackupStatus = "skipped";
       lastScheduledBackupError = connectionState || "whatsapp_not_connected";
+      await recordBackupOutcome({ status: "skipped", reason: lastScheduledBackupError });
       return { skipped: true, reason: lastScheduledBackupError };
     }
 
@@ -833,11 +864,19 @@ export function createWhatsAppConnection({ config, logger, store, plugins }) {
       });
       lastScheduledBackupStatus = result?.skipped ? "skipped" : result?.sent ? "sent" : "created";
       lastScheduledBackupError = result?.sent === false ? result.reason || "send_failed" : "";
+      const producedName = String(result?.fileName || result?.filePath || "").split(/[\\/]/).pop();
+      await recordBackupOutcome({
+        status: lastScheduledBackupStatus,
+        error: lastScheduledBackupError,
+        reason: result?.reason || "",
+        fileName: producedName,
+      });
       return result;
     } catch (error) {
       lastScheduledBackupStatus = "failed";
       lastScheduledBackupError = error.message || "scheduled_backup_failed";
       logWarning("Auto backup 6 jam gagal", error);
+      await recordBackupOutcome({ status: "failed", error: lastScheduledBackupError, reason });
       return { success: false, error: lastScheduledBackupError };
     } finally {
       scheduledBackupRunning = false;
