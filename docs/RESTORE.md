@@ -223,10 +223,14 @@ Backup otomatis punya **dua** pemicu, dan keduanya sudah ada di repo:
 | Pemicu | Yang meng-arm | Default |
 |---|---|---|
 | Sekali saat start | `scripts/startup/kavya-start.mjs:670` | **mati** (`AUTO_BACKUP_ON_START=false`) |
-| Tiap 24 jam | `apps/bot/handle/connection.js:805` | **nyala** (`AUTO_BACKUP_SCHEDULE_ENABLED=true`) |
+| Tiap 24 jam | `apps/bot/handle/connection.js:886` | **nyala** (`AUTO_BACKUP_SCHEDULE_ENABLED=true`) |
 
 Jadi pada konfigurasi yang sekarang, **yang benar-benar bekerja adalah timer
 24 jam di proses bot WhatsApp** — bukan `kavya-start.mjs`.
+
+> **Catatan 2026-10-04.** Nomor baris di tabel ini ikut geser setiap kali
+> `connection.js` diubah. Kalau angkanya tidak cocok dengan filemu, cari
+> `function startScheduledBackup` — itu penandanya, bukan angka baris.
 
 ### Konsekuensi yang harus kamu tahu
 
@@ -234,18 +238,65 @@ Tiga hal ini yang membuat backup diam-diam tidak jalan, dan ketiganya **tidak
 akan muncul di `crontab`**:
 
 1. **Bot WhatsApp mati → tidak ada backup sama sekali.** Timer-nya hidup di
-   proses bot (`connection.js:1109`), bukan di cron sistem. Kalau proses bot
+   proses bot (`connection.js:893`), bukan di cron sistem. Kalau proses bot
    stop atau crash, tidak ada yang menjadwalkan apa pun. Ini titik kegagalan
    tunggal, dan tidak tertulis di `.env.example`.
 2. **WhatsApp tidak connect → backup dilewati, arsip pun tidak dibuat.**
-   `runScheduledBackup` mengecek `isSocketOpen` (`connection.js:771`) dan
+   `runScheduledBackup` mengecek `isSocketOpen` (`connection.js:843`) dan
    `return` **sebelum** arsipnya dibangun. Jadi bukan "saja tidak terkirim" —
    tidak ada file sama sekali.
 3. **Back-to-back backup di-throttle 30 menit** (`AUTO_BACKUP_MIN_INTERVAL_MS`).
    Kalau kamu tes manual berulang kali, yang berikutnya ditolak dengan
    `auto_backup_throttled`. Itu perilaku yang benar, bukan bug.
 
+Poin 1 punya konsekuensi yang menyakitkan: **proses yang ought to melaporkan
+backup rusak adalah proses yang sudah mati.** Itu sebabnya setiap hasil backup
+sekarang ikut ditulis ke `kavya-db.json` — lihat di bawah.
+
+## Cara cek backup hari ini (Health Center)
+
+Sebelum deploy versi ini, satu-satunya cara tahu backup jalan atau tidak adalah
+`curl` ke proses bot — dan kalau proses bot mati, `curl` itu juga tidak
+menjawab. Sekarang Health Center bisa menjawabnya sendiri.
+
+Buka **Owner → Health Center**, kartu **Backup**. Yang ditampilkan bukan jumlah
+file di `runtime/backups`, melainkan hasil run terakhir:
+
+| Status di kartu | Artinya | Yang harus kamu lakukan |
+|---|---|---|
+| `sehat` + "Terkirim ..." | Backup terakhir sampai ke owner | Tidak ada |
+| "Backup otomatis dilewati..." | Jadwal berjalan, tapi tidak ada file dibuat | Cek koneksi WhatsApp di Health Center |
+| "Backup dibuat tapi tidak terkirim..." | Arsip ada di VPS, tapi owner tidak punya | Kirim manual; file ini hilang bersama VPS |
+| "Backup otomatis gagal..." | Run meledak | Cek log proses bot |
+| "terlalu lama ... jam lalu" | Tidak ada run baru dalam 2× jadwal | Proses bot kemungkinan mati |
+| "Belum pernah ada catatan" | Tidak ada run yang pernah tercatat | Proses bot versi lama, atau jadwal mati |
+
+Pesan lengkapnya muncul sebagai banner di atas Health Center, bukan cuma di
+kartu — ini kegagalan yang baru ketahuan setelah kamu butuh file-nya.
+
+**Penting:** "Backup otomatis dilewati" **bukan**kolom kosong. Itu artinya
+jadwal hidup tapi tidak menghasilkan apa pun. Backup yang hanya ada di VPS yang
+sama bukan backup dari sudut pandangmu, karena disk itu ikut hilang kalau
+servernya hilang.
+
+### Cara tambangnya dicatat
+
+Bot menulis setiap hasil run ke `settings.backupState` di `kavya-db.json`
+(`apps/bot/lib/backup-state-writer.js`), termasuk saat run **dilewati** atau
+**gagal** — bukan cuma saat sukses. Timestamp sengaja disimpan dalam format
+`YYYY-MM-DD HH:MM` supaya bisa langsung dibaca `formatDateTime` di dashboard.
+
+Bot jadi penulis kedua file itu, jadi penulisnya memakai optimistic
+concurrency: baca, hitung, lalu verifikasi file di disk masih identik sebelum
+menimpanya, dan retry dari versi terbaru kalau ada yang berubah di tengah jalan.
+Tanpa itu, satu tumpang-tindih dengan dashboard bisa menghapus order pelanggan.
+
 ### Cara cek yang benar
+
+**Cek Health Center dulu.** Kalau bot masih hidup, `curl` dan dashboard
+memberi jawaban yang sama; kalau bot mati, hanya dashboard yang masih bisa
+jawab. `curl` tetap berguna sebagai sumber kedua karena tidak bergantung pada
+isi database.
 
 Jangan pakai `crontab`. Tanya langsung ke proses bot:
 
@@ -257,8 +308,8 @@ curl -s -H "Authorization: Bearer $WHATSAPP_BOT_TOKEN" \
 
 `4016` adalah `WHATSAPP_PORT` di `.env.example`; kalau di `.env`mu berbeda, pakai
 yang tertulis di situ. Balasannya memuat `enabled`, `scheduled`, `interval_ms`,
-`owner_configured`, `last_run_at`, `last_status`, dan `last_error` — cukup untuk
-tahu backup terakhir jalan atau tidak, tanpa menebak.
+`owner_configured`, `running`, `last_run_at`, `last_status`, dan `last_error` —
+cukup untuk tahu backup terakhir jalan atau tidak, tanpa menebak.
 
 | Yang dilihat di `last_status` | Artinya |
 |---|---|
@@ -267,6 +318,11 @@ tahu backup terakhir jalan atau tidak, tanpa menebak.
 | `skipped` | Dilewati — cek `last_error` |
 | `failed` | Error; `last_error` berisi alasannya |
 | `disabled` | `AUTO_BACKUP` atau `AUTO_BACKUP_SCHEDULE_ENABLED`=false |
+
+Kalau `curl` tidak menjawab sama sekali, itu bukan berarti backup baik-baik
+aja — itu berarti proses bot tidak hidup, dan tidak ada yang menjadwalkan apa
+pun. Health Center akan menandai ini sebagai "terlalu lama" dalam satu atau dua
+siklus jadwal.
 
 Kalau `last_run_at` kosong jauh lebih lama dari 24 jam, timer-nya tidak pernah
 senang — periksa proses bot dulu, bukan jadwal.

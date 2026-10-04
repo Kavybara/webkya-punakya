@@ -102,6 +102,73 @@ test("the one-way claim matches what the sync module actually does", () => {
   );
 });
 
+/*
+ * The backup section carries the same risk as the data table: line numbers and
+ * status vocabularies rot, and this file is read when the server is already
+ * dead. These check the claims against the code rather than against memory.
+ */
+test("the runbook points at the backup code by marker, not only by line number", () => {
+  // A line number in a runbook is a promise that decays. The commit that
+  // records backup state shifted every one of them, which is exactly how a
+  // correct-looking document starts sending people to the wrong place.
+  const backupSection = runbook.slice(runbook.indexOf("## Catatan: kenapa backup tidak dikirim"));
+  assert.match(
+    backupSection,
+    /connection\.js:\d+/,
+    "at least one line reference should still be given for the impatient",
+  );
+  assert.match(
+    backupSection,
+    /startScheduledBackup|isSocketOpen|setInterval/,
+    "the runbook must also name a function that survives edits, or the line numbers are the only way in",
+  );
+});
+
+test("the runbook tells the owner to check the Health Center first", () => {
+  // The bot records every outcome into kavya-db.json now, so the dashboard can
+  // answer this question even when the bot is dead. That inverts the old
+  // advice, which only had `curl` against the bot itself.
+  const backupSection = runbook.slice(runbook.indexOf("## Catatan: kenapa backup tidak dikirim"));
+  assert.match(backupSection, /Health Center/i, "the runbook still sends the owner to the one source that dies with the bot");
+});
+
+test("the runbook warns that files on the VPS are not a backup", () => {
+  // The whole reason this feature exists. Thirty archives in runtime/backups
+  // are thirty copies of the same disk that is about to fail.
+  const backupSection = runbook.slice(runbook.indexOf("## Catatan: kenapa backup tidak dikirim"));
+  assert.match(
+    backupSection,
+    /VPS yang sama|same VPS|ikut hilang/i,
+    "the runbook lets the owner count files on disk as if they were a backup",
+  );
+});
+
+test("every backup status the bot can produce is explained", () => {
+  // `assessBackupHealth` branches on exactly these. A status the runbook does
+  // not name is a status an owner cannot act on.
+  const health = readFileSync(new URL("../services/backup-health.js", import.meta.url), "utf8");
+  const backupSection = runbook.slice(runbook.indexOf("## Catatan: kenapa backup tidak dikirim"));
+  for (const status of ["never_run", "sent", "created", "skipped", "failed", "disabled"]) {
+    assert.match(health, new RegExp(status), `the detector no longer knows about "${status}"`);
+  }
+  for (const status of ["never_run", "sent", "created", "skipped", "failed", "disabled"]) {
+    const named = status === "never_run" ? /belum pernah/i : new RegExp(status);
+    assert.match(backupSection, named, `RESTORE.md does not explain the "${status}" state`);
+  }
+});
+
+test("the runbook says a dead curl is a failure, not good news", () => {
+  // Silence from the bot is the single most likely symptom of the failure it
+  // would otherwise report. Reading it as "no news, backups fine" is how a
+  // broken backup survives for weeks.
+  const backupSection = runbook.slice(runbook.indexOf("## Catatan: kenapa backup tidak dikirim"));
+  assert.match(
+    backupSection,
+    /tidak menjawab|does not respond/i,
+    "the runbook treats an unresponsive bot as reassuring instead of as the failure it is",
+  );
+});
+
 test("orders and payments still exist nowhere in Sheets", () => {
   // The loss detector's whole premise rests on this: it fires only when orders
   // exist with no resellers, which is impossible if Sheets could rebuild orders.
