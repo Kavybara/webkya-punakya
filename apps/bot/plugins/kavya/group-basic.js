@@ -4,6 +4,7 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { applyTemplate } from "../../../../database/templates/list.js";
 import { isValidListTemplate, WHATSAPP_STRINGS } from "../../../../packages/shared/whatsapp/templates.mjs";
+import { formatRentalEndDate, rentalInviteLink } from "../../../../packages/shared/rental-expiry.mjs";
 import { logWarning } from "../../lib/panel-log.js";
 
 const COMMANDS = [
@@ -726,6 +727,10 @@ async function checkRental(context) {
       groupName: groupDisplayNameForContext(context, groups[context.chat_jid] || {}, rental),
       ownerNumber: ownerNumberForContext(context, rental),
       days: daysLeft,
+      // `.ceksewa` is not admin-only, so this reply is readable by every member.
+      // The date is safe to print here; the invite link is not, and it is
+      // deliberately absent.
+      endText: formatRentalEndDate({ ...rental, daysLeft }),
     }),
   );
   return { handled: true, plugin: "group-basic" };
@@ -830,7 +835,17 @@ function rentalDayChangeLines({ mode, addedDays, previousDays, totalDays } = {})
   return [`${label} : *${Math.abs(delta)} hari*`];
 }
 
-function rentalMessageText({ title, groupName, ownerNumber, days, mode, addedDays, previousDays }) {
+/*
+ * `endText` and `linkGrub` are separate arguments on purpose.
+ *
+ * This one function builds the message that goes into the group chat AND the
+ * one that goes privately to the person who rents. Only the second may carry
+ * the invite link: a WhatsApp invite is the key to the group, and anything
+ * printed in the chat is readable by every member and forwardable to anyone.
+ * Splitting the arguments means the in-group caller has no link to pass, so
+ * leaking it is not a decision someone has to remember not to make.
+ */
+function rentalMessageText({ title, groupName, ownerNumber, days, mode, addedDays, previousDays, endText = "", linkGrub = "" }) {
   return [
     `_*${title}*_`,
     "",
@@ -838,6 +853,8 @@ function rentalMessageText({ title, groupName, ownerNumber, days, mode, addedDay
     `Nomor Owner : *${ownerNumber}*`,
     ...rentalDayChangeLines({ mode, addedDays, previousDays, totalDays: days }),
     `Expired : *${formatRentalDays(days)}*`,
+    ...(endText ? [`Berakhir : *${endText}*`] : []),
+    ...(linkGrub ? [`Link Grub : *${linkGrub}*`] : []),
     "",
     "_Untuk Mengecek status sewa ketik .ceksewa pada grub tersebut_",
   ].join("\n");
@@ -853,6 +870,9 @@ function rentalStoreOwnerMessage({ context, rental = {}, groupName, mode, addedD
     mode,
     addedDays,
     previousDays,
+    endText: formatRentalEndDate({ ...rental, daysLeft: totalDays || rental.daysLeft }),
+    // The only place in the bot that hands out the invite link.
+    linkGrub: rentalInviteLink(rental),
   });
 }
 
@@ -915,6 +935,8 @@ async function upsertCurrentGroupRental(context, mode) {
       mode,
       addedDays: days,
       previousDays,
+      // Date yes, invite link no: this one is posted where the whole group reads it.
+      endText: formatRentalEndDate(rentalSnapshot),
     }),
   );
   await notifyStoreOwnerRentalChanged(context, {

@@ -1,3 +1,5 @@
+import { formatRentalEndDate, rentalInviteLink } from "../../../../packages/shared/rental-expiry.mjs";
+
 function normalizeWhatsappNumber(value = "") {
   const digits = String(value || "").replace(/[^\d]/g, "");
   if (!digits) return "";
@@ -34,6 +36,25 @@ export function formatRentalDays(value) {
   return `${Number.isFinite(days) ? Math.max(0, Math.trunc(days)) : 0} hari`;
 }
 
+/*
+ * Two lines that answer the question every one of these messages exists to
+ * answer: when does this stop, and where do I go?
+ *
+ * `newEndsAt` outranks the rental's own `endsAt` because after an adjustment
+ * the rental on the payload is the record as it was *before* the change -- the
+ * notification would otherwise announce the date the rental just left.
+ */
+function rentalEndLines(rental = {}, newEndsAt = "") {
+  const endsAt = String(newEndsAt || "").trim();
+  const endText = formatRentalEndDate(endsAt ? { ...rental, endsAt } : rental);
+  return endText ? [`Berakhir : ${endText}`] : [];
+}
+
+function rentalLinkLines(rental = {}) {
+  const link = rentalInviteLink(rental);
+  return link ? [`Link Grub : ${link}`] : [];
+}
+
 function joinBotMessageLines(lines = []) {
   return lines
     .map((line) => String(line ?? "").trim())
@@ -60,7 +81,7 @@ function changeTitle(action = "", delta = 0) {
   return "Bot Sewa Bertambah";
 }
 
-export function rentalChangedNotificationText({ db = {}, rental = {}, action = "", addedDays = 0, previousDays = 0, totalDays = 0 } = {}) {
+export function rentalChangedNotificationText({ db = {}, rental = {}, action = "", addedDays = 0, previousDays = 0, totalDays = 0, newEndsAt = "" } = {}) {
   const delta = rentalDeltaDays({ addedDays, previousDays, totalDays });
   const changeLabel = delta < 0 ? "Pengurangan Hari" : "Penambahan Hari";
   const remainingDays = Number(totalDays || rental.daysLeft || 0);
@@ -71,6 +92,8 @@ export function rentalChangedNotificationText({ db = {}, rental = {}, action = "
     `Nomor Owner : ${rentalOwnerContactNumber(db, rental) || "-"}`,
     delta ? `${changeLabel} : ${formatRentalDays(Math.abs(delta))}` : "",
     `Expired : ${formatRentalDays(remainingDays)}`,
+    ...rentalEndLines(rental, newEndsAt),
+    ...rentalLinkLines(rental),
     "",
     "Untuk Mengecek status sewa ketik .ceksewa pada grub tersebut",
   ]);
@@ -87,18 +110,27 @@ export function rentalExpiringNotificationText(db = {}, rental = {}, daysLeft = 
     `Name Grub : ${rentalDisplayName(rental)}`,
     `Nomor Owner : ${rentalOwnerContactNumber(db, rental) || "-"}`,
     `Waktu Tersisa : ${formatRentalDays(daysLeft)}`,
+    ...rentalEndLines(rental),
+    ...rentalLinkLines(rental),
     "",
     "Untuk Mengecek status sewa ketik .ceksewa pada grub tersebut",
   ]);
 }
 
 export function rentalExpiredNotificationText(db = {}, rental = {}) {
+  /*
+   * No `Link Grub` line here, unlike every other rental notification. Once a
+   * rental ends the invite link is not information -- it is a way in, and the
+   * person receiving this has just lost the right to use it. Sending it would
+   * invite someone into a group they are no longer paying for.
+   */
   return joinBotMessageLines([
     "Notifikasi Sewa Bot Expired",
     "",
     `Name Grub : ${rentalDisplayName(rental)}`,
     `Nomor Owner : ${rentalOwnerContactNumber(db, rental) || "-"}`,
     "Expired : 0 hari",
+    ...rentalEndLines(rental),
     "",
     "Bot tidak akan merespons command di grup sampai sewa diperpanjang.",
     "List grup tetap disimpan sementara dan baru dibersihkan otomatis setelah 30 hari expired.",
