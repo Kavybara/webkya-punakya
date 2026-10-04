@@ -20,6 +20,7 @@ export { ActionCard, Metric, MetricRow } from "./Metric";
 export { Dialog, DialogActions, Drawer, useOverlayFocus } from "./Overlay";
 export { CopyButton, SensitiveValue, maskIdentity, maskSecret } from "./Sensitive";
 export { EmptyState, ErrorState, LoadingSkeleton, LoadingState } from "./State";
+export { ErrorBoundary, ErrorScreen } from "./ErrorBoundary";
 export { ShellNav } from "./ShellNav";
 export { Notice, Toast } from "./Toast";
 export type { Tone } from "./types";

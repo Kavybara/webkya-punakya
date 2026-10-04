@@ -12,11 +12,11 @@ import { BentoCell } from "../components/ui";
  * `.theme-dark` puts it on the same canvas as everything else, which also means
  * the backdrop the token file paints behind that root reaches this page too.
  *
- * Migrated off `components/base` onto the shared kit. The cell is a `BentoCell`
- * rather than a bare `<section>` because it resolves to the same tokens the old
- * `Card` did -- `--surface`, `--radius-lg`, `--shadow-lift`, `--glass-blur` --
- * so the page looks the same while the last consumer of the base kit is gone.
- * `as="section"` because this cell has its own heading.
+ * Migrated onto the shared kit. The cell is a `BentoCell` rather than a bare
+ * `<section>` because it resolves to the same tokens a static panel uses
+ * everywhere else -- `--surface`, `--radius-lg`, `--shadow-lift`,
+ * `--glass-blur` -- so the page looks the same without carrying its own copy
+ * of them. `as="section"` because this cell has its own heading.
  *
  * The call to action is a `Link` carrying `.ui-button` rather than a `Button`
  * inside a `Link`. It was the latter, which nests a `<button>` in an `<a>`:

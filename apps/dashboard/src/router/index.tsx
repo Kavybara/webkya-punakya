@@ -1,5 +1,9 @@
 import { BrowserRouter, useLocation, useRoutes } from "react-router-dom";
-import { ErrorBoundary } from "../components/base/ErrorBoundary";
+// The leaf module rather than the barrel -- see the note in `main.tsx`. This
+// file is in the eager graph, and the barrel's `ui.css`/`shell.css` imports
+// would move 47 kB of kit CSS out of the lazy route chunks and into the entry
+// chunk. Every other component in the product imports the barrel normally.
+import { ErrorBoundary } from "../components/ui/ErrorBoundary";
 import { FarmVideoBackdrop } from "../components/feature/FarmVideoBackdrop";
 import { routes } from "./config";
 

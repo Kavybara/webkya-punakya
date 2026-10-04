@@ -17,7 +17,7 @@ stated intent is a token the next person will "fix".
 | The shared component kit | `src/components/ui/` |
 | The signed-in frame | `src/components/ui/AppShell.tsx` + `shell.css` |
 | The kit's own styles | `src/components/ui/ui.css` |
-| The legacy base kit (**one file left** — see §7) | `src/components/base/` |
+| The crash boundary (imported by leaf, not barrel — see §7) | `src/components/ui/ErrorBoundary.tsx` |
 
 **Tokens are not in `ui.css` or `shell.css`.** Neither file has a `:root` block;
 both consume the tokens. If you are looking for a colour and cannot find it in
@@ -206,6 +206,22 @@ Always reach for these instead of an ad-hoc spinner or empty block:
 - **`ErrorState`** — `{ message, onRetry }`. `onRetry` is what makes it an error
   state rather than an error message.
 
+### The crash boundary
+
+**`ErrorBoundary`** — `{ children, fallback?, resetKeys? }`, plus **`ErrorScreen`**
+(`{ error, onRetry }`) which is its default face.
+
+`resetKeys` clears a held error when any value changes — `router/index.tsx` passes
+`[location.pathname]` so a failed page stops being failed once the reader
+navigates away. `fallback` lets a section fail without blanking the page.
+
+It is a class component because `getDerivedStateFromError` has no hook equivalent.
+That is not a style preference to be argued with later.
+
+"Ke beranda" inside `ErrorScreen` is a plain `<a href>`, not a router `Link`, and
+that is load-bearing: the boundary in `main.tsx` wraps `<App />`, so it sits above
+`BrowserRouter`, and a `Link` with no router above it throws.
+
 ### Feedback
 
 **`Notice`** and **`Toast`**, both taking `Tone`. **`Badge`** —
@@ -322,27 +338,50 @@ place of the collapse button. `shell-responsive-visibility.test.mjs` pins it.
 
 ---
 
-## 7. The legacy base kit — one file left
+## 7. The base kit is gone
 
-`src/components/base/` is down to a single file:
+`src/components/base/` **no longer exists.** All three of its files are gone:
 
-| File | Live consumers |
+| Was | Now |
 |---|---|
-| `ErrorBoundary.tsx` | `src/main.tsx`, `src/router/index.tsx` |
+| `ErrorBoundary.tsx` | `components/ui/ErrorBoundary.tsx` |
+| `Card.tsx` | `BentoCell` — same tokens, so no page changed appearance |
+| `Button.tsx` | `Button` from the kit |
 
-`Button.tsx` and `Card.tsx` are **gone**. `pages/NotFound.tsx` was their only
-consumer; it now uses `BentoCell` for the surface and a `Link` carrying
-`.ui-button is-primary` for the call to action.
+`pages/NotFound.tsx` was the last consumer of `Button` and `Card`. It now uses a
+`BentoCell` for the surface and a `Link` carrying `.ui-button is-primary` for the
+call to action. That last part is worth copying: the old page nested a `<Button>`
+inside a `<Link>` — a `<button>` inside an `<a>`, which is invalid HTML and makes
+a screen reader announce two controls where there is one action. `.ui-button` is a
+plain class, not tied to the `Button` component, so the anchor can carry it
+directly and stay one focusable link.
 
-That last part is worth copying. The old page nested a `<Button>` inside a
-`<Link>` — a `<button>` inside an `<a>`, which is invalid HTML and makes a screen
-reader announce two controls where there is one action. `.ui-button` is a plain
-class, not tied to the `Button` component, so the anchor can carry it directly
-and stay one focusable link.
+### One exception to the barrel rule
 
-`ErrorBoundary` remains because it has **no `ui/` equivalent**. It needs porting
-or a new home before `base/` can go. Until then, new components go in `ui/` and
-`base/` is read-only.
+`src/main.tsx` and `src/router/index.tsx` import `ErrorBoundary` from
+`components/ui/ErrorBoundary` — **the leaf module, not the barrel.** Every other
+component in the product imports `../ui`.
+
+This is deliberate and measured. Those two files are the eager graph, and the
+barrel imports `ui.css` and `shell.css`. Going through the barrel moved all 83 kB
+of kit CSS into the entry chunk that every visitor downloads before the first
+route resolves:
+
+| | eager CSS chunk |
+|---|---|
+| baseline | 35.25 kB (7.61 kB gzip) |
+| via the barrel | **83.00 kB (14.65 kB gzip)** |
+| via the leaf module | **34.13 kB** |
+
+`ErrorBoundary.tsx` imports `./Bento` and `./Button` directly for the same
+reason. It is still exported from the barrel, so anything inside a route can
+import it normally.
+
+The cost of the exception: on the rare crash that happens before any route chunk
+has loaded, the error screen's own `.ui-button` styling is absent and its button
+reads as plain text. Everything stays legible, because the screen styles itself
+from tokens rather than from `.ui-*` rules. A readable link is the right trade
+against a 47 kB regression on every page load.
 
 ---
 
