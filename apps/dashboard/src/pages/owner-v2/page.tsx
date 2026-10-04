@@ -17,8 +17,6 @@ import { TopProducts } from "./overview/TopProducts";
 import {
   buildAttentionQueue,
   buildRevenueSeries,
-  fulfillmentLabel,
-  isPaid,
   isSmokeTest,
   parseDate,
   serviceRows,
@@ -29,6 +27,7 @@ import {
   systemWarnings,
   topProducts,
 } from "./overview/analytics";
+import { fulfillmentLabel, paymentLabel } from "../../lib/labels";
 
 type OverviewData = {
   orders: ApiOrder[];
@@ -58,18 +57,22 @@ const orderColumns: Array<DataColumn<ApiOrder>> = [
       </span>
     ) },
   { id: "total", header: "Total", value: (order) => Number(order.total || 0), sortable: true, cell: (order) => formatRupiah(Number(order.total || 0)) },
-  { id: "payment", header: "Pembayaran", value: (order) => String(order.qrisStatus || ""), sortable: true, cell: (order) => <Badge tone={isPaid(order) ? "success" : order.qrisStatus === "expired" ? "danger" : "warning"}>{order.qrisStatus === "paid" ? "Dibayar" : order.qrisStatus === "manual" ? "Manual" : order.qrisStatus === "expired" ? "Expired" : "Menunggu"}</Badge> },
-  { id: "fulfillment", header: "Fulfillment", value: fulfillmentLabel, sortable: true, cell: (order) => {
-      const label = fulfillmentLabel(order);
-      return <Badge tone={label === "Selesai" ? "success" : label === "Gagal" || label === "Dibatalkan" ? "danger" : label === "Diproses" ? "warning" : "muted"}>{label}</Badge>;
-    } },
+  // Both columns used to spell their own label out inline -- a third ternary
+  // chain here, a fourth on the orders page -- and then looked the *string* up
+  // in a colour table to pick the badge tone. Two things followed from that: the
+  // same order read differently on the overview than on the orders table beside
+  // it, and the moment "Expired" became "Kedaluwarsa" to match the rest of the
+  // product, every badge that mapped that string silently fell through to grey.
+  // The label and its tone now arrive together from `lib/labels.ts`.
+  { id: "payment", header: "Pembayaran", value: (order) => paymentLabel(order).label, sortable: true, cell: (order) => <Badge tone={paymentLabel(order).tone}>{paymentLabel(order).label}</Badge> },
+  { id: "fulfillment", header: "Fulfillment", value: (order) => fulfillmentLabel(order).label, sortable: true, cell: (order) => <Badge tone={fulfillmentLabel(order).tone}>{fulfillmentLabel(order).label}</Badge> },
   { id: "time", header: "Waktu", value: (order) => parseDate(order.createdAt)?.getTime() || 0, sortable: true, hideOnMobile: true, cell: (order) => formatDateTime(order.createdAt) },
   { id: "action", header: "Aksi", value: () => "Detail", cell: (order) => <Link to={`/owner-v2/orders?order=${encodeURIComponent(order.id)}`} aria-label={`Buka detail ${order.id}`}><ArrowUpRight size={15} /></Link> },
 ];
 
 const orderFilters: Array<DataFilter<ApiOrder>> = [
-  { id: "payment", label: "Pembayaran", options: [{ label: "Dibayar", value: "paid" }, { label: "Menunggu", value: "pending" }, { label: "Expired", value: "expired" }], value: (order) => String(order.qrisStatus || "") },
-  { id: "fulfillment", label: "Fulfillment", options: [{ label: "Selesai", value: "Selesai" }, { label: "Diproses", value: "Diproses" }, { label: "Gagal", value: "Gagal" }], value: fulfillmentLabel },
+  { id: "payment", label: "Pembayaran", options: [{ label: "Dibayar", value: "paid" }, { label: "Menunggu", value: "pending" }, { label: "Kedaluwarsa", value: "expired" }], value: (order) => String(order.qrisStatus || "") },
+  { id: "fulfillment", label: "Fulfillment", options: [{ label: "Selesai", value: "Selesai" }, { label: "Diproses", value: "Diproses" }, { label: "Gagal kirim", value: "Gagal kirim" }], value: (order) => fulfillmentLabel(order).label },
 ];
 
 export default function OwnerConsoleOverviewPage() {

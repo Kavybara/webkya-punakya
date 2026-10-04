@@ -15,8 +15,8 @@ import {
   deliveryIsComplete,
   orderCanReopenQris,
   orderPaid,
-  orderStatus,
 } from "../../../lib/orders";
+import { orderStatus } from "../../../lib/labels";
 import { ResellerShell } from "../../../components/reseller-v2/ResellerShell";
 import { systemStateFor } from "../../../components/attention";
 import {

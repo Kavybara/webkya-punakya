@@ -26,6 +26,7 @@ import {
   summarizeResellerAccounts,
 } from "../../lib/resellerAccounts";
 import { formatRupiah } from "../../lib/format";
+import { orderStatus } from "../../lib/labels";
 import { ActionCard, Badge, Bento, BentoCell, BentoStat, Button, EmptyState, ErrorState, LoadingSkeleton, maskIdentity } from "../../components/ui";
 
 type OverviewData = {
@@ -45,18 +46,15 @@ function compactDate(value = "") {
   }).format(parsed);
 }
 
+// This used to be a local `statusForOrder` that answered "Dibatalkan" and
+// "delivery failed" with the same word -- "Gagal". That is the one label error
+// in this app that could cost a reseller real money: an order they cancelled
+// looks exactly like an order the customer paid for and never received, and the
+// second is their problem to chase while the first is nobody's. It also called
+// a customer-cancelled order a delivery failure on the owner's overview, so the
+// owner saw a support ticket that did not exist. `labels.ts` answers this once.
 function statusForOrder(order: ApiOrder) {
-  if (order.orderStatus === "completed" || order.deliveryStatus === "sent")
-    return { label: "Selesai", tone: "success" as const };
-  if (
-    order.orderStatus === "cancelled" ||
-    order.deliveryStatus === "failed" ||
-    order.qrisStatus === "expired"
-  )
-    return { label: "Gagal", tone: "danger" as const };
-  if (order.qrisStatus === "pending")
-    return { label: "Menunggu pembayaran", tone: "warning" as const };
-  return { label: "Diproses", tone: "info" as const };
+  return orderStatus(order);
 }
 
 function isActiveOrder(order: ApiOrder) {

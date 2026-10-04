@@ -14,12 +14,26 @@
  * colour vocabulary living one layer below the badge that was supposed to own
  * the colour, and a cancelled order rendered in `bg-red-50 text-red-600` was a
  * light-theme colour inside a dark console.
+ *
+ * `orderStatus` itself no longer lives here. It answered the same question as
+ * three other functions in three other files, all four disagreeing -- and this
+ * one was the worst of them, labelling a paid-but-undelivered order "Sukses".
+ * It now lives in `labels.ts` alongside every other status the product shows,
+ * so there is one vocabulary rather than five.
  */
 
-import type { Tone } from "../components/ui/types";
 import type { Order } from "./types";
 
-/** Has this order been paid for? A cancelled order never counts, whatever the payment says. */
+/**
+ * Has this order been paid for? A cancelled order never counts, whatever the payment says.
+ *
+ * Note this is *narrower* than `isPaid` in `labels.ts`, which counts a
+ * manually-approved order as paid. That is a real, still-open disagreement
+ * rather than an oversight: this one backs the reseller's own "Dibayar" filter
+ * and its paid-order counts, and widening it changes numbers a reseller reads
+ * as their own balance history. It is called out here, and in `labels.ts`, so
+ * that whoever settles it knows it is a decision rather than a typo.
+ */
 export function orderPaid(order: Order): boolean {
   if (order.orderStatus === "cancelled") return false;
   return order.qrisStatus === "paid" || order.orderStatus === "completed";
@@ -33,14 +47,4 @@ export function orderCanReopenQris(order: Order): boolean {
 /** Have the credentials gone out? */
 export function deliveryIsComplete(order: Order): boolean {
   return order.deliveryStatus === "sent" || order.orderStatus === "completed";
-}
-
-/** The one label and the one tone, decided together so they cannot disagree. */
-export function orderStatus(order: Order): { label: string; tone: Tone } {
-  if (order.orderStatus === "cancelled") return { label: "Dibatalkan", tone: "danger" };
-  if (order.qrisStatus === "expired") return { label: "Kedaluwarsa", tone: "danger" };
-  if (order.qrisStatus === "pending") return { label: "Menunggu Pembayaran", tone: "warning" };
-  if (orderPaid(order)) return { label: "Sukses", tone: "success" };
-  if (order.orderStatus === "processing") return { label: "Diproses", tone: "info" };
-  return { label: "Menunggu", tone: "muted" };
 }

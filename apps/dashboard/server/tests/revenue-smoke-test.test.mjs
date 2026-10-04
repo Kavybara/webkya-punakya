@@ -16,10 +16,18 @@ import { transpileModule } from "typescript";
  * `../../../components/attention` specifier still lands on the sibling that was
  * compiled next to it. The `lib/api` import is `import type`, so it is erased
  * and needs nothing.
+ *
+ * `lib/labels` is a third, for the same reason and not by choice: analytics.ts
+ * no longer defines `isPaid` or `FAILED_DELIVERY_STATUSES` itself, it imports
+ * them from the shared status vocabulary. That import is a value, so the
+ * compiled analytics module resolves it at runtime and fails hard if the sibling
+ * was not written. Both of labels.ts's own imports are `import type`, so it
+ * transpiles to a leaf with nothing left to resolve.
  */
 const sources = {
   analytics: "../../src/pages/owner-v2/overview/analytics.ts",
   attention: "../../src/components/attention/attention.ts",
+  labels: "../../src/lib/labels.ts",
 };
 
 const outRoot = new URL("../.compiled-tests/", import.meta.url);
@@ -45,6 +53,7 @@ function compileTo(relativeSource, relativeOut) {
 }
 
 compileTo(sources.attention, "src/components/attention.mjs");
+compileTo(sources.labels, "src/lib/labels.mjs");
 const compiledAnalytics = compileTo(sources.analytics, "src/pages/owner-v2/overview/analytics.mjs");
 
 // `fileURLToPath`, not `.pathname`: the repo path has a space in it, which the

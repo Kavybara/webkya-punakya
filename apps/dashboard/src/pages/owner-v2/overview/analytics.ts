@@ -13,6 +13,15 @@
  * about the same order on two adjacent screens -- and the way that happened is
  * the way this file is meant to prevent.
  *
+ * That disagreement is now closed, which is why this file no longer defines
+ * `isPaid`, `paymentLabel`, `fulfillmentLabel` or `FAILED_DELIVERY_STATUSES`.
+ * All four were copy-pasted here from `owner-v2/orders/page.tsx`, then edited
+ * apart: the copy here lost the "Manual" payment label entirely, so the
+ * overview showed a manually-approved order as plain "Menunggu" while the
+ * orders table beside it showed "Manual". Same order, same second, two screens,
+ * two answers. The status vocabulary now lives in `lib/labels.ts` and this file
+ * imports it.
+ *
  * A note on what is deliberately absent: there is no profit, no margin, no
  * cost. Nothing in the database records what an account cost to buy -- not on
  * the order, not on the stock item, not on the product. A dashboard that
@@ -24,14 +33,11 @@
  * Revenue minus spend is not margin, and is never presented as one.
  */
 import type { ApiOrder, ApiStockItem, OperationsCenterResult, SystemStatus } from "../../../lib/api";
+import { FAILED_DELIVERY_STATUSES, isPaid } from "../../../lib/labels";
 
 /** The two questions every dashboard opens with: is it money, and is it real. */
 export function isSmokeTest(order: ApiOrder) {
   return Boolean(order.excludeFromSalesMetrics || order.isSmokeTest || String(order.source || "").toLowerCase() === "owner_smoke_test");
-}
-
-export function isPaid(order: ApiOrder) {
-  return ["paid", "manual"].includes(String(order.qrisStatus || "").toLowerCase());
 }
 
 export function parseDate(value?: string) {
@@ -51,29 +57,13 @@ function startOfDay(date: Date) {
   return next;
 }
 
-export function paymentLabel(order: ApiOrder) {
-  if (isPaid(order)) return "Dibayar";
-  if (order.qrisStatus === "expired") return "Expired";
-  return "Menunggu";
-}
-
 /*
- * The statuses that mean "delivery did not happen". `abandoned` belongs here:
- * the fulfillment repair job gives up on it after 80 attempts, so nothing in the
- * backend will ever retry it again and only the owner can, via the orders page.
- * Reading only "failed" here showed an abandoned order as "Diproses" on the
- * overview's recent-orders table, which is the one place a paid customer
- * looking like still-handled is worst.
+ * `paymentLabel`, `fulfillmentLabel` and `FAILED_DELIVERY_STATUSES` used to be
+ * defined here, and `paymentLabel` had no caller at all. All three now live in
+ * `lib/labels.ts`; their reasoning -- in particular why `abandoned` counts as a
+ * delivery failure, and why the fulfilment column separates "has the money
+ * arrived" from "has the customer been served" -- moved with them.
  */
-export const FAILED_DELIVERY_STATUSES = ["failed", "needs_redelivery", "abandoned"];
-
-export function fulfillmentLabel(order: ApiOrder) {
-  if (FAILED_DELIVERY_STATUSES.includes(String(order.deliveryStatus || ""))) return "Gagal";
-  if (order.orderStatus === "completed" || order.deliveryStatus === "sent") return "Selesai";
-  if (order.orderStatus === "processing" || isPaid(order)) return "Diproses";
-  if (order.orderStatus === "cancelled") return "Dibatalkan";
-  return "Menunggu";
-}
 
 /* ------------------------------------------------------------------ *
  * Money

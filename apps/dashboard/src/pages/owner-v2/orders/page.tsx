@@ -14,7 +14,7 @@ import { ConsoleShell } from "../../../components/console/ConsoleShell";
 import { api, subscribeRealtime, type ApiOrder } from "../../../lib/api";
 import { formatRupiah } from "../../../lib/format";
 import { formatDateTimeFull } from "../../../lib/format";
-import type { Tone } from "../../../components/ui";
+import { deliveryFailed, fulfillmentLabel, isPaid, paymentLabel } from "../../../lib/labels";
 import { systemStateFor } from "../../../components/attention";
 
 type ActionKind = "mark-paid" | "approve-manual" | "retry-delivery" | "repair-sheets" | "rerender-template";
@@ -26,8 +26,8 @@ const statusOptions = [
   { value: "paid", label: "Dibayar" },
   { value: "processing", label: "Diproses" },
   { value: "completed", label: "Selesai" },
-  { value: "expired", label: "Expired" },
-  { value: "delivery-failed", label: "Delivery gagal" },
+  { value: "expired", label: "Kedaluwarsa" },
+  { value: "delivery-failed", label: "Gagal kirim" },
 ] as const;
 
 function parseDate(value?: string) {
@@ -36,37 +36,8 @@ function parseDate(value?: string) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function isPaid(order: ApiOrder) {
-  return ["paid", "manual"].includes(String(order.qrisStatus || "").toLowerCase());
-}
-
 function isSmokeTest(order: ApiOrder) {
   return Boolean(order.isSmokeTest || order.excludeFromSalesMetrics || String(order.source || "").toLowerCase() === "owner_smoke_test");
-}
-
-function paymentLabel(order: ApiOrder) {
-  if (String(order.qrisStatus) === "manual") return "Manual";
-  if (order.qrisStatus === "paid") return "Dibayar";
-  if (order.qrisStatus === "expired") return "Expired";
-  return "Menunggu";
-}
-
-// The three statuses that mean "delivery did not happen", kept as one list
-// because the label, the filter and the overview tile all have to agree on it.
-// `abandoned` is what the fulfillment repair job writes once it has retried 80
-// times and stopped: the customer paid, nothing was delivered, and no future
-// pass will ever select the order again. It is the one delivery state only the
-// owner can clear, via `retry-delivery`, which re-runs fulfillment and resets
-// the status when it succeeds. Excluding it here made the overview's "Delivery
-// gagal" tile promise rows this page would not show.
-const FAILED_DELIVERY_STATUSES = ["failed", "needs_redelivery", "abandoned"];
-
-function fulfillmentLabel(order: ApiOrder) {
-  if (FAILED_DELIVERY_STATUSES.includes(String(order.deliveryStatus || ""))) return "Gagal";
-  if (order.deliveryStatus === "sent" || order.orderStatus === "completed") return "Selesai";
-  if (order.orderStatus === "processing" || isPaid(order)) return "Diproses";
-  if (order.orderStatus === "cancelled") return "Dibatalkan";
-  return "Menunggu";
 }
 
 function matchesStatus(order: ApiOrder, status: string) {
@@ -75,15 +46,8 @@ function matchesStatus(order: ApiOrder, status: string) {
   if (status === "processing") return order.orderStatus === "processing";
   if (status === "completed") return order.orderStatus === "completed";
   if (status === "expired") return order.qrisStatus === "expired" || order.orderStatus === "cancelled";
-  if (status === "delivery-failed") return FAILED_DELIVERY_STATUSES.includes(String(order.deliveryStatus || ""));
+  if (status === "delivery-failed") return deliveryFailed(order);
   return true;
-}
-
-function badgeTone(label: string): Tone {
-  if (["Dibayar", "Selesai"].includes(label)) return "success";
-  if (["Expired", "Gagal", "Dibatalkan"].includes(label)) return "danger";
-  if (["Manual", "Diproses", "Menunggu"].includes(label)) return "warning";
-  return "muted";
 }
 
 
@@ -214,7 +178,7 @@ export default function OwnerConsoleOrdersPage() {
   }, [openOrderDetail, orders, requestedOrder, selectedOrder?.id]);
 
   const liveOrders = useMemo(() => orders.filter((order) => !isSmokeTest(order)), [orders]);
-  const attentionCount = useMemo(() => liveOrders.filter((order) => fulfillmentLabel(order) === "Gagal" || (isPaid(order) && fulfillmentLabel(order) !== "Selesai")).length, [liveOrders]);
+  const attentionCount = useMemo(() => liveOrders.filter((order) => deliveryFailed(order) || (isPaid(order) && fulfillmentLabel(order).label !== "Selesai")).length, [liveOrders]);
   const filteredOrders = useMemo(() => orders.filter((order) => matchesStatus(order, activeStatus)).sort((left, right) => (parseDate(right.createdAt)?.getTime() || 0) - (parseDate(left.createdAt)?.getTime() || 0)), [activeStatus, orders]);
 
   const counts = useMemo(() => Object.fromEntries(statusOptions.map((item) => [item.value, liveOrders.filter((order) => matchesStatus(order, item.value)).length])), [liveOrders]);
@@ -224,15 +188,15 @@ export default function OwnerConsoleOrdersPage() {
     { id: "customer", header: "Customer", value: (order) => order.customer || order.resellerName || order.reseller || "-", sortable: true, cell: (order) => <span className="console-product-cell"><strong>{order.customer || "-"}</strong><small>{order.resellerName || order.reseller || "Direct"}</small></span> },
     { id: "product", header: "Produk", value: (order) => `${order.product} ${order.variant}`, sortable: true, cell: (order) => <span className="console-product-cell"><strong>{order.product}</strong><small>{order.variant} / {order.duration}</small></span> },
     { id: "total", header: "Total", value: (order) => Number(order.total || 0), sortable: true, cell: (order) => formatRupiah(Number(order.total || 0)) },
-    { id: "payment", header: "Pembayaran", value: paymentLabel, sortable: true, cell: (order) => <Badge tone={badgeTone(paymentLabel(order))}>{paymentLabel(order)}</Badge> },
-    { id: "fulfillment", header: "Fulfillment", value: fulfillmentLabel, sortable: true, cell: (order) => <Badge tone={badgeTone(fulfillmentLabel(order))}>{fulfillmentLabel(order)}</Badge> },
+    { id: "payment", header: "Pembayaran", value: (order) => paymentLabel(order).label, sortable: true, cell: (order) => <Badge tone={paymentLabel(order).tone}>{paymentLabel(order).label}</Badge> },
+    { id: "fulfillment", header: "Fulfillment", value: (order) => fulfillmentLabel(order).label, sortable: true, cell: (order) => <Badge tone={fulfillmentLabel(order).tone}>{fulfillmentLabel(order).label}</Badge> },
     { id: "time", header: "Waktu", value: (order) => parseDate(order.createdAt)?.getTime() || 0, sortable: true, hideOnMobile: true, cell: (order) => formatDateTimeFull(order.createdAt) },
     { id: "action", header: "Aksi", value: () => "Detail", cell: (order) => <button type="button" className="console-row-action" onClick={() => openOrderDetail(order)} aria-label={`Buka detail ${order.id}`}><ArrowUpRight size={15} /></button> },
   ], [openOrderDetail]);
 
   const filters = useMemo<Array<DataFilter<ApiOrder>>>(() => [
-    { id: "payment", label: "Pembayaran", options: [{ label: "Dibayar", value: "Dibayar" }, { label: "Manual", value: "Manual" }, { label: "Menunggu", value: "Menunggu" }, { label: "Expired", value: "Expired" }], value: paymentLabel },
-    { id: "fulfillment", label: "Fulfillment", options: [{ label: "Selesai", value: "Selesai" }, { label: "Diproses", value: "Diproses" }, { label: "Gagal", value: "Gagal" }], value: fulfillmentLabel },
+    { id: "payment", label: "Pembayaran", options: [{ label: "Dibayar", value: "Dibayar" }, { label: "Manual", value: "Manual" }, { label: "Menunggu", value: "Menunggu" }, { label: "Kedaluwarsa", value: "Kedaluwarsa" }], value: (order) => paymentLabel(order).label },
+    { id: "fulfillment", label: "Fulfillment", options: [{ label: "Selesai", value: "Selesai" }, { label: "Diproses", value: "Diproses" }, { label: "Gagal kirim", value: "Gagal kirim" }], value: (order) => fulfillmentLabel(order).label },
   ], []);
 
   function selectStatus(status: string) {
@@ -356,7 +320,7 @@ export default function OwnerConsoleOrdersPage() {
       >
         {selectedOrder ? (
           <>
-            <div className="console-drawer-statuses"><Badge tone={badgeTone(paymentLabel(selectedOrder))}>{paymentLabel(selectedOrder)}</Badge><Badge tone={badgeTone(fulfillmentLabel(selectedOrder))}>{fulfillmentLabel(selectedOrder)}</Badge>{isSmokeTest(selectedOrder) ? <Badge tone="info">Smoke test</Badge> : null}</div>
+            <div className="console-drawer-statuses"><Badge tone={paymentLabel(selectedOrder).tone}>{paymentLabel(selectedOrder).label}</Badge><Badge tone={fulfillmentLabel(selectedOrder).tone}>{fulfillmentLabel(selectedOrder).label}</Badge>{isSmokeTest(selectedOrder) ? <Badge tone="info">Smoke test</Badge> : null}</div>
             {detailLoading ? <LoadingState label="Memuat detail order" /> : null}
             {detailError ? <Notice tone="danger">{detailError}</Notice> : null}
             <dl className="ui-detail-list">
@@ -395,7 +359,7 @@ export default function OwnerConsoleOrdersPage() {
             <div className="console-order-actions">
               {!isPaid(selectedOrder) && selectedOrder.qrisStatus !== "expired" ? <button type="button" onClick={() => requestAction("mark-paid", selectedOrder)}><CircleDollarSign size={16} /> {actionText("mark-paid").button}</button> : null}
               {selectedOrder.orderStatus !== "completed" && String(selectedOrder.qrisStatus) !== "manual" ? <button type="button" onClick={() => requestAction("approve-manual", selectedOrder)}><CheckCircle2 size={16} /> {actionText("approve-manual").button}</button> : null}
-              {fulfillmentLabel(selectedOrder) === "Gagal" ? <button type="button" onClick={() => requestAction("retry-delivery", selectedOrder)}><RefreshCw size={16} /> {actionText("retry-delivery").button}</button> : null}
+              {deliveryFailed(selectedOrder) ? <button type="button" onClick={() => requestAction("retry-delivery", selectedOrder)}><RefreshCw size={16} /> {actionText("retry-delivery").button}</button> : null}
               {selectedOrder.orderStatus === "completed" && deliveredCount === 0 ? <button type="button" onClick={() => requestAction("repair-sheets", selectedOrder)}><PackageCheck size={16} /> {actionText("repair-sheets").button}</button> : null}
               {selectedOrder.orderStatus === "completed" && deliveredCount > 0 ? <button type="button" onClick={() => requestAction("rerender-template", selectedOrder)}><RefreshCw size={16} /> {actionText("rerender-template").button}</button> : null}
             </div>
