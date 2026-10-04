@@ -746,23 +746,6 @@ export type ResellerCheckResult = {
 
 export type HealthResult = {
   ok: boolean;
-  databasePath?: string;
-  database?: {
-    path: string;
-    exists: boolean;
-    size: number;
-    modifiedAt: string;
-    version: number;
-  };
-  backup?: {
-    path: string;
-    exists: boolean;
-    count: number;
-    totalSize: number;
-    latestName: string;
-    latestSize: number;
-    latestAt: string;
-  };
   ownerWhatsAppNumber?: string;
   warrantyWhatsAppNumber?: string;
   whatsappInboundConfigured?: boolean;
@@ -773,6 +756,25 @@ export type HealthResult = {
   googleSheetsHealthy?: boolean;
   googleSheetsFailedSections?: string[];
   maintenance?: MaintenanceState;
+  /**
+   * Whether `kavya-db.json` looks lost rather than merely empty.
+   *
+   * `store.js` answers a missing database file with `defaultData`, which has an
+   * empty `resellers` array -- so a total loss renders as a healthy site with
+   * an empty reseller table and no error. The server decides which case this is
+   * (see `services/data-loss-detector.js`) and sends the owner-facing wording
+   * alongside it, so the client never re-derives the condition.
+   */
+  databaseLoss?: {
+    lost: boolean;
+    reason: string;
+    resellerCount: number;
+    orderCount: number;
+    orphanedOrderCount: number;
+    paymentCount: number;
+  };
+  /** Empty string unless a loss was detected. */
+  databaseLossMessage?: string;
 };
 
 export type SystemStatus = {

@@ -1,3 +1,5 @@
+import { databaseLossMessage, detectDatabaseLoss } from "../services/data-loss-detector.js";
+
 export function registerSystemRoutes(app, deps) {
   const {
     ensureDb,
@@ -24,6 +26,7 @@ export function registerSystemRoutes(app, deps) {
     const db = await readDb();
     const pakasir = getPakasirCredentials(db);
     const sheetsHealth = googleSheetsSyncHealth(db.settings || {});
+    const databaseLoss = detectDatabaseLoss(db);
     res.json({
       ok: true,
       googleSheetsConfigured: googleSheetsConfigured(db),
@@ -36,6 +39,11 @@ export function registerSystemRoutes(app, deps) {
       whatsappInboundConfigured: Boolean(firstConfigured(db.settings?.whatsappInboundToken, process.env.WHATSAPP_INBOUND_TOKEN)),
       pakasirConfigured: pakasir.configured,
       maintenance: maintenanceMode(db),
+      databaseLoss,
+      // Empty string unless a loss was detected, so the client can render the
+      // warning without re-deriving the condition -- and so the wording can
+      // never disagree with the detector that decided to speak.
+      databaseLossMessage: databaseLossMessage(databaseLoss),
     });
   });
 

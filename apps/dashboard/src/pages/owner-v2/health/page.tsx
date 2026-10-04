@@ -79,16 +79,25 @@ export default function OwnerConsoleHealthPage() {
         key: "database",
         title: "Database",
         icon: <Database size={18} />,
-        ok: Boolean(health?.database?.exists || system?.database?.exists),
-        detail: `${formatBytes(health?.database?.size || system?.database?.size || 0)} / update ${formatDateTime(health?.database?.modifiedAt || system?.database?.modifiedAt || "")}`,
+        // Both of these read `system` only. `api.systemStatus()` is the
+        // endpoint that serves file stats (`readDatabaseInfo` /
+        // `readBackupInfo` in index.js); `/api/health` has never returned a
+        // `database` or `backup` field. `HealthResult` used to declare them
+        // anyway, so every `health?.backup?.x` below compiled and silently
+        // evaluated to `undefined` -- which is how the backup card came to
+        // claim no backup existed while its own badge read the real count.
+        ok: Boolean(system?.database?.exists),
+        detail: `${formatBytes(system?.database?.size || 0)} / update ${formatDateTime(system?.database?.modifiedAt || "")}`,
       },
       {
         key: "backup",
         title: "Backup",
         icon: <HardDrive size={18} />,
-        ok: Boolean(health?.backup?.count || system?.backup?.count),
+        ok: Boolean(system?.backup?.count),
         warning: true,
-        detail: health?.backup?.latestName ? `${health.backup.latestName} / ${formatDateTime(health.backup.latestAt)}` : "Backup belum ditemukan.",
+        detail: system?.backup?.latestName
+          ? `${system.backup.latestName} / ${formatDateTime(system.backup.latestAt)}`
+          : "Backup belum ditemukan.",
       },
     ];
   }, [health, system]);
@@ -100,6 +109,6 @@ export default function OwnerConsoleHealthPage() {
     {error ? <Notice tone="danger">{error}</Notice> : null}
     {health?.maintenance?.enabled ? <Notice tone="warning">{health.maintenance.reason || "Maintenance order sedang aktif."}</Notice> : null}
     <section className="console-panel"><div className="console-panel-header"><div><span>Status teknis</span><h2>Komponen utama</h2></div><div className="console-panel-toolbar-actions"><button type="button" onClick={() => load().catch(() => undefined)} disabled={loading}><RefreshCw size={15} /> Perbarui</button></div></div><div className="console-health-grid">{checks.map((item) => <article key={item.key} className="console-health-card"><span>{item.icon}</span><div><strong>{item.title}</strong><p>{item.detail}</p></div><Badge tone={statusTone(item.ok, item.warning)}>{item.ok ? "sehat" : item.warning ? "cek" : "error"}</Badge></article>)}</div></section>
-    <section className="console-panel"><div className="console-panel-header"><div><span>Server</span><h2>{system?.server?.hostname || "Server"}</h2></div><Badge tone={Number(system?.memory?.percent || 0) > 85 ? "warning" : "success"}>{system?.server?.platform || "-"}</Badge></div><div className="console-resource-form-grid"><div className="console-readonly-field"><Server size={15} /> CPU {system?.server?.cpus || 0}</div><div className="console-readonly-field">Memory {formatBytes(system?.memory?.used || 0)} / {formatBytes(system?.memory?.total || 0)}</div><div className="console-readonly-field">Disk {system?.disk?.percent ?? 0}% terpakai</div><div className="console-readonly-field">Backup {health?.backup?.count || system?.backup?.count || 0} file</div></div></section>
+    <section className="console-panel"><div className="console-panel-header"><div><span>Server</span><h2>{system?.server?.hostname || "Server"}</h2></div><Badge tone={Number(system?.memory?.percent || 0) > 85 ? "warning" : "success"}>{system?.server?.platform || "-"}</Badge></div><div className="console-resource-form-grid"><div className="console-readonly-field"><Server size={15} /> CPU {system?.server?.cpus || 0}</div><div className="console-readonly-field">Memory {formatBytes(system?.memory?.used || 0)} / {formatBytes(system?.memory?.total || 0)}</div><div className="console-readonly-field">Disk {system?.disk?.percent ?? 0}% terpakai</div><div className="console-readonly-field">Backup {system?.backup?.count || 0} file</div></div></section>
   </ConsoleShell>;
 }

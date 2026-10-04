@@ -18,6 +18,7 @@ export default function OwnerConsoleResellersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [requestsError, setRequestsError] = useState("");
+  const [databaseLoss, setDatabaseLoss] = useState("");
   const [message, setMessage] = useState("");
   const [editing, setEditing] = useState<ApiReseller | null | undefined>(undefined);
   const [form, setForm] = useState<ResellerForm>(emptyForm);
@@ -37,15 +38,27 @@ export default function OwnerConsoleResellersPage() {
    * Two states, two messages, because they mean opposite things: an empty queue
    * is good news, and an unread queue is not.
    */
+  /*
+   * A lost database must not look like an empty one.
+   *
+   * `store.js` answers a missing `kavya-db.json` with `defaultData`, so a total
+   * loss produces this exact page: products intact, login working, reseller
+   * table empty, zero errors. Nothing below the table can tell that apart from
+   * an owner who simply has no reseller yet, which is why the server decides
+   * (see `services/data-loss-detector.js`) and this page only renders its
+   * verdict. Deriving it here would mean guessing from `resellers.length === 0`,
+   * which fires on every fresh install and trains the owner to ignore it.
+   */
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     setRequestsError("");
-    const results = await Promise.allSettled([api.resellers(), api.depositRequests()]);
+    const results = await Promise.allSettled([api.resellers(), api.depositRequests(), api.health()]);
     if (results[0].status === "fulfilled") setResellers(results[0].value);
     else setError("Data reseller gagal dimuat.");
     if (results[1].status === "fulfilled") { setRequests(results[1].value); setRequestsError(""); }
     else setRequestsError("Permintaan deposit gagal dimuat. Antrean di bawah belum bisa dipercaya.");
+    if (results[2].status === "fulfilled") setDatabaseLoss(results[2].value.databaseLossMessage || "");
     setLoading(false);
   }, []);
   useEffect(() => { load().catch(() => setLoading(false)); }, [load]);
@@ -72,8 +85,16 @@ export default function OwnerConsoleResellersPage() {
   ], []);
   const pending = requests.filter((row) => !row.status || row.status === "pending");
   const pendingCount = pending.length;
-  return <ConsoleShell title="Reseller" description="Kelola akses, saldo, status, dan permintaan deposit reseller." refreshing={loading} attentionCount={pendingCount} systemState={systemStateFor(pendingCount, { error: Boolean(error), loading })} onRefresh={load}>
+  /*
+   * A detected database loss counts toward the attention badge, not just the
+   * inline banner. The owner lands on this page first and the badge is what
+   * they read on the way in -- a red banner they have to scroll to find would
+   * lose the one signal that the data behind it is already gone.
+   */
+  const attentionCount = pendingCount + (databaseLoss ? 1 : 0);
+  return <ConsoleShell title="Reseller" description="Kelola akses, saldo, status, dan permintaan deposit reseller." refreshing={loading} attentionCount={attentionCount} systemState={systemStateFor(attentionCount, { error: Boolean(error), loading })} onRefresh={load}>
     <MetricRow items={[{ label: "Reseller aktif", value: resellers.filter((row) => row.isActive).length, tone: "success" }, { label: "Nonaktif", value: resellers.filter((row) => !row.isActive).length }, { label: "Total saldo", value: formatRupiah(resellers.reduce((sum, row) => sum + Number(row.deposit || 0), 0)) }, { label: "Deposit pending", value: pending.length, tone: pending.length ? "warning" : "success", error: requestsError ? "Gagal dimuat" : undefined }]} />
+    {databaseLoss ? <Notice tone="danger">{databaseLoss}</Notice> : null}
     {error ? <Notice tone="danger">{error}</Notice> : null}<Toast message={message} onClose={clearMessage} />
     <section className="console-panel"><div className="console-panel-header"><div><span>Pelanggan</span><h2>Data reseller</h2></div><div className="console-panel-toolbar-actions"><button type="button" disabled={busy} onClick={syncResellerSheets}><RefreshCw size={15} /> Sinkronkan Data Reseller</button><button type="button" onClick={openCreate}><Plus size={15} /> Tambah reseller</button></div></div><DataTable rows={resellers} columns={columns} filters={filters} rowKey={(row) => row.id} loading={loading} error={error} initialPageSize={10} /></section>
     <section className="console-panel console-orders-panel"><div className="console-panel-header"><div><span>Wallet</span><h2>Permintaan deposit aktif</h2></div><ShieldCheck size={18} /></div><DataTable rows={pending} columns={requestColumns} rowKey={(row) => row.id} loading={loading} error={requestsError} emptyText="Tidak ada permintaan deposit yang perlu diproses." initialPageSize={5} /></section>
