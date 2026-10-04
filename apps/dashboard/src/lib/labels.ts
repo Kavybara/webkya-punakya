@@ -321,6 +321,38 @@ export function orderStatus(order: Order): Label {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Warranty claim                                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Where a claim sits between the reseller's complaint and a working account.
+ *
+ * `waiting_evidence` is deliberately given the *same* label as `reviewing`
+ * rather than one of its own. It is not a different stage of the owner's work:
+ * the owner is doing exactly the same thing in both, and the reason there is no
+ * progress is on the reseller's side. A distinct badge would imply the owner
+ * had a different task to perform and had somehow failed it.
+ *
+ * `submitted` is the only warning tone here. The rest of an owner's queue is
+ * either work in hand (info), work finished (success), or work declined
+ * (danger) -- and a freshly filed claim is the only one that is both unfinished
+ * and waiting to be started.
+ */
+const WARRANTY_STATUS: Record<string, Label> = {
+  submitted: { label: "Diajukan", tone: "warning" },
+  reviewing: { label: "Sedang diperiksa", tone: "info" },
+  waiting_evidence: { label: "Sedang diperiksa", tone: "info" },
+  replaced: { label: "Diganti", tone: "success" },
+  resolved: { label: "Selesai", tone: "success" },
+  rejected: { label: "Ditolak", tone: "danger" },
+};
+
+export function warrantyStatus(value?: string | null): Label {
+  const key = String(value ?? "").trim().toLowerCase();
+  return WARRANTY_STATUS[key] ?? { label: humanise(value), tone: "muted" };
+}
+
+/* -------------------------------------------------------------------------- */
 /* Action labels                                                              */
 /* -------------------------------------------------------------------------- */
 

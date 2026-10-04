@@ -11,6 +11,7 @@ import {
   type WarrantyReplacementCandidate,
 } from "../../../lib/api";
 import { formatDateTimeFull } from "../../../lib/format";
+import { warrantyStatus } from "../../../lib/labels";
 import { Badge, Dialog, DialogActions, Field, MetricRow, Notice, Toast } from "../../../components/ui";
 import { systemStateFor } from "../../../components/attention";
 
@@ -28,23 +29,15 @@ const emptyManualReplacement = {
   note: "",
 };
 
-function statusLabel(status: WarrantyClaimStatus | string) {
-  return ({
-    submitted: "Diajukan",
-    reviewing: "Sedang diperiksa",
-    waiting_evidence: "Sedang diperiksa",
-    replaced: "Diganti",
-    resolved: "Selesai",
-    rejected: "Ditolak",
-  } as Record<string, string>)[status] || status;
-}
-
-function statusTone(status: WarrantyClaimStatus | string) {
-  if (["replaced", "resolved"].includes(status)) return "success" as const;
-  if (status === "rejected") return "danger" as const;
-  if (status === "submitted") return "warning" as const;
-  return "info" as const;
-}
+/*
+ * The claim vocabulary lives in `lib/labels` now, alongside every other status
+ * the console shows. It used to be a local map ending in `|| status`, so any
+ * status this page had not been taught -- a value written by a newer server, or
+ * a row that predates a rename -- rendered as the raw database token in the
+ * Status column. That is the exact failure `labels.ts` was written to prevent,
+ * and the tone travelled separately from the label here, so a new status could
+ * be added to one and not the other.
+ */
 
 function formatReviewDuration(minutes = 0) {
   const safeMinutes = Math.max(0, Math.round(Number(minutes || 0)));
@@ -54,6 +47,23 @@ function formatReviewDuration(minutes = 0) {
   return [days ? `${days} hari` : "", hours ? `${hours} jam` : "", !days && mins ? `${mins} menit` : ""]
     .filter(Boolean)
     .join(" ") || "kurang dari 1 menit";
+}
+
+/**
+ * How a replacement unit is named everywhere it is offered for a decision.
+ *
+ * `identity` is already masked by the server -- `replacementCandidatesForClaim`
+ * runs it through `maskIdentity` -- so this never renders a full login. The
+ * sheet name and row are what makes two masked units distinguishable, and they
+ * are exactly what the owner needs in front of them: the same place they will
+ * look up the real credentials to hand over.
+ */
+export function candidateIdentity(candidate?: WarrantyReplacementCandidate | null): string {
+  if (!candidate) return "";
+  const where = candidate.sheetName
+    ? `${candidate.sheetName} baris ${candidate.sheetRow || "-"}`
+    : "baris database";
+  return `${candidate.identity || "Tanpa identitas"} · ${candidate.profile || "tanpa profil"} · ${where}`;
 }
 
 type PreparedEvidence = { name: string; mimeType: string; dataUrl: string; size: number };
@@ -67,7 +77,31 @@ function fileAsDataUrl(file: Blob) {
   });
 }
 
-async function prepareEvidence(file: File): Promise<PreparedEvidence> {
+/**
+ * The three JPEG qualities the compressor walks down, highest first.
+ *
+ * Extracted because the loop's failure message reports the size the *last* pass
+ * produced, and "last" only means something because the order is descending.
+ * A future edit that reorders this list silently changes what the owner is told.
+ */
+const EVIDENCE_QUALITIES = [0.82, 0.7, 0.58];
+
+/**
+ * What the compression loop should say while it works.
+ *
+ * Three `toBlob` passes over a canvas is several seconds of nothing at all,
+ * and the field's hint read "Memproses gambar..." for the whole of it -- one
+ * string for a wait whose length the owner could not predict. Reporting the
+ * attempt and the size it produced turns an unbounded pause into something that
+ * visibly moves, and it tells the owner *why* their 4 MB screenshot is being
+ * re-encoded when the field only mentions PNG, JPEG and WebP.
+ */
+export type EvidenceProgress = { attempt: number; attempts: number; sizeBytes: number };
+
+async function prepareEvidence(
+  file: File,
+  onProgress?: (progress: EvidenceProgress) => void,
+): Promise<PreparedEvidence> {
   const allowed = new Set(["image/png", "image/jpeg", "image/webp"]);
   if (!allowed.has(file.type)) throw new Error("Bukti harus berupa PNG, JPEG, atau WebP.");
   const maxBytes = 650_000;
@@ -75,14 +109,19 @@ async function prepareEvidence(file: File): Promise<PreparedEvidence> {
     return { name: file.name, mimeType: file.type, dataUrl: await fileAsDataUrl(file), size: file.size };
   }
   const bitmap = await createImageBitmap(file);
+  let smallest = 0;
   try {
     const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(bitmap.width * scale));
     canvas.height = Math.max(1, Math.round(bitmap.height * scale));
     canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    for (const quality of [0.82, 0.7, 0.58]) {
+    for (const [index, quality] of EVIDENCE_QUALITIES.entries()) {
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+      if (blob) {
+        smallest = smallest ? Math.min(smallest, blob.size) : blob.size;
+        onProgress?.({ attempt: index + 1, attempts: EVIDENCE_QUALITIES.length, sizeBytes: blob.size });
+      }
       if (blob && blob.size <= maxBytes) {
         return {
           name: file.name.replace(/\.[^.]+$/, "") + ".jpg",
@@ -95,7 +134,14 @@ async function prepareEvidence(file: File): Promise<PreparedEvidence> {
   } finally {
     bitmap.close();
   }
-  throw new Error("Screenshot masih terlalu besar. Potong gambar lalu pilih kembali.");
+  // Naming the size reached turns "masih terlalu besar" into something the owner
+  // can act on: they can see how far over the limit the image is, rather than
+  // being asked to guess how much to crop.
+  throw new Error(
+    smallest
+      ? `Screenshot masih terlalu besar. Setelah dikompresi ${Math.ceil(smallest / 1024)} KB, ukurannya masih di atas batas 650 KB. Potong gambar lalu pilih kembali.`
+      : "Gambar tidak dapat dikompres di browser ini. Potong gambar atau simpan sebagai JPG lalu pilih kembali.",
+  );
 }
 
 export default function OwnerConsoleWarrantyPage() {
@@ -125,6 +171,7 @@ export default function OwnerConsoleWarrantyPage() {
   const [manualError, setManualError] = useState("");
   const [manualEvidence, setManualEvidence] = useState<PreparedEvidence | null>(null);
   const [manualEvidenceBusy, setManualEvidenceBusy] = useState(false);
+  const [manualEvidenceProgress, setManualEvidenceProgress] = useState<EvidenceProgress | null>(null);
   const [manualReplaceOpen, setManualReplaceOpen] = useState(false);
   const [manualReplaceForm, setManualReplaceForm] = useState(emptyManualReplacement);
   const manualEvidenceInputRef = useRef<HTMLInputElement>(null);
@@ -226,7 +273,17 @@ export default function OwnerConsoleWarrantyPage() {
       const rows = await api.warrantyReplacementCandidates(claim.id);
       if (claimRequestRef.current !== requestId) return;
       setCandidates(rows);
-      setCandidateId(rows[0]?.id || "");
+      // Deliberately *not* pre-selecting the first row.
+      //
+      // `replacementCandidatesForClaim` returns every available unit in the
+      // pool, unsorted, so `rows[0]` is whatever the database happened to hold
+      // first -- not the best match and not one anybody looked at. Combined
+      // with a confirmation dialog that named neither account, the owner could
+      // open a claim, type an owner note, and press "Ganti akun" twice, and have
+      // swapped a customer's credentials for an arbitrary unit from the pool with
+      // no moment at which the choice was visible. The picker now starts empty
+      // and the button stays disabled until a row is actually chosen.
+      setCandidateId("");
     } catch (cause) {
       if (claimRequestRef.current !== requestId) return;
       setCandidateError(cause instanceof Error ? cause.message : "Kandidat stok pengganti gagal dimuat.");
@@ -324,7 +381,7 @@ export default function OwnerConsoleWarrantyPage() {
   async function saveClaim() {
     if (!selected || selected.status === "replaced") return;
     if (terminalStatuses.has(status) && !ownerNote.trim()) {
-      setActionError(`Catatan Owner wajib diisi untuk status ${statusLabel(status)}.`);
+      setActionError(`Catatan Owner wajib diisi untuk status ${warrantyStatus(status).label.toLowerCase()}.`);
       return;
     }
     if (actionLockRef.current) return;
@@ -512,15 +569,19 @@ export default function OwnerConsoleWarrantyPage() {
     { id: "reseller", header: "Reseller", value: (row) => row.resellerName || row.resellerId || "-", sortable: true, cell: (row) => <span className="console-product-cell"><strong>{row.resellerName || row.resellerId || "-"}</strong><small>{row.accountIdentity || "Identitas dimasking"}</small></span> },
     { id: "product", header: "Produk", value: (row) => `${row.product} ${row.variant}`, sortable: true, cell: (row) => <span className="console-product-cell"><strong>{row.product || "-"}</strong><small>{row.variant || "-"}</small></span> },
     { id: "order", header: "Order", value: (row) => row.orderId || "-", hideOnMobile: true },
-    { id: "status", header: "Status", value: (row) => row.status, sortable: true, cell: (row) => <div className="flex flex-wrap gap-2"><Badge tone={statusTone(row.status)}>{statusLabel(row.status)}</Badge>{row.reviewOverdue && !["replaced", "resolved", "rejected"].includes(row.status) ? <Badge tone="danger">Lewat 3 hari</Badge> : null}</div> },
+    { id: "status", header: "Status", value: (row) => row.status, sortable: true, cell: (row) => <div className="flex flex-wrap gap-2"><Badge tone={warrantyStatus(row.status).tone}>{warrantyStatus(row.status).label}</Badge>{row.reviewOverdue && !["replaced", "resolved", "rejected"].includes(row.status) ? <Badge tone="danger">Lewat 3 hari</Badge> : null}</div> },
     { id: "notification", header: "Sumber", value: (row) => row.submissionSource || row.ownerNotificationStatus || "pending", hideOnMobile: true, cell: (row) => row.submissionSource === "owner_manual_whatsapp" ? <Badge tone="info">WhatsApp manual</Badge> : <Badge tone={row.ownerNotificationStatus === "sent" ? "success" : row.ownerNotificationStatus === "failed" ? "danger" : "warning"}>{row.ownerNotificationStatus === "sent" ? "WA terkirim" : row.ownerNotificationStatus === "failed" ? "WA gagal" : "Dashboard"}</Badge> },
     { id: "actions", header: "Aksi", value: () => "", cell: (row) => <div className="console-row-actions"><button type="button" onClick={() => openClaim(row)} aria-label={`Kelola ${row.id}`}><ShieldCheck size={15} /></button></div> },
   ], []);
-  const filters = useMemo<Array<DataFilter<WarrantyClaim>>>(() => [{ id: "status", label: "Status", options: ["submitted", "reviewing", "replaced", "resolved", "rejected"].map((value) => ({ label: statusLabel(value), value })), value: (row) => row.status === "waiting_evidence" ? "reviewing" : row.status }], []);
+  const filters = useMemo<Array<DataFilter<WarrantyClaim>>>(() => [{ id: "status", label: "Status", options: ["submitted", "reviewing", "replaced", "resolved", "rejected"].map((value) => ({ label: warrantyStatus(value).label, value })), value: (row) => row.status === "waiting_evidence" ? "reviewing" : row.status }], []);
 
   const activeClaims = useMemo(() => claims.filter((claim) => activeStatuses.has(claim.status)), [claims]);
   const historyClaims = useMemo(() => claims.filter((claim) => !activeStatuses.has(claim.status)), [claims]);
   const visibleClaims = claimView === "active" ? activeClaims : historyClaims;
+  const selectedCandidate = useMemo(
+    () => candidates.find((row) => row.id === candidateId) || null,
+    [candidateId, candidates],
+  );
   const activeFailures = useMemo(() => activeClaims.filter((claim) => (
     claim.reviewOverdue
     || claim.ownerNotificationStatus === "failed"
@@ -588,21 +649,33 @@ export default function OwnerConsoleWarrantyPage() {
         <Field label="Kendala dari WhatsApp" hint="Tuliskan keluhan reseller secara ringkas dan jelas.">
           <textarea rows={6} value={manualIssue} onChange={(event) => setManualIssue(event.target.value.slice(0, 1000))} placeholder="Contoh: akun tidak dapat login sejak pagi..." />
         </Field>
-        <Field label="Screenshot WhatsApp (opsional)" hint={manualEvidenceBusy ? "Memproses gambar..." : manualEvidence ? `${manualEvidence.name} (${Math.ceil(manualEvidence.size / 1024)} KB) siap disimpan.` : "PNG, JPEG, atau WebP. Maksimal hasil kompresi 650 KB."}>
-          <input ref={manualEvidenceInputRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={async (event) => {
+        <Field label="Screenshot WhatsApp (opsional)" hint={manualEvidenceBusy
+          ? manualEvidenceProgress
+            ? `Mengompres ke-${manualEvidenceProgress.attempt} dari ${manualEvidenceProgress.attempts}, hasil ${Math.ceil(manualEvidenceProgress.sizeBytes / 1024)} KB...`
+            : "Menyiapkan gambar..."
+          : manualEvidence
+            ? `${manualEvidence.name} (${Math.ceil(manualEvidence.size / 1024)} KB) siap disimpan.`
+            : "PNG, JPEG, atau WebP. Di atas 650 KB akan dikompres otomatis."}>
+          {/* Disabled while compressing: a second pick mid-`toBlob` would leave two
+              compressions racing for the same state, and the slower one would
+              overwrite the owner's actual choice. `closeManualClaim` already
+              refuses to close mid-compression for the same reason. */}
+          <input ref={manualEvidenceInputRef} type="file" accept="image/png,image/jpeg,image/webp" disabled={manualEvidenceBusy} onChange={async (event) => {
             const input = event.currentTarget;
             const file = input.files?.[0];
             if (!file) return;
             setManualEvidenceBusy(true);
+            setManualEvidenceProgress(null);
             setManualError("");
             try {
-              setManualEvidence(await prepareEvidence(file));
+              setManualEvidence(await prepareEvidence(file, setManualEvidenceProgress));
             } catch (cause) {
               setManualEvidence(null);
               setManualError(cause instanceof Error ? cause.message : "Bukti gagal diproses.");
               input.value = "";
             } finally {
               setManualEvidenceBusy(false);
+              setManualEvidenceProgress(null);
             }
           }} />
         </Field>
@@ -631,7 +704,7 @@ export default function OwnerConsoleWarrantyPage() {
       </div>
       {selected.ownerNote ? <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4"><span className="text-xs uppercase tracking-wider text-[var(--text-muted)]">Catatan Owner untuk reseller</span><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--text-secondary)]">{selected.ownerNote}</p></div> : null}
       {selected.status !== "replaced" ? <div className="mt-5 grid gap-4 md:grid-cols-2">
-        <Field label="Status klaim"><select value={status} onChange={(event) => setStatus(event.target.value as WarrantyClaimStatus)}>{editableStatuses.map((value) => <option key={value} value={value}>{statusLabel(value)}</option>)}</select></Field>
+        <Field label="Status klaim"><select value={status} onChange={(event) => setStatus(event.target.value as WarrantyClaimStatus)}>{editableStatuses.map((value) => <option key={value} value={value}>{warrantyStatus(value).label}</option>)}</select></Field>
         <Field label={`Catatan Owner${terminalStatuses.has(status) ? " (wajib)" : ""}`}><textarea value={ownerNote} onChange={(event) => setOwnerNote(event.target.value.slice(0, 500))} placeholder="Hasil pemeriksaan, alasan penolakan, atau alasan penggantian" rows={4} /></Field>
         <div className="md:col-span-2 flex flex-wrap justify-end gap-3"><button type="button" className="h-11 rounded-lg border border-[var(--border)] px-4 text-sm font-semibold text-[var(--text-secondary)]" onClick={saveClaim} disabled={busy}>Simpan status</button></div>
       </div> : <div className="mt-4 space-y-3"><Notice>Akun sudah diganti dengan Stock ID {selected.replacement?.newStockId || "-"}. Masa aktif ditambah {formatReviewDuration(selected.holdAppliedMinutes)} sesuai waktu pemeriksaan.</Notice>{selected.replacementSyncStatus === "failed" || selected.replacementSyncStatus === "pending" ? <Notice tone="danger">Sinkronisasi Google Sheets {selected.replacementSyncStatus === "failed" ? "gagal" : "belum selesai"}. Penggantian sudah dikunci di database dan tidak boleh memilih stok baru.<button type="button" className="ml-3 h-10 rounded-lg border border-[var(--border)] px-3 font-semibold text-[var(--text-primary)]" onClick={() => retryReplacementSync().catch(() => undefined)} disabled={busy}>{busy ? "Mencoba..." : "Coba Sync Ulang"}</button></Notice> : <Notice>Sinkronisasi penggantian: selesai.</Notice>}{selected.replacementNotificationStatus === "sent" ? <Notice>WhatsApp penerima: terkirim ke nomor akun yang digaransi.</Notice> : <Notice tone="danger">WhatsApp penerima belum terkirim{selected.replacementNotificationError ? ` (${selected.replacementNotificationError})` : ""}.<button type="button" className="ml-3 h-10 rounded-lg border border-[var(--border)] px-3 font-semibold text-[var(--text-primary)]" onClick={() => retryReplacementNotification().catch(() => undefined)} disabled={busy}>{busy ? "Mengirim..." : "Kirim ulang WhatsApp"}</button></Notice>}</div>}
@@ -640,9 +713,11 @@ export default function OwnerConsoleWarrantyPage() {
         <p className="mt-1 text-sm text-[var(--text-muted)]">Hanya stok tersedia dari pool yang sama yang dapat dipilih. Credential tidak ditampilkan di daftar ini.</p>
         {candidateError ? <Notice tone="danger">Daftar kandidat gagal dimuat: {candidateError}. Ganti akun tidak bisa dilanjutkan sampai daftar ini terbaca.</Notice> : null}
         <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
-          <select className="h-11 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-sm text-[var(--text-primary)]" value={candidateId} onChange={(event) => setCandidateId(event.target.value)} disabled={candidateLoading || !candidates.length}>
+          {/* Named for a screen reader as well as sighted: it is a bare select
+              with no visible label, and the placeholder option is not one. */}
+          <select aria-label="Pilih stok pengganti" className="h-11 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-sm text-[var(--text-primary)]" value={candidateId} onChange={(event) => setCandidateId(event.target.value)} disabled={candidateLoading || !candidates.length}>
             <option value="">{candidateLoading ? "Memuat kandidat..." : candidateError ? "Kandidat gagal dimuat" : candidates.length ? "Pilih stok pengganti" : "Tidak ada stok satu pool"}</option>
-            {candidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.identity} · {candidate.profile || "Tanpa profil"} · {candidate.sheetName || "DB"} row {candidate.sheetRow || "-"}</option>)}
+            {candidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidateIdentity(candidate)}</option>)}
           </select>
           <button type="button" className="h-11 rounded-lg bg-[var(--text-primary)] px-5 text-sm font-semibold text-[var(--text-inverse)] disabled:cursor-not-allowed disabled:opacity-40" disabled={!candidateId || busy || !ownerNote.trim()} onClick={() => setConfirmReplace(true)}>Ganti akun</button>
         </div>
@@ -653,6 +728,7 @@ export default function OwnerConsoleWarrantyPage() {
           }}>Ganti manual / By Order</button>
         </div>
         {!ownerNote.trim() ? <p className="mt-2 text-xs text-[var(--status-warning)]">Isi Catatan Owner terlebih dahulu. Catatan ini akan terlihat oleh reseller.</p> : null}
+        {ownerNote.trim() && !candidateId && !candidateLoading && !candidateError && candidates.length ? <p className="mt-2 text-xs text-[var(--status-warning)]">Pilih satu stok pengganti dari daftar di atas. Tidak ada yang dipilih otomatis.</p> : null}
       </div> : null}
     </Dialog> : null}
 
@@ -672,9 +748,31 @@ export default function OwnerConsoleWarrantyPage() {
       </div>
     </Dialog> : null}
 
-    {selected && confirmReplace ? <Dialog open title="Konfirmasi penggantian" eyebrow={selected.id} onClose={() => setConfirmReplace(false)} footer={<DialogActions onCancel={() => setConfirmReplace(false)} onConfirm={executeReplacement} confirmLabel="Ya, ganti akun" busy={busy} danger />}>
+    {selected && confirmReplace && selectedCandidate ? <Dialog open title="Konfirmasi penggantian" eyebrow={selected.id} onClose={() => setConfirmReplace(false)} footer={<DialogActions onCancel={() => setConfirmReplace(false)} onConfirm={executeReplacement} confirmLabel="Ya, ganti akun" busy={busy} danger />}>
       {actionError ? <Notice tone="danger">{actionError}</Notice> : null}
-      <Notice tone="danger">Akun lama akan ditandai REPLACED dan tidak dikembalikan ke stok. Akun baru memakai order, reseller, serta tanggal berakhir yang sama. Tindakan ini tercatat dan tidak dapat memilih stok kedua setelah selesai.</Notice>
+      <Notice tone="danger">Akun lama akan ditandai sudah diganti dan tidak dikembalikan ke stok. Akun baru memakai order, reseller, serta tanggal berakhir yang sama. Tindakan ini tercatat dan tidak dapat memilih stok kedua setelah selesai.</Notice>
+      {/* Both accounts, named.
+          This replaces a paragraph that said only "Akun lama akan ditandai
+          REPLACED" -- a raw column value, and one that named neither the unit
+          being withdrawn nor the unit being handed to the customer. Replacing a
+          customer's credentials is the least reversible action on the page, and
+          it is the one whose two subjects were both invisible at the moment of
+          confirmation. */}
+      <div className="mt-5 grid gap-3 md:grid-cols-2">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+          <span className="text-xs uppercase tracking-wider text-[var(--text-muted)]">Akun yang diganti</span>
+          <p className="mt-2 font-semibold text-[var(--text-primary)]">{selected.accountIdentity || "Dimasking"}</p>
+          <p className="mt-1 text-sm text-[var(--text-muted)]">{selected.product} {selected.variant} / profil {selected.profile || "-"}</p>
+          <p className="mt-1 text-sm text-[var(--text-muted)]">Reseller {selected.resellerName || selected.resellerId || "-"}</p>
+        </div>
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+          <span className="text-xs uppercase tracking-wider text-[var(--text-muted)]">Akun yang dikirim</span>
+          <p className="mt-2 font-semibold text-[var(--text-primary)]">{selectedCandidate.identity || "Tanpa identitas"}</p>
+          <p className="mt-1 text-sm text-[var(--text-muted)]">Profil {selectedCandidate.profile || "-"}</p>
+          <p className="mt-1 text-sm text-[var(--text-muted)]">{selectedCandidate.sheetName ? `${selectedCandidate.sheetName} baris ${selectedCandidate.sheetRow || "-"}` : "Tersimpan di database"}</p>
+        </div>
+      </div>
+      {ownerNote.trim() ? <p className="mt-4 text-sm text-[var(--text-muted)]">Catatan yang akan dilihat reseller: &ldquo;{ownerNote.trim()}&rdquo;</p> : null}
     </Dialog> : null}
   </ConsoleShell>;
 }
