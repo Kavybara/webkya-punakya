@@ -37,12 +37,56 @@ Setelah restore, website akan berjalan dan **sync otomatis ke Sheets** dalam
 |---|---|
 | Stok, status sold, SELLER | ✅ Ya — sync otomatis tiap 3 menit |
 | Managed Account (email/password, reseller, buyer) | ✅ Ya — dibangun ulang dari baris Sheet yang `sold` |
-| Produk, harga, daftar reseller | ✅ Ya |
-| **Order & riwayat pembayaran** | ❌ **Tidak** — hanya di `kavya-db.json` |
-| **Saldo wallet / deposit** | ❌ **Tidak** — hanya di `kavya-db.json` |
+| Produk dan harga | ✅ Ya — `db.products` ditulis ulang dari Sheet |
+| **Daftar reseller** | ❌ **Tidak** — hanya ada di `kavya-db.json` |
+| **Order dan riwayat pembayaran** | ❌ **Tidak** — hanya ada di `kavya-db.json` |
+| **Saldo wallet / deposit** | ❌ **Tidak** — hanya ada di `kavya-db.json` |
 | Sesi login WhatsApp | ❌ Tidak — harus scan QR ulang |
 
-Jadi: **Restore tetap wajib.** Sync Sheets saja tidak memulihkan order dan saldo.
+Jadi: **Restore tetap wajib.** Sync Sheets saja tidak memulihkan order, saldo,
+dan daftar reseller.
+
+### Koreksi 2026-10-04 — baris "daftar reseller" sebelumnya salah
+
+Versi dokumen ini menulis "Produk, harga, daftar reseller — Ya". Baris reseller
+itu **salah**, dan salahnya berbahaya: kalimat tepat di atasnya menyatakan Sheet
+tidak menyimpan semua data, jadi tabel ini dipercaya tanpa diperiksa ulang.
+
+Kenyataannya `server/google-sheets.js` **tidak pernah membaca baris reseller
+untuk mengisi `db.resellers`.** Semua kemunculan `db.resellers` di file itu
+adalah pembacaan, kecuali satu loop yang hanya menandai status sinkron pada
+objek yang sudah ada. Sync reseller berjalan satu arah: database ke Sheet.
+Tidak ada jalur sebaliknya. Sheet `Data Reseller` memang berisi kolom SELLER
+dan WHATSAPP, tapi tidak ada kode yang membacanya kembali.
+
+Konsekuensinya kalau restore dilewat: kamu melihat aplikasi yang tampak normal
+dengan tabel reseller kosong. Produk lengkap, login jalan, nol error. Kehilangan
+total tidak terlihat sebagai kegagalan.
+
+### Kenapa kehilangan total tidak terdengar
+
+`server/store.js` menjawab `kavya-db.json` yang hilang dengan `defaultData`,
+lalu **menulis ulang file itu**. Hasilnya bukan file yang hilang, melainkan file
+yang berisi katalog 31 produk lengkap dan seluruh array data operasional kosong
+(termasuk `resellers: []`, `default-data.js:841`). Prosesnya tidak gagal — ia
+berhasil. Tidak ada error di log, dan halaman tetap terbuka.
+
+### Cara mengenali restore yang terlewat
+
+Kondisi ini sekarang terdeteksi. `/api/health` memeriksa ketidaklaianan yang
+tidak mungkin terjadi pada operasi normal, dan halaman Reseller menampilkan
+banner merah kalau terdeteksi.
+
+`orders` dan `payments` hanya pernah ada di `kavya-db.json` — Sheets tidak
+menyimpannya dan tidak ada sync yang membangunnya — dan setiap order membawa
+`resellerId`. Jadi "order ada, reseller tidak ada" tidak mungkin terjadi lewat
+operasi normal. Order milik owner sendiri (`resellerId` kosong) tidak dihitung,
+jadi database yang hanya berisi order owner tetap diam.
+
+Kalau banner itu muncul: **jangan langsung membuat akun reseller baru untuk
+mengisi ulang.** Itu akan menimpa data lama kalau file backup ternyata masih ada
+di WhatsApp. Pulihkan `kavya-db.json` dari backup dulu, baru jalankan ulang
+sync Sheets.
 
 ---
 
@@ -148,13 +192,20 @@ dulu**, karena salah tempat berarti database yang dipulihkan tidak dibaca.
 Jangan percaya website sudah benar hanya karena sudah nyala. Cek:
 
 1. **Login owner** bisa masuk.
-2. **Jumlah order** di Operations cocok kira-kira dengan backup (tidak 0).
-3. **Angka stok** ada. Kalau 0, berarti Sheet belum ter-configure — cek `.env`.
-4. **Sync Sheets** — tunggu 1 menit, lalu pastikan log tidak complaint. Kalau
+2. **Tidak ada banner merah di halaman Reseller.** Ini cek pertama, bukan
+   nomor dua. Kalau banner "database reseller kosong" muncul, restore-nya gagal
+   total — berhenti di sini dan ulangi langkah 6. Jangan lanjutkan, jangan
+   buat akun reseller baru.
+3. **Daftar reseller** ada dan jumlahnya sesuai seperti yang kamu ingat. Kalau
+   0 padahal backup jelas berisi reseller, berarti `kavya-db.json` yang dipasang
+   bukan yang benar.
+4. **Jumlah order** di Operations cocok kira-kira dengan backup (tidak 0).
+5. **Angka stok** ada. Kalau 0, berarti Sheet belum ter-configure — cek `.env`.
+6. **Sync Sheets** — tunggu 1 menit, lalu pastikan log tidak complaint. Kalau
    stok masih 0, cek `GOOGLE_SHEETS_*` di `.env`.
-5. **Saldo reseller** sesuai. Ini yang paling penting — kalau salah, ada transaksi
+7. **Saldo reseller** sesuai. Ini yang paling penting — kalau salah, ada transaksi
    yang tidak tercatat.
-6. **WhatsApp bot** — kalau `baileys-auth` tidak ikut ter-restore, kamu perlu scan
+8. **WhatsApp bot** — kalau `baileys-auth` tidak ikut ter-restore, kamu perlu scan
    QR lagi. Normal, bukan tanda data hilang.
 
 ---
