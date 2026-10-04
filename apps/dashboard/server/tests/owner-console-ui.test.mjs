@@ -335,6 +335,97 @@ test("Owner Console interactive controls are wired to real actions", async () =>
   assert.match(orders, /detailRequestRef/);
 });
 
+/*
+ * A reseller dialog that fails must not take the page down with it.
+ *
+ * `save` and `executeAction` reported into the page-level `error`, which is
+ * wired to *both* DataTables as their `error` prop. Typing a space into the
+ * WhatsApp field replaced the whole reseller table with "Data reseller gagal
+ * dimuat" -- the owner lost the list they were looking at because a dialog
+ * field did not validate, and the message blamed a data problem that had not
+ * happened.
+ */
+test("a reseller dialog reports its own failures instead of blanking the tables", async () => {
+  const resellers = withoutComments(await source("pages/owner-v2/resellers/page.tsx"));
+
+  // Two dialog-local error slots, and `save`/`executeAction` must not touch the
+  // page-level one.
+  assert.match(resellers, /const \[formError, setFormError\] = useState\(""\)/);
+  assert.match(resellers, /const \[actionError, setActionError\] = useState\(""\)/);
+
+  const save = resellers.slice(resellers.indexOf("async function save("), resellers.indexOf("async function executeAction("));
+  assert.doesNotMatch(save, /setError\(/, "a form failure must not reach the page-level error");
+  assert.match(save, /setFormError\(/);
+  assert.match(save, /validateForm\(clean, Boolean\(editing\)\)/);
+  // Rendered inside the dialog, not by the table.
+  assert.match(resellers, /\{formError \? <Notice tone="danger">\{formError\}<\/Notice> : null\}/);
+
+  const act = resellers.slice(resellers.indexOf("async function executeAction("), resellers.indexOf("function requestAction("));
+  assert.doesNotMatch(act, /setError\(/, "a confirm failure must not reach the page-level error");
+  assert.match(act, /setActionError\(/);
+
+  // Both dialogs clear their error when they open, so a previous failure does
+  // not greet the next attempt.
+  assert.match(resellers, /setFormError\(""\); setShowPassword\(false\); \}/);
+  assert.match(resellers, /setActionError\(""\);\n    setNote\(""\);/);
+});
+
+test("a reseller is validated before it is written", async () => {
+  const resellers = withoutComments(await source("pages/owner-v2/resellers/page.tsx"));
+
+  // Whitespace is not a name. A username stored as " budi " has to be typed
+  // with that space forever, and a WhatsApp field holding a customer's name
+  // only surfaces as a failed send days later.
+  assert.match(resellers, /name: form\.name\.trim\(\)/);
+  assert.match(resellers, /username: form\.username\.trim\(\)/);
+  assert.match(resellers, /whatsapp: form\.whatsapp\.trim\(\)/);
+
+  assert.match(resellers, /EMAIL = \/\^\[\^\\s@\]\+@/, "email shape must be checked");
+  assert.match(resellers, /Format email belum benar/);
+  assert.match(resellers, /Nomor WhatsApp belum benar/, "a pasted name in the phone field must be caught");
+  assert.match(resellers, /Password wajib diisi untuk akun baru/);
+
+  // A negative balance is a typo that becomes someone's real money the moment
+  // this row is summed into the "Total saldo" tile.
+  assert.match(resellers, /Saldo tidak boleh minus/);
+  assert.match(resellers, /deposit < 0/);
+  // And a real manual edit warns rather than silently overwriting.
+  assert.match(resellers, /Saldo akan diubah dari/);
+});
+
+test("a reseller confirm says who and how much before it destroys anything", async () => {
+  const resellers = withoutComments(await source("pages/owner-v2/resellers/page.tsx"));
+
+  // Jargon from the API layer, in a dialog a non-engineer has to read.
+  assert.doesNotMatch(resellers, /endpoint owner/);
+  assert.doesNotMatch(resellers, /ownership aktif/);
+
+  // Approving a deposit moves real money. The dialog used to be a note
+  // textarea with no statement of whose money or how much, so the
+  // confirmation a reseller is waiting on could be given to the wrong row.
+  for (const field of ["Reseller", "Nominal", "Metode pembayaran", "Diminta pada"]) {
+    assert.ok(resellers.includes(`label="${field}"`), `the deposit confirm must show ${field}`);
+  }
+  // Deleting takes the balance with it.
+  for (const field of ["Nama", "Username", "Saldo tersisa"]) {
+    assert.ok(resellers.includes(`label="${field}"`), `the delete confirm must show ${field}`);
+  }
+
+  // Buttons name the action rather than saying "Konfirmasi".
+  assert.doesNotMatch(resellers, /confirmLabel="Konfirmasi"/);
+  assert.match(resellers, /"Hapus reseller"/);
+  assert.match(resellers, /"Setujui deposit"/);
+  assert.match(resellers, /"Tolak deposit"/);
+
+  // Row actions speak Indonesian too.
+  assert.match(resellers, /aria-label=\{`Setujui deposit \$\{row\.resellerName\}`\}/);
+  assert.match(resellers, /aria-label=\{`Tolak deposit \$\{row\.resellerName\}`\}/);
+
+  // A password the owner typed should be checkable before it is lost forever.
+  assert.match(resellers, /setShowPassword\(/);
+  assert.match(resellers, /aria-label=\{showPassword \? "Sembunyikan password" : "Tampilkan password"\}/);
+});
+
 test("Owner Console notification center aggregates live operational queues", async () => {
   // The shell may be refactored into a shared AppShell, so search the whole
   // console component tree rather than one file for the wiring.
