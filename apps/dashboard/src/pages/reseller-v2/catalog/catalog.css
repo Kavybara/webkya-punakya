@@ -568,6 +568,31 @@
   color: var(--text-muted);
 }
 
+/* What the balance covers and what is still owed.
+
+   Sits directly under the checkout button, and in the sticky phone bar, so it
+   is the last thing a dealer reads before committing. Deliberately
+   `--text-secondary` rather than a warning tone: paying part with deposit and
+   the rest by QRIS is a normal way to buy here, not a problem, and colouring
+   it as one would train dealers to ignore it. */
+.reseller-v2-catalog-split {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* The bar's own rule above sets `white-space: nowrap` with an ellipsis on every
+   child, which is right for the product name and wrong here: this sentence is
+   two clauses long and the second one is the part that matters. It wraps to
+   two lines instead of being cut off mid-amount. */
+.reseller-v2-catalog-mobile-bar .reseller-v2-catalog-split {
+  display: block;
+  margin-top: 4px;
+  overflow: visible;
+  white-space: normal;
+}
+
 /* ------------------------------------------------------------------ *
  * The phone bar. It is the only way to reach checkout below the fold on a
  * small screen, so it stays above the shell's own bottom navigation.

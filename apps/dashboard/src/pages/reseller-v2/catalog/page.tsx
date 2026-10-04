@@ -26,6 +26,7 @@ import {
 } from "../../../components/ui";
 import { api, subscribeRealtime, type ApiReseller, type CatalogProduct, type CatalogVariant } from "../../../lib/api";
 import { firstAllowedPriceEntry, isDailyDuration, sortedAllowedPriceEntries } from "../../../lib/durations";
+import { depositSplit, splitNotice } from "../../../lib/deposits";
 import { formatRupiah } from "../../../lib/format";
 import { productBrandAsset, productLogoUrl } from "../../../lib/productBrandAssets";
 import "./catalog.css";
@@ -123,6 +124,18 @@ export default function ResellerV2CatalogPage() {
      count is for. */
   const noBalance = reseller && Number(reseller.deposit || 0) <= 0 ? 1 : 0;
   const catalogAttention = noBalance + (products.length ? 0 : 1);
+  /* What the currently-selected package actually costs, split the way the
+     server splits it. See `lib/deposits.ts` -- notably this does NOT gate
+     checkout. */
+  const balance = Number(reseller?.deposit || 0);
+  const split = useMemo(
+    () => depositSplit(balance, selection?.price || 0),
+    [balance, selection?.price],
+  );
+  const paymentNotice = useMemo(
+    () => splitNotice(split, formatRupiah),
+    [split],
+  );
   const totalStock = useMemo(() => rows.reduce((sum, product) => sum + Number(product.stockCount || 0), 0), [rows]);
   const totalVariants = useMemo(() => rows.reduce((sum, product) => sum + Number(product.variants.length || 0), 0), [rows]);
 
@@ -285,6 +298,7 @@ export default function ResellerV2CatalogPage() {
                 expanded={openProductId === product.id}
                 selection={selection?.product.id === product.id ? selection : null}
                 redirecting={redirecting}
+                paymentNotice={paymentNotice}
                 onToggle={() => chooseProduct(product.id)}
                 onChooseVariant={(variantId) => chooseVariant(product, variantId)}
                 onChooseDuration={chooseDuration}
@@ -306,6 +320,13 @@ export default function ResellerV2CatalogPage() {
           <div>
             <p>{selection.product.name} - {selection.variant.name}</p>
             <span>{selection.duration} / {formatRupiah(selection.price)}</span>
+            {/* The same split sentence the expanded card shows. Without it this
+                bar was the one checkout control on a phone that said nothing
+                about the shortfall -- and it is sticky, so it is the last thing
+                on screen before the tap. */}
+            {paymentNotice ? (
+              <small className="reseller-v2-catalog-split">{paymentNotice}</small>
+            ) : null}
           </div>
           <button
             type="button"
@@ -328,6 +349,7 @@ function CatalogCard({
   expanded,
   selection,
   redirecting,
+  paymentNotice,
   onToggle,
   onChooseVariant,
   onChooseDuration,
@@ -338,6 +360,7 @@ function CatalogCard({
   expanded: boolean;
   selection: SelectedPackage | null;
   redirecting: boolean;
+  paymentNotice: string;
   onToggle: () => void;
   onChooseVariant: (variantId: string) => void;
   onChooseDuration: (duration: string) => void;
@@ -440,17 +463,28 @@ function CatalogCard({
           )}
 
           {selection ? (
-            <button
-              type="button"
-              onClick={onCheckout}
-              disabled={redirecting}
-              className="reseller-v2-catalog-checkout"
-            >
-              {redirecting
-                ? <LoaderCircle className="reseller-v2-catalog-spin" size={16} aria-hidden="true" />
-                : <ShoppingCart size={16} aria-hidden="true" />}
-              {redirecting ? "Membuka checkout..." : "Lanjut ke Checkout"}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={onCheckout}
+                disabled={redirecting}
+                className="reseller-v2-catalog-checkout"
+              >
+                {redirecting
+                  ? <LoaderCircle className="reseller-v2-catalog-spin" size={16} aria-hidden="true" />
+                  : <ShoppingCart size={16} aria-hidden="true" />}
+                {redirecting ? "Membuka checkout..." : "Lanjut ke Checkout"}
+              </button>
+              {/* What the balance does and does not cover, said here rather than
+                  discovered on the checkout page. The button above stays
+                  enabled at Rp0 on purpose -- the server splits the payment
+                  (`depositBreakdown` in `server/auto-order.js`), so an order
+                  the balance cannot cover is still a sale. See
+                  `lib/deposits.ts`. */}
+              {paymentNotice ? (
+                <p className="reseller-v2-catalog-split">{paymentNotice}</p>
+              ) : null}
+            </>
           ) : null}
         </div>
       ) : null}

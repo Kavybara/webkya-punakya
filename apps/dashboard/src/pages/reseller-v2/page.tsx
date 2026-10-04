@@ -231,10 +231,19 @@ export default function ResellerV2OverviewPage() {
             <BentoStat
               span={{ col: 3 }}
               label="Pesanan aktif"
-              value={activeOrders.length}
-              hint={activeOrders.length ? "Perlu dipantau" : "Semua beres"}
+              /* `openOrderCount`, not `activeOrders.length`.
+
+                 `activeOrders` is `.slice(0, 3)` -- it exists to fill the list
+                 below, which has room for three rows. Counting it capped the
+                 tile at 3 forever: a dealer with nine open orders saw "3", and
+                 since the cell right next to it reads "Akun aktif" with a real
+                 total, the two numbers being counted by different rules was
+                 invisible. The list below still shows three; the tile now tells
+                 the truth about all of them. */
+              value={openOrderCount}
+              hint={openOrderCount ? "Perlu dipantau" : "Semua beres"}
               icon={<ShoppingBag size={18} />}
-              tone={activeOrders.length ? "warning" : "success"}
+              tone={openOrderCount ? "warning" : "success"}
               onClick={() => navigate("/reseller-v2/orders")}
             />
             <BentoStat
@@ -486,7 +495,23 @@ function BalanceCard({
       </div>
       <div className="ui-balance-actions">
         <Button weight="primary" onClick={onTopUp}>Top Up</Button>
-        <Button weight="secondary" onClick={onHistory}>Riwayat saldo</Button>
+        {/* "Riwayat saldo", not "Riwayat pesanan".
+
+           It was `Riwayat saldo` and it navigated to `/reseller-v2/orders`,
+           which is the *purchase* history: order ids, products, totals. A
+           dealer pressing it to find out where their deposit went found a
+           list of what they bought instead.
+
+           The label now names the destination rather than the promise, because
+           the promise cannot be kept without an endpoint. There is no
+           reseller-facing balance ledger: `walletLedger` and
+           `resellers/deposit-requests` are both `requireAuth(["owner"])`, so
+           a dealer genuinely cannot be shown a deposit history today. Adding
+           one is Phase 6 work and needs the owner's confirmation -- it is a
+           new route, and the brief explicitly forbids new Express endpoints
+           before then. Renaming the button is the whole honest fix available
+           now; renaming the route is not. */}
+        <Button weight="secondary" onClick={onHistory}>Riwayat pesanan</Button>
       </div>
     </BentoCell>
   );

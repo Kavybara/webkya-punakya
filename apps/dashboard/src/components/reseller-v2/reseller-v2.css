@@ -835,6 +835,16 @@ a) {
   color: var(--text-secondary);
   font-size: 12px;
 }
+/* The amount field's own note. Muted on purpose and never a validation colour:
+   it describes the format before anything is wrong, and colouring a helper line
+   as an error the moment the field is empty would mean it scolds every dealer
+   who opens the dialog. */
+.reseller-v2-topup-hint {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
 .reseller-v2-topup-details {
   display: grid;
   gap: 8px;

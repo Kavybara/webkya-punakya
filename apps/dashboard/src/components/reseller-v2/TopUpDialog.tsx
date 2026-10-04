@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, ExternalLink, LoaderCircle, X } from "lucide-react";
 import {
   api,
   type ApiPayment,
   type ResellerDepositInstructions,
 } from "../../lib/api";
-import { formatRupiah } from "../../lib/format";
+import { formatDateTime, formatRupiah } from "../../lib/format";
 import { useQrisQr } from "../../lib/useQrisQr";
 import { qrisPayloadFrom } from "../../lib/qrisQr";
 
@@ -19,7 +19,23 @@ const methodOrder = [
   "shopeepay",
 ];
 
-function methodLabel(method = "") {
+/**
+ * The readable name for a payment method.
+ *
+ * The server already names these -- `deposit-instructions` returns a `label`
+ * per method ("Deposit otomatis QRIS", "QRIS owner manual", "Livin Mandiri") --
+ * and this function ignored all of it in favour of a private copy. The copy was
+ * never worse for the seven known methods, which is why nobody noticed; the
+ * cost showed up the moment the owner configures an eighth, and the fallback
+ * `|| method` printed the raw key into the dropdown: `shopee` or `qris_manual`
+ * sitting next to "BCA".
+ *
+ * The owner's wording wins over ours, so a label they change in settings
+ * reaches the dealer without a code change. Ours is the fallback for the
+ * initial render and for the receipt, which can render before `instructions`
+ * resolves.
+ */
+function methodLabel(method = "", instructions?: ResellerDepositInstructions | null) {
   return (
     (
       {
@@ -31,8 +47,45 @@ function methodLabel(method = "") {
         gopay: "GoPay",
         shopeepay: "ShopeePay",
       } as Record<string, string>
-    )[method] || method
+    )[method] || instructions?.methods?.[method]?.label || method
   );
+}
+
+/**
+ * What the amount field accepts, and what the server will actually store.
+ *
+ * `POST /api/resellers/deposit-request` validates exactly one thing about the
+ * amount: `Math.max(0, Number(amount || 0))` must not be falsy. There is no
+ * minimum and no maximum anywhere in the server -- not in the route, not in
+ * `createDepositTopupOrder`, not in `createPakasirQris`. So this is not a
+ * minimum, and the field deliberately does not claim to be one; inventing a
+ * floor the backend does not enforce would be a promise the product cannot
+ * keep, and the owner would approve the request anyway.
+ *
+ * What *is* real, and was missing: fractional rupiah. `min="1"` on a
+ * `<input type="number">` does not stop 1.5 being typed, and a deposit of
+ * `1500.5` becomes `deposit: 1500.5` in the reseller's own balance. Rupiah has
+ * no subunit in circulation, and every other amount on this page goes through
+ * `formatRupiah`, which rounds -- so the field accepted a number the rest of
+ * the product would not even be able to show back to them.
+ */
+export function parseTopUpAmount(value: string): {
+  amount: number;
+  error: string;
+} {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return { amount: 0, error: "Masukkan nominal Top Up yang valid." };
+
+  const amount = Number(trimmed);
+  if (!Number.isFinite(amount)) return { amount: 0, error: "Nominal hanya boleh berisi angka." };
+  if (amount <= 0) return { amount: 0, error: "Nominal Top Up harus lebih besar dari nol." };
+  if (!Number.isInteger(amount)) {
+    return {
+      amount: 0,
+      error: "Nominal harus bilangan bulat rupiah, tanpa pecahan.",
+    };
+  }
+  return { amount, error: "" };
 }
 
 function safeDepositError(error: unknown) {
@@ -70,6 +123,16 @@ export function TopUpDialog({
   const [success, setSuccess] = useState("");
   const [payment, setPayment] = useState<ApiPayment | null>(null);
   const [orderId, setOrderId] = useState("");
+  /* A ref, not the `submitting` state above.
+     `disabled={submitting}` does not close the window this button has: React
+     has to re-render before the attribute lands, and two clicks inside that
+     window both reach `submit`. The second request is not a duplicate that
+     fails quietly -- for `qris_auto` it calls `createPakasirQris`, which makes
+     a real transaction at the provider, and it messages the owner. So the
+     dealer pays for the same top-up twice and the owner is told twice.
+     Checked synchronously, before the first `await`. */
+  const submitLock = useRef(false);
+  const [receipt, setReceipt] = useState<{ reference: string; message: string } | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -107,6 +170,7 @@ export function TopUpDialog({
       setSuccess("");
       setPayment(null);
       setOrderId("");
+      setReceipt(null);
       setMethod("qris_auto");
     }
   }, [open]);
@@ -127,7 +191,7 @@ export function TopUpDialog({
           (item) =>
             item === "qris_auto" || instructions?.methods?.[item]?.available,
         )
-        .map((item) => ({ value: item, label: methodLabel(item) })),
+        .map((item) => ({ value: item, label: methodLabel(item, instructions) })),
     [instructions],
   );
   const selected = instructions?.methods?.[method] || null;
@@ -136,15 +200,17 @@ export function TopUpDialog({
   const qrImage = useQrisQr(qrisPayloadFrom(payment));
 
   async function submit() {
-    const numericAmount = Number(amount || 0);
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-      setError("Masukkan nominal Top Up yang valid.");
+    if (submitLock.current) return;
+    const { amount: numericAmount, error: amountError } = parseTopUpAmount(amount);
+    if (amountError) {
+      setError(amountError);
       return;
     }
     if (!available) {
       setError("Metode pembayaran belum tersedia. Pilih metode lain.");
       return;
     }
+    submitLock.current = true;
     setSubmitting(true);
     setError("");
     setSuccess("");
@@ -158,17 +224,27 @@ export function TopUpDialog({
         ? result.payment || (await api.payment(result.paymentRef))
         : null;
       setPayment(createdPayment);
-      setOrderId(result.orderId || "");
-      setSuccess(
+      const reference = result.orderId || result.requestId || "";
+      setOrderId(reference);
+      const message =
         result.message ||
-          (createdPayment
-            ? "QRIS berhasil dibuat."
-            : "Permintaan Top Up berhasil dikirim."),
-      );
+        (createdPayment
+          ? "QRIS berhasil dibuat."
+          : "Permintaan Top Up berhasil dikirim.");
+      setSuccess(message);
+      /* A manual method gets no `payment` back -- the server only creates one
+         for `qris_auto` -- so before this, `payment` stayed null and the dialog
+         fell back to showing the *form again*, with the green confirmation
+         sitting under the amount field. Nothing stopped the dealer from reading
+         that as "it did not send" and pressing "Kirim Permintaan" again, which
+         files a second request and messages the owner a second time. The
+         receipt is what the no-payment path now renders instead. */
+      if (!createdPayment) setReceipt({ reference, message });
       onBalanceChanged?.();
     } catch (submitError) {
       setError(safeDepositError(submitError));
     } finally {
+      submitLock.current = false;
       setSubmitting(false);
     }
   }
@@ -233,7 +309,11 @@ export function TopUpDialog({
               </div>
               <div>
                 <dt>Batas bayar</dt>
-                <dd>{payment.expiresAt || "-"}</dd>
+                {/* Was a raw `payment.expiresAt`, i.e. `2026-01-02 03:04:05`
+                    from `addMinutesText`. Every other timestamp on the reseller
+                    side goes through `formatDateTime`; this one was the only
+                    ISO string left on the page. */}
+                <dd>{payment.expiresAt ? formatDateTime(payment.expiresAt) : "-"}</dd>
               </div>
             </dl>
             <div className="reseller-v2-topup-actions">
@@ -241,9 +321,54 @@ export function TopUpDialog({
                 <a href={payment.paymentUrl} target="_blank" rel="noreferrer">
                   Buka QRIS <ExternalLink size={15} />
                 </a>
-              ) : null}
+              ) : (
+                /* No link means no way to pay, and the QR only shows when the
+                   provider returned a drawable string. Saying so is the whole
+                   difference between "your top-up is stuck" and "here is what
+                   to do about it". */
+                <p className="reseller-v2-topup-notice">
+                  Tautan pembayaran tidak tersedia dari penyedia. Tutup dialog
+                  ini lalu hubungi owner bila QRIS tidak tampil.
+                </p>
+              )}
               <button type="button" onClick={onClose}>
                 Tutup
+              </button>
+            </div>
+          </div>
+        ) : receipt ? (
+          /* The manual-method success path. It has no QR and no link -- the
+             owner approves it after the dealer transfers to a bank account --
+             so it says which reference to quote and stops. */
+          <div className="reseller-v2-topup-body">
+            <div className="reseller-v2-topup-success">
+              <CheckCircle2 size={19} />
+              <div>
+                <strong>Permintaan terkirim</strong>
+                <span>{receipt.message}</span>
+              </div>
+            </div>
+            <dl className="reseller-v2-topup-details">
+              <div>
+                <dt>Nomor permintaan</dt>
+                <dd>{receipt.reference || "-"}</dd>
+              </div>
+              <div>
+                <dt>Nominal</dt>
+                <dd>{formatRupiah(Number(amount || 0))}</dd>
+              </div>
+              <div>
+                <dt>Metode</dt>
+                <dd>{methodLabel(method, instructions)}</dd>
+              </div>
+            </dl>
+            <p className="reseller-v2-topup-notice">
+              Saldo bertambah setelah owner memverifikasi transfer. Simpan
+              nomor permintaan di atas sebagai bukti.
+            </p>
+            <div className="reseller-v2-topup-actions">
+              <button type="button" onClick={onClose}>
+                Selesai
               </button>
             </div>
           </div>
@@ -261,11 +386,16 @@ export function TopUpDialog({
                   <input
                     type="number"
                     min="1"
+                    step="1"
                     inputMode="numeric"
                     value={amount}
                     onChange={(event) => setAmount(event.target.value)}
                     placeholder="Contoh: 10000"
                   />
+                  <small className="reseller-v2-topup-hint">
+                    Nominal harus bilangan bulat rupiah. Saldo bertambah
+                    setelah pembayaran diverifikasi.
+                  </small>
                 </label>
                 <label>
                   <span>Metode pembayaran</span>
@@ -284,7 +414,7 @@ export function TopUpDialog({
                   </select>
                 </label>
                 <div className="reseller-v2-topup-instruction">
-                  <strong>{methodLabel(method)}</strong>
+                  <strong>{methodLabel(method, instructions)}</strong>
                   {method === "qris_auto" && available ? (
                     <p>
                       QRIS dibuat otomatis. Saldo bertambah setelah pembayaran

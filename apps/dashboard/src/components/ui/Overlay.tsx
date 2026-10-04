@@ -286,17 +286,46 @@ export function Drawer({ open, title, description, eyebrow, onClose, footer, bus
  * live: the buttons grey out, then the reader hits Escape and the dialog
  * vanishes with the request still running. Pass it to both.
  */
-export function DialogActions({ onCancel, onConfirm, confirmLabel, busy = false, danger = false }: {
+export function DialogActions({
+  onCancel,
+  onConfirm,
+  confirmLabel,
+  busy = false,
+  danger = false,
+  confirmDisabled = false,
+  disabledReason = "",
+}: {
   onCancel: () => void;
   onConfirm: () => void;
   confirmLabel: string;
   busy?: boolean;
   danger?: boolean;
+  /**
+   * The confirm action is impossible right now -- there is no link to open, the
+   * selection is empty, the account is zero.
+   *
+   * Distinct from `busy`, which means "wait". A busy button is a promise that
+   * pressing it again shortly will work; a disabled one has to explain itself,
+   * or the reader is left with a dead control and no idea which of the
+   * dialog's conditions is unmet. That is what `disabledReason` is for -- the
+   * caller owns the wording, because only it knows which condition failed.
+   */
+  confirmDisabled?: boolean;
+  disabledReason?: string;
 }) {
+  const blocked = busy || confirmDisabled;
   return (
     <div className="ui-dialog-actions" aria-busy={busy || undefined}>
       <Button weight="secondary" onClick={onCancel} disabled={busy}>Batal</Button>
-      <Button weight={danger ? "danger" : "primary"} onClick={onConfirm} disabled={busy}>
+      {/* `title` only, not visible text: the reason is rendered by the caller as
+          a `Notice` in the dialog body, where it is readable by everyone and not
+          only by a mouse user who waits for a tooltip. */}
+      <Button
+        weight={danger ? "danger" : "primary"}
+        onClick={onConfirm}
+        disabled={blocked}
+        title={confirmDisabled && disabledReason ? disabledReason : undefined}
+      >
         {busy ? <LoaderCircle className="ui-spin" size={15} /> : null}
         {busy ? "Memproses..." : confirmLabel}
       </Button>

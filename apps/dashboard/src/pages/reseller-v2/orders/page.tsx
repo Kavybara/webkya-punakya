@@ -8,7 +8,7 @@ import {
   type ApiOrder,
   type ApiPayment,
 } from "../../../lib/api";
-import { formatDateTime, formatRupiah } from "../../../lib/format";
+import { formatCalendarDate, formatDateTime, formatRupiah } from "../../../lib/format";
 import { useQrisQr } from "../../../lib/useQrisQr";
 import { qrisPayloadFrom } from "../../../lib/qrisQr";
 import {
@@ -434,9 +434,37 @@ export default function ResellerV2OrdersPage() {
                 </div>
                 <div>
                   <dt>Batas Bayar</dt>
-                  <dd>{qrisPayment?.expiresAt || qrisOrder.paymentExpiresAt || "-"}</dd>
+                  {/* Was the raw `expiresAt` string -- `2026-01-02 03:04:05`
+                      straight from `addMinutesText`. The deadline is the one
+                      number on this screen the reseller cannot do without, so it
+                      has to be a date they can read, like every other one. */}
+                  <dd>
+                    {qrisPayment?.expiresAt
+                      ? formatDateTime(qrisPayment.expiresAt)
+                      : qrisOrder.paymentExpiresAt
+                        ? formatDateTime(qrisOrder.paymentExpiresAt)
+                        : "-"}
+                  </dd>
                 </div>
               </dl>
+
+              {/* The empty-`paymentUrl` case, named.
+
+                  `qrisPayment` exists for any pending order with a
+                  `paymentRef`, but `paymentUrl` is only populated once the
+                  provider answers. Until then -- or if it fails -- "Buka QRIS"
+                  was a primary button doing `window.open(undefined)`: live,
+                  inviting, and a no-op when pressed. Both halves are fixed
+                  together, because a disabled button with no reason is its own
+                  dead end. */}
+              {!qrisLoading && !qrisPayment?.paymentUrl ? (
+                <Notice tone="warning">
+                  Tautan pembayaran belum tersedia dari penyedia QRIS. Bila kode
+                  QR juga tidak tampil di atas, pesanan ini tidak dapat dibayar
+                  dari halaman ini -- hubungi owner untuk membuka ulang
+                  pembayaran.
+                </Notice>
+              ) : null}
 
               <DialogActions
                 onCancel={closeQris}
@@ -445,6 +473,8 @@ export default function ResellerV2OrdersPage() {
                   window.open(qrisPayment.paymentUrl, "_blank", "noopener,noreferrer");
                 }}
                 confirmLabel="Buka QRIS"
+                confirmDisabled={!qrisPayment?.paymentUrl}
+                disabledReason="Tautan pembayaran belum tersedia dari penyedia QRIS."
                 busy={qrisLoading}
               />
             </div>
@@ -531,7 +561,13 @@ export default function ResellerV2OrdersPage() {
                       </div>
                       <div>
                         <dt>Berakhir</dt>
-                        <dd>{account.expiresAt || "-"}</dd>
+                        {/* Raw `YYYY-MM-DD` from the server.
+                            `formatCalendarDate` reads the date out of the
+                            string rather than via `Date`, so it cannot shift a
+                            day for a reader east or west of UTC. */}
+                        <dd>
+                          {account.expiresAt ? formatCalendarDate(account.expiresAt) : "-"}
+                        </dd>
                       </div>
                     </dl>
 
