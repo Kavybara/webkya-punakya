@@ -189,24 +189,77 @@ dulu**, karena salah tempat berarti database yang dipulihkan tidak dibaca.
 
 ## 8. Verifikasi setelah hidup
 
-Jangan percaya website sudah benar hanya karena sudah nyala. Cek:
+Jangan percaya website sudah benar hanya karena sudah nyala.
+
+Urutannya penting: **cek yang paling merusak lebih dulu.** Restore yang gagal
+total tidak selalu terlihat, dan kalau kamu lanjutkan ke langkah yang lebih
+lambat, kamu bisa menghabiskan waktu lama menyalakan sesuatu yang berdiri di atas database kosong.
+
+### A. Yang harus Dicek Dulu
 
 1. **Login owner** bisa masuk.
-2. **Tidak ada banner merah di halaman Reseller.** Ini cek pertama, bukan
-   nomor dua. Kalau banner "database reseller kosong" muncul, restore-nya gagal
-   total — berhenti di sini dan ulangi langkah 6. Jangan lanjutkan, jangan
-   buat akun reseller baru.
-3. **Daftar reseller** ada dan jumlahnya sesuai seperti yang kamu ingat. Kalau
-   0 padahal backup jelas berisi reseller, berarti `kavya-db.json` yang dipasang
+2. **Tidak ada banner merah di halaman Reseller.** Kalau banner "database
+   reseller kosong" muncul, restore-nya gagal total — berhenti di sini dan ulangi
+   langkah 6. Jangan lanjutkan, jangan buat akun reseller baru.
+3. **Daftar reseller** ada dan jumlahnya sesuai seperti yang kamu ingat. Kalau 0
+   padahal backup jelas berisi reseller, berarti `kavya-db.json` yang dipasang
    bukan yang benar.
-4. **Jumlah order** di Operations cocok kira-kira dengan backup (tidak 0).
-5. **Angka stok** ada. Kalau 0, berarti Sheet belum ter-configure — cek `.env`.
-6. **Sync Sheets** — tunggu 1 menit, lalu pastikan log tidak complaint. Kalau
-   stok masih 0, cek `GOOGLE_SHEETS_*` di `.env`.
-7. **Saldo reseller** sesuai. Ini yang paling penting — kalau salah, ada transaksi
-   yang tidak tercatat.
+
+Tiga langkah ini hampir selalu selesai dalam dua menit, dan tiga-tiganya
+menangkap kegagalan yang paling mahal.
+
+### B. Data yang Hanya Ada di Backup
+
+Empat data ini **tidak ada di Google Sheets** dan tidak bisa dibangun ulang oleh
+sync. Kalau restore-nya salah, tidak ada sumber kedua:
+
+| Data | Halaman owner | Kalau kosong |
+|---|---|---|
+| Order & riwayat pembayaran | Operations | Setiap transaksi hilang permanen |
+| Saldo wallet / deposit | Reseller | Saldo salah = uang pelanggan salah |
+| Klaim garansi | Warranty | Klaim lama tidak bisa dilacak |
+| Rental & daftar grup WhatsApp | Rental / Group sync | Nomor & grup harus diisi ulang manual |
+
+Cek angkanya masuk akal — tidak harus cocok sampai satuan, tapi harus **tidak
+nol** dan tidak jauh lebih kecil dari yang kamu ingat.
+
+### C. Yang Bisapulih dari Sheets
+
+Ini boleh terlihat aneh selama beberapa menit pertama, karena sync butuh waktu:
+
+5. **Angka stok** ada. Kalau 0 setelah 1 menit, berarti Sheet belum ter-configure
+   — cek `GOOGLE_SHEETS_*` di `.env`.
+6. **Sync Sheets** — tunggu 1 menit, lalu pastikan log tidak complaint.
+7. **Produk dan harga** tampil di katalog.
+
+### D. Setelah Semua Berjalan
+
 8. **WhatsApp bot** — kalau `baileys-auth` tidak ikut ter-restore, kamu perlu scan
    QR lagi. Normal, bukan tanda data hilang.
+9. **Backup — cek Health Center.** Lihat bagian **Cara cek backup hari ini**. Ini
+   yang paling sering terlewat setelah restore, dan akibatnya fatal: file
+   `kavya-db.json` yang baru saja kamu pasang **tidak punya salinan di mana pun**.
+   Kalau VPS-nya mati lagi sebelum jadwal backup berikutnya jalan, kamu kembali
+   ke titik nol. Jalankan backup manual dan pastikan file benar-benar terkirim
+   ke WhatsApp kamu — bukan cuma "dibuat".
+10. **Saldo reseller** cocok dengan catatanmu. Ini yang paling penting — kalau
+    salah, ada transaksi yang tidak tercatat, dan tidak ada yang mengabarimu.
+
+---
+
+### Kalau sesuatu terasa salah
+
+| Gejala | Kemungkinan | Yang harus dilakukan |
+|---|---|---|
+| Banner merah di halaman Reseller | `kavya-db.json` tidak terbaca, jadi `defaultData` menimpanya | Ulangi langkah 6. **Jangan** buat akun reseller baru |
+| Tabel reseller kosong, tapi tidak ada banner | Backup memang tidak punya reseller — atau banner belum ter-deploy | Bandingkan isi `kavya-db.json` dengan backup |
+| Stok 0 tapi order ada | `kavya-db.json` terbaca, `.env` Sheets salah | Cek `GOOGLE_SHEETS_*`; sync akan menyusul |
+| Order 0 tapi reseller ada | Database terbaca tapi bukan file yang benar | Ulangi langkah 6 dengan arsip yang berbeda |
+| Saldo tidak sesuai | transactions hilang | Berhenti. Pulihkan dari backup terbaru, jangan menebak |
+
+Baris terakhir intentional: **menebak saldo adalah cara tercepat membuat
+kerugian irreversible.** Kalau angkanya tidak cocok, tidak ada yang perlu
+diperbaiki sekarang — yang perlu diperbaiki adalah file-nya.
 
 ---
 

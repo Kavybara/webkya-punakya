@@ -28,6 +28,18 @@ function runbookRow(label) {
   return row;
 }
 
+// The post-restore checklist and nothing else. Slicing to end-of-document would
+// let the backup section further down satisfy a checklist assertion: "Health
+// Center" appears there seven times, so an unbounded slice cannot tell "the
+// checklist tells you to check backups" apart from "the document does, somewhere".
+function verificationSection() {
+  const start = runbook.indexOf("## 8. Verifikasi setelah hidup");
+  assert.ok(start > -1, "RESTORE.md has no post-restore verification section");
+  const rest = runbook.slice(start);
+  const end = rest.indexOf("## Catatan:");
+  return end > -1 ? rest.slice(0, end) : rest;
+}
+
 test("the runbook does not claim Sheets rebuilds the reseller list", () => {
   const row = runbookRow("**Daftar reseller**");
   assert.match(row, /❌/, 'the reseller row must read "does not come back", not "comes back"');
@@ -74,7 +86,7 @@ test("the verification checklist checks the reseller list", () => {
   // The checklist is what actually runs during a restore. It used to ask about
   // stock and balances but never "is the reseller list there", which is the
   // one question whose answer distinguishes a good restore from a failed one.
-  const checklist = runbook.slice(runbook.indexOf("## 8. Verifikasi setelah hidup"));
+  const checklist = verificationSection();
   assert.match(checklist, /Daftar reseller/i, "the post-restore checklist never asks whether resellers came back");
   assert.match(checklist, /banner/i, "and never tells the owner to look for the loss banner");
 });
@@ -83,12 +95,58 @@ test("the checklist tells the owner to check for data loss first", () => {
   // Ordering carries meaning in a checklist. If the banner check is not first,
   // a failed restore gets read as "stok 0, cek .env" and the real cause is
   // lost.
-  const checklist = runbook.slice(runbook.indexOf("## 8. Verifikasi setelah hidup"));
+  const checklist = verificationSection();
   const bannerAt = checklist.search(/banner merah/i);
-  const orderAt = checklist.search(/\*\*Jumlah order\*\*/i);
+  const orderAt = checklist.search(/order/i);
   assert.ok(bannerAt > -1, "no banner check found");
-  assert.ok(orderAt > -1, "no order-count check found");
+  assert.ok(orderAt > -1, "no order check found");
   assert.ok(bannerAt < orderAt, "the loss banner must be checked before order counts");
+});
+
+test("the checklist covers every dataset that only exists in the backup", () => {
+  // Four kinds of data live only in kavya-db.json. The checklist used to name
+  // three of them and silently skip warranty claims, WA rentals and group
+  // directories -- so a restore that dropped those looked clean. Each of these
+  // keys is asserted absent from the Sheets module below, which is what makes
+  // "there is no second copy" true rather than merely likely.
+  const checklist = verificationSection();
+  for (const [label, pattern] of [
+    ["order", /order/i],
+    ["wallet balance", /saldo wallet|deposit/i],
+    ["warranty claims", /garansi|warranty/i],
+    ["whatsapp rentals and groups", /rental|grup whatsapp/i],
+  ]) {
+    assert.match(checklist, pattern, `the checklist never asks whether ${label} came back`);
+  }
+});
+
+test("the backup-only datasets really are absent from the Sheets sync", () => {
+  // The claim above is only worth making if the code backs it up. Reading these
+  // keys is fine and expected -- the module pushes orders and resellers
+  // *outward*. What must not exist is an assignment, because an assignment is
+  // how a value gets rebuilt from a sheet row. With no assignment anywhere,
+  // Sheets cannot reconstruct any of them and the backup is the only copy.
+  for (const key of ["orders", "payments", "resellers", "warrantyClaims", "whatsappRentals", "whatsappGroupLists"]) {
+    assert.doesNotMatch(
+      sheetsSync,
+      new RegExp(`db\\.${key}\\s*=(?!=)`),
+      `the Sheets sync now assigns db.${key}. If that is deliberate, RESTORE.md's "backup only" table is wrong and both must be corrected the same day.`,
+    );
+  }
+});
+
+test("the checklist tells the owner to check backup health after restoring", () => {
+  // A freshly restored kavya-db.json has no copy anywhere: it was just pulled
+  // off WhatsApp onto a machine that could die again. The checklist did not
+  // say so, and a second outage before the next scheduled run means starting
+  // from zero a second time.
+  const checklist = verificationSection();
+  assert.match(checklist, /Health Center/i, "the post-restore checklist never checks whether backups are running again");
+  assert.match(
+    checklist,
+    /tidak punya salinan di mana pun|kembali ke titik nol/i,
+    "the reason to check -- the restored file has no copy anywhere -- is what makes this step stick",
+  );
 });
 
 test("the one-way claim matches what the sync module actually does", () => {
