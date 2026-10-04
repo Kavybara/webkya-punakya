@@ -48,9 +48,13 @@ test("runtime backup writes a full restore archive with source, dashboard build,
     reason: "test-full-restore",
   });
   const backup = await writeRuntimeBackupFile({ payload, outputDir });
-  // --force-local stops GNU tar reading the Windows drive letter in
-  // backup.filePath ("C:\...") as a remote host name.
-  const list = spawnSync("tar", ["--force-local", "-tzf", backup.filePath], { encoding: "utf8" });
+  // Listed the same way the archive is written: from inside its own directory,
+  // by bare name, so no drive letter reaches tar. See the note above the
+  // spawnSync in `writeUploadableArchive`.
+  const list = spawnSync("tar", ["-tzf", path.basename(backup.filePath)], {
+    cwd: path.dirname(backup.filePath),
+    encoding: "utf8",
+  });
 
   assert.equal(list.status, 0, list.stderr);
   const entries = list.stdout.split(/\r?\n/).filter(Boolean);

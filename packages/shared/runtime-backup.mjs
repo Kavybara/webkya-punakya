@@ -390,10 +390,18 @@ async function writeUploadableArchive({ payload, outputDir, fileName }) {
     );
     await writeFileBundle(stageDir, ".", payload.file_bundles?.project_source);
 
-    // --force-local stops GNU tar reading a Windows drive letter (e.g. the
-    // "C:" in "C:\...\stage") as a remote host name, which otherwise fails with
-    // "Cannot connect to C: resolve failed". It is a no-op for local paths.
-    const result = spawnSync("tar", ["--force-local", "-czf", filePath, "-C", stageDir, "."], {
+    // The archive is written from inside its own directory, by bare file name,
+    // so no Windows drive letter ever reaches tar's argument list. That matters
+    // because GNU tar reads "C:\out.tar.gz" as the remote host "C:" and fails
+    // with "Cannot connect to C: resolve failed" -- and the obvious remedy,
+    // --force-local, is a GNU-only flag that bsdtar rejects outright. bsdtar is
+    // the `tar.exe` that ships with Windows and the one that wins PATH
+    // resolution by default there, so the flag made this call fail outright on
+    // every default Windows install while working fine on the Linux VPS.
+    // Keeping the drive letter out of the arguments is correct on both flavors
+    // and needs neither the flag nor the GNU assumption.
+    const result = spawnSync("tar", ["-czf", path.basename(filePath), "-C", stageDir, "."], {
+      cwd: path.dirname(filePath),
       stdio: "pipe",
       shell: false,
     });
