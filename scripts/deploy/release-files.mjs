@@ -22,7 +22,7 @@ export async function collectReleaseFiles(root, { protectedPaths = [] } = {}) {
       const next = relative ? `${relative}/${entry.name}` : entry.name;
       const target = path.join(directory, entry.name);
       if (entry.isSymbolicLink() || protectedEntry(target)) continue;
-      if (/^(?:runtime(?:-|$)|database$|node_modules$|backups$|tmp$|\.auth$|baileys-auth$|\.git$|\.cache$|\.compiled-tests$|coverage$|test-results$|playwright-report$)/i.test(entry.name)) continue;
+      if (entry.isDirectory() && /^(?:runtime(?:-|$)|database$|node_modules$|backups$|tmp$|\.auth$|baileys-auth$|\.git$|\.cache$|\.compiled-tests$|coverage$|test-results$|playwright-report$)/i.test(entry.name)) continue;
       if (entry.name === ".npmrc" || (entry.name.startsWith(".env") && next !== ".env.example") || /\.(?:pem|key|p12|pfx|enc|log|tar|tgz|gz)$/i.test(entry.name)) continue;
       if (entry.isDirectory()) {
         if (!relative && !SOURCE_DIRS.has(entry.name)) continue;
