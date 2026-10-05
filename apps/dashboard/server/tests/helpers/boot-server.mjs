@@ -157,11 +157,12 @@ export async function withServer(run, { database, env = {}, timeoutMs = 90_000, 
     // handle outlives the kill signal briefly, and removing the directory too
     // early fails with EBUSY.
     await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5_000))]);
-    if (runtimeRoot) return;
-    try {
-      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-    } catch {
-      // A leftover temp directory is not worth failing a test over.
+    if (!runtimeRoot) {
+      try {
+        fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+      } catch {
+        // A leftover temp directory is not worth failing a test over.
+      }
     }
   }
 }

@@ -48,7 +48,7 @@ test("decrypted backup boots restored code, authenticates and survives rejected-
   const entry = path.join(restored, "apps/dashboard/server/index.js");
   const verify = async () => withServer(async ({ base, post }) => {
     assert.deepEqual(await (await fetch(`${base}/api/health`)).json(), { ok: true });
-    const login = await post("/api/auth/login", { username: "kya", password: "fixture-restored-login" });
+    const login = await post("/api/auth/login", { email: "kya", password: "fixture-restored-login" });
     assert.equal(login.status, 200);
     const stored = JSON.parse(await fs.readFile(path.join(restoredRuntime, "kavya-db.json"), "utf8"));
     assert.equal(stored.resellers[0].id, "res-kya");
