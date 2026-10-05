@@ -10,6 +10,48 @@ test("canonical rental projection preserves paused status and never resurrects a
   assert.equal(data["group@g.us"].status, "paused");
   assert.equal(data["group@g.us"].daysLeft, 15);
   assert.deepEqual(canonicalRentalMap({ whatsappRentals: [] }), {});
+  assert.throws(() => canonicalRentalMap(), /canonical_rentals_missing/);
+  assert.deepEqual(canonicalRentalMap({ whatsappRentals: [{ id: "invalid" }] }), {});
+  assert.equal(canonicalRentalMap({ whatsappRentals: [{ groupJid: "g@g.us", expiresAt: 123, start: "old" }] })["g@g.us"].expired, 123);
+});
+
+test("missing and corrupt mirrors report pending and transient Windows locks are retried", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "kavya-mirror-lock-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const target = path.join(root, "rentals.json");
+  let locked = true;
+  const mirror = createRentalMirror({ readCanonical: async () => ({ whatsappRentals: [] }), targets: [target], journalPath: path.join(root, "pending.json"), io: { ...fs, rename: async (from, to) => {
+    if (locked) { locked = false; throw Object.assign(new Error("busy"), { code: "EBUSY" }); }
+    return fs.rename(from, to);
+  } } });
+  assert.equal((await mirror.health()).status, "pending");
+  await fs.writeFile(target, "broken-json");
+  assert.equal((await mirror.health()).status, "pending");
+  assert.equal((await mirror.reconcile()).status, "synced");
+  assert.equal((await mirror.health()).status, "synced");
+});
+
+test("rollback failures remain pending and newly created copies are removed on failure", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "kavya-mirror-rollback-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const targets = [path.join(root, "first.json"), path.join(root, "second.json")];
+  let failRollback = false;
+  const mirror = createRentalMirror({ readCanonical: async () => ({ whatsappRentals: [] }), targets, journalPath: path.join(root, "pending.json"), io: { ...fs,
+    rename: async (from, to) => {
+      if (to === targets[1]) throw new Error("write failed");
+      return fs.rename(from, to);
+    }, rm: async (file, options) => {
+      if (failRollback && file === targets[0]) throw new Error("rollback failed");
+      return fs.rm(file, options);
+    },
+  } });
+  assert.equal((await mirror.reconcile()).rollbackFailed, false);
+  await assert.rejects(fs.access(targets[0]));
+  failRollback = true;
+  const result = await mirror.reconcile();
+  assert.equal(result.errorCode, "mirror_write_failed");
+  assert.equal(result.rollbackFailed, true);
+  assert.equal((await mirror.health()).status, "pending");
 });
 
 test("partial mirror failure rolls back copies, retains recovery journal, then retries latest canonical data", async (t) => {

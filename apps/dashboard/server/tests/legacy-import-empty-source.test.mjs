@@ -48,8 +48,8 @@ test("rental legacy mirror writes status and adjust does not reactivate paused g
   const indexSource = await fs.readFile(dashboardIndexPath, "utf8");
   const routeSource = await fs.readFile(whatsappRoutesPath, "utf8");
 
-  assert.match(indexSource, /const status = String\(patch\.status \?\? current\.status \?\? ""\)/);
-  assert.match(indexSource, /\.\.\.\(status \? \{ status \} : \{\}\)/);
+  assert.match(indexSource, /return canonicalRentalMap\(await readDbSnapshot\(\)\)/);
+  assert.match(indexSource, /rentalMirror\.reconcile\(\)/);
   assert.match(routeSource, /status: String\(current\.status \|\| fallback\.status \|\| ""\)\.toLowerCase\(\) === "paused"/);
   assert.match(routeSource, /status: updated\.status/);
 });

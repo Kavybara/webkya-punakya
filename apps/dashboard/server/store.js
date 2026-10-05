@@ -81,6 +81,7 @@ async function writeJsonFileAtomic(filePath, value) {
     await renameWithRetry(tempPath, filePath);
     await fs.chmod(filePath, 0o600).catch(() => undefined);
     if (filePath === databasePath) {
+      registerLogSecrets(value.settings || {});
       cachedDb = clone(value);
       cachedMtimeMs = (await fs.stat(filePath)).mtimeMs;
     }

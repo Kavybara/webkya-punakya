@@ -4,7 +4,7 @@ import { redactLogValue, requestTelemetry, registerLogSecrets, installConsoleRed
 
 test("logs redact nested secrets, URL tokens, Bearer values and registered opaque credentials", () => {
   registerLogSecrets({ arbitraryToken: "fixture-opaque-provider-value" });
-  const redacted = redactLogValue({ password: "do-not-log", nested: { apiKey: "secret-key", ok: "visible" }, message: "https://example.test/?api_key=secret-value Bearer opaque-session-token fixture-opaque-provider-value" });
+  const redacted = redactLogValue({ password: "do-not-log", nested: { apiKey: "secret-key", ok: "visible" }, message: "https://example.test/?api_key=secret-value Bearer " + "opaque-session-token fixture-opaque-provider-value" });
   const serialized = JSON.stringify(redacted);
   for (const secret of ["do-not-log", "secret-key", "secret-value", "opaque-session-token", "fixture-opaque-provider-value"]) assert.equal(serialized.includes(secret), false);
   assert.equal(redacted.nested.ok, "visible");
