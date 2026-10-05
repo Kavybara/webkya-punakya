@@ -148,4 +148,3 @@ Daftar relatif terhadap root repository sejak baseline di atas, plus laporan ini
 - `scripts/deploy/release-files.mjs`
 - `scripts/startup/kavya-start.mjs`
 - `docs/PRODUCTION-AUDIT-2026-10-06.md`
-
