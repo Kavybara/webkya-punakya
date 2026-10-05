@@ -153,6 +153,35 @@
  * to sit, which is most of what "not cluttered" actually is.
  * ------------------------------------------------------------------ */
 
+/* One recipe for the small uppercase label.
+ *
+ * There were seven. `10px/650/0.06em`, `10px/700/0.1em`, `10px/750/0.14em`,
+ * `9px/700/0.1em`, `10px/700/0.08em`, `10px/700/0.12em` and `10px/700/0.1em`
+ * were all "the little grey word above a number", written out six different
+ * ways across this file and `shell.css`. Two of them differ by a single
+ * tracking digit, which is the worst kind of difference: nobody would ever
+ * decide it, and everybody can see it once the labels sit next to each other.
+ *
+ * `.ui-label` is the recipe; the selectors below it are the places it applies.
+ * Each of those keeps only its own layout rule from here on, so the type is
+ * stated once and a page can use the class directly on anything new.
+ *
+ * 600 rather than the old 650. Inter has it as a real stop on the variable
+ * axis, and 650 was a value nobody chose so much as landed on. */
+.ui-label,
+.ui-panel-eyebrow,
+.ui-metric-head > span,
+.ui-bento-stat-head > span,
+.ui-table-scroll tbody td::before,
+.ui-balance > div > span {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
 .ui-panel {
   display: flex;
   max-height: min(86svh, 900px);
@@ -173,18 +202,13 @@
   padding: 20px 24px;
   border-bottom: 1px solid var(--border);
 }
-.ui-panel header h2 { margin: 0; color: var(--text-primary); font-size: 15px; font-weight: 650; }
+.ui-panel header h2 { margin: 0; color: var(--text-primary); font-size: 15px; font-weight: 600; }
 .ui-panel header p { margin: 6px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
 
 /* The eyebrow says where you are before the title says what it is. */
 .ui-panel-eyebrow {
   display: block;
   margin-bottom: 4px;
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
 }
 
 .ui-panel-body { flex: 1; min-height: 0; overflow-y: auto; padding: 24px; }
@@ -195,7 +219,7 @@
 /* What a dialog says before its actions. The lead is the question being asked
    and the note is the consequence, so they are set apart from each other
    rather than run together as one paragraph. */
-.ui-dialog-lead { margin: 0; color: var(--text-primary); font-size: 13.5px; font-weight: 650; line-height: 1.5; }
+.ui-dialog-lead { margin: 0; color: var(--text-primary); font-size: 13.5px; font-weight: 600; line-height: 1.5; }
 .ui-dialog-note { margin: 6px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
 .ui-panel-body > .ui-notice { margin-top: 14px; }
 .ui-panel-body > .ui-field { margin-top: 16px; }
@@ -392,22 +416,29 @@
    that the thing can be pressed, and the two kinds are not interchangeable:
    a reader who learns that every panel rises learns that none of them
    means anything. So a plain card gets a *glow* -- the edge warms and a
-   light passes across it -- and only the cards that are controls lift. */
+   light passes across it -- and only the cards that are controls lift.
+
+   It also sits at `--shadow-rest` rather than `--shadow-lift`. Every
+   card-shaped surface in the kit used to carry the identical shadow, which
+   meant a page of twelve cards had one elevation and therefore no depth at
+   all -- the eye had nothing to rank. A plain card is the quietest large
+   thing on a screen; the metric tiles and bento cells are the ones that
+   should be visibly standing off it. */
 .ui-card {
   padding: var(--space-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
   backdrop-filter: blur(var(--glass-blur));
-  box-shadow: var(--shadow-lift);
+  box-shadow: var(--shadow-rest);
   transition: border-color var(--duration-normal) var(--ease-out-expo), background var(--duration-normal) var(--ease-out-expo), box-shadow var(--duration-normal) var(--ease-out-expo);
 }
 .ui-card:hover {
   border-color: var(--border-strong);
   background: var(--surface-hover);
-  box-shadow: var(--shadow-float);
+  box-shadow: var(--shadow-lift);
 }
-.ui-card > h3 { margin: 0 0 5px; color: var(--text-primary); font-size: 13px; font-weight: 650; }
+.ui-card > h3 { margin: 0 0 5px; color: var(--text-primary); font-size: 13px; font-weight: 600; }
 .ui-card > p { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
 
 /* A card whose number is the reason it exists.
@@ -428,15 +459,20 @@
   gap: 18px;
   padding: 22px 24px;
 }
-.ui-balance > div > span { color: var(--text-muted); font-size: 10px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
+.ui-balance > div > span { /* type comes from the shared label recipe above */ }
 .ui-balance h2 {
   margin: 10px 0 0;
   color: var(--text-primary);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: clamp(30px, calc(1.6rem + 1.6vw), 46px);
-  font-weight: 400;
+  /* 500, not 400. A 46px Inter at 400 is the thinnest thing on the page and it
+     was reading as under-set rather than as restraint -- the same figure at
+     500, holding the same -0.02em tracking, reads as confident. Weight, not
+     size, is what separates a display number from a caption that happens to
+     be large. */
+  font-weight: 500;
   line-height: 1.05;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
   font-variant-numeric: tabular-nums;
 }
 .ui-balance p { margin: 8px 0 0; color: var(--text-secondary); font-size: 11px; }
@@ -459,7 +495,7 @@
   padding: 34px 22px;
   text-align: center;
 }
-.ui-state strong { color: var(--text-primary); font-size: 13px; font-weight: 650; }
+.ui-state strong { color: var(--text-primary); font-size: 13px; font-weight: 600; }
 .ui-state p { max-width: 44ch; margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
 .ui-state button { margin-top: 6px; }
 
@@ -523,7 +559,7 @@
   background: var(--bg-raised);
   color: var(--text-secondary);
   font-size: 10px;
-  font-weight: 650;
+  font-weight: 600;
   white-space: nowrap;
 }
 /* The dot is not decoration: it is the part that survives when the tone
@@ -607,13 +643,18 @@
   line-height: 1.6;
 }
 .ui-notice > svg { flex: 0 0 auto; margin-top: 1px; color: var(--text-muted); }
-.ui-notice.is-info { border-color: color-mix(in srgb, var(--status-info) 24%, transparent); background: color-mix(in srgb, var(--status-info) 7%, transparent); }
+/* One border alpha for all four tones. They were 24 / 24 / 26 / 28 -- four
+   deliberate-looking numbers for what is one decision, which meant a danger
+   notice sat visibly heavier on the page than an info one and nobody could
+   have said why. The hue already carries the tone; the edge does not need to
+   as well. */
+.ui-notice.is-info { border-color: color-mix(in srgb, var(--status-info) 26%, transparent); background: color-mix(in srgb, var(--status-info) 7%, transparent); }
 .ui-notice.is-info > svg { color: var(--status-info); }
-.ui-notice.is-success { border-color: color-mix(in srgb, var(--status-success) 24%, transparent); background: color-mix(in srgb, var(--status-success) 7%, transparent); }
+.ui-notice.is-success { border-color: color-mix(in srgb, var(--status-success) 26%, transparent); background: color-mix(in srgb, var(--status-success) 7%, transparent); }
 .ui-notice.is-success > svg { color: var(--status-success); }
 .ui-notice.is-warning { border-color: color-mix(in srgb, var(--status-warning) 26%, transparent); background: color-mix(in srgb, var(--status-warning) 7%, transparent); }
 .ui-notice.is-warning > svg { color: var(--status-warning); }
-.ui-notice.is-danger { border-color: color-mix(in srgb, var(--status-danger) 28%, transparent); background: color-mix(in srgb, var(--status-danger) 7%, transparent); }
+.ui-notice.is-danger { border-color: color-mix(in srgb, var(--status-danger) 26%, transparent); background: color-mix(in srgb, var(--status-danger) 7%, transparent); }
 .ui-notice.is-danger > svg { color: var(--status-danger); }
 
 /* ------------------------------------------------------------------ *
@@ -641,7 +682,6 @@
   transition: border-color var(--duration-normal) var(--ease-out-expo), background var(--duration-normal) var(--ease-out-expo), box-shadow var(--duration-normal) var(--ease-out-expo);
 }
 .ui-metric-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.ui-metric-head > span { color: var(--text-muted); font-size: 10px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
 .ui-metric-head > i { display: grid; place-items: center; color: var(--text-muted); }
 .ui-metric-head > i.is-danger { color: var(--status-danger); }
 .ui-metric-head > i.is-warning { color: var(--status-warning); }
@@ -653,10 +693,16 @@
 .ui-metric > strong {
   color: var(--text-primary);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 25px;
-  font-weight: 400;
-  letter-spacing: -0.01em;
-  line-height: 1.15;
+  /* 500 and -0.02em, shared exactly with `.ui-bento-stat > strong`. Both are
+     the same figure drawn in the same place in a tile; they were two pixels
+     and half a tracking unit apart, which is not a scale step, it is two
+     numbers that drifted. At 400 they also read as under-set rather than
+     restrained -- a 26px figure in Inter wants a little weight before it
+     reads as confident, and the tracking compensates. */
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.12;
   font-variant-numeric: tabular-nums;
 }
 .ui-metric > small { color: var(--text-secondary); font-size: 11px; line-height: 1.45; }
@@ -712,7 +758,7 @@
 .ui-action-card-mark { display: grid; width: 38px; height: 38px; flex: 0 0 auto; place-items: center; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-raised); color: var(--accent-cyan); transition: color var(--duration-normal) var(--ease-out-expo), border-color var(--duration-normal) var(--ease-out-expo), background var(--duration-normal) var(--ease-out-expo); }
 .ui-action-card:hover .ui-action-card-mark { border-color: color-mix(in srgb, var(--accent-cyan) 45%, transparent); color: var(--accent-cyan); }
 .ui-action-card-text { display: grid; gap: 3px; min-width: 0; }
-.ui-action-card strong { color: var(--text-primary); font-size: 12.5px; font-weight: 650; }
+.ui-action-card strong { color: var(--text-primary); font-size: 12.5px; font-weight: 600; }
 .ui-action-card small { color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
 
 /* The arrow is how a bare row says it is a destination now that it has no
@@ -1036,7 +1082,13 @@
 .ui-table-scroll th { position: sticky; top: 0; z-index: 2; height: 44px; padding: 0 14px; border-bottom: 1px solid var(--border); background: var(--surface-glass-strong); color: var(--text-muted); font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-align: left; text-transform: uppercase; }
 .ui-table-scroll th button { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; text-transform: inherit; }
 .ui-table-scroll th button:disabled { cursor: default; }
-.ui-table-scroll td { height: 60px; padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text-secondary); font-size: 11px; vertical-align: middle; }
+/* Tabular figures in the body, not just in the headline tiles. The three
+   headline figures already had it, and the columns that actually hold money --
+   order totals, balances, dates -- did not, so digits in a column failed to
+   line up digit-for-digit down the page. On a 60px row with nine of them
+   stacked, that ragged right edge is the single most obvious "this is a
+   default table" signal a screen has. */
+.ui-table-scroll td { height: 60px; padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text-secondary); font-size: 11px; vertical-align: middle; font-variant-numeric: tabular-nums; }
 .ui-table-scroll tbody tr:hover, .ui-table-scroll tbody tr.is-selected { background: color-mix(in srgb, var(--text-primary) 3%, transparent); }
 .ui-checkbox-cell { width: 38px; text-align: center !important; }
 .ui-checkbox-cell input { width: 14px; height: 14px; accent-color: var(--accent-violet); }
@@ -1067,7 +1119,10 @@
 .ui-table-scroll thead { display: none; }
 .ui-table-scroll tbody tr { display: grid; gap: 0; margin-top: 12px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-raised); backdrop-filter: blur(var(--glass-blur)); }
 .ui-table-scroll tbody td { display: grid; min-width: 0; height: auto; min-height: 48px; grid-template-columns: minmax(88px, .38fr) minmax(0, 1fr); align-items: center; gap: 12px; padding: 10px 12px; white-space: normal; overflow-wrap: anywhere; }
-.ui-table-scroll tbody td::before { content: attr(data-label); color: var(--text-muted); font-size: 9px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+/* The mobile row header. It is a label, so it is the same label: it was 9px
+   with its own tracking, i.e. both smaller than every other label in the kit
+   and set differently from them. */
+.ui-table-scroll tbody td::before { content: attr(data-label); font-size: 10px; font-weight: 600; letter-spacing: 0.09em; }
 .ui-table-scroll tbody td > * { min-width: 0; }
 .ui-table-scroll tbody tr.ui-table-state-row { display: block; margin-top: 0; border: 0; background: transparent; }
 .ui-table-scroll tbody tr.ui-table-state-row td { display: block; padding: 0; border: 0; }
@@ -1133,9 +1188,15 @@
    an accent casts light instead of being lit. It does not lift: it is a
    container, and the rule the whole redesign settled on is that a lift is a
    promise the thing can be pressed. */
+/* The one surface on a screen that is genuinely the subject, so it is the one
+   that gets `--shadow-crown` -- and the only place in the kit that had an
+   inset rim to begin with. The rim was the right idea pointed at the wrong
+   scope: it now lives on all four elevation rungs in `tokens.css`, where it
+   does the work everywhere, and this cell keeps the darker inner hairline that
+   makes a plate read as a plate rather than as a sheet of paper. */
 .ui-bento-cell.is-emphasis {
   background: var(--surface-glass-strong);
-  box-shadow: var(--shadow-float), inset 0 1px 0 0 color-mix(in srgb, var(--text-primary) 7%, transparent);
+  box-shadow: var(--shadow-crown);
 }
 
 .ui-bento-cell.is-emphasis:hover {
@@ -1182,14 +1243,6 @@
   gap: 8px;
 }
 
-.ui-bento-stat-head > span {
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 650;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
 .ui-bento-stat-head > i {
   display: grid;
   place-items: center;
@@ -1199,10 +1252,14 @@
 .ui-bento-stat > strong {
   color: var(--text-primary);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 27px;
-  font-weight: 400;
-  letter-spacing: -0.015em;
-  line-height: 1.1;
+  /* The same figure as `.ui-metric > strong`, on purpose -- see the note
+     there. These two were 25px/-0.01em and 27px/-0.015em, which is a two-pixel
+     difference nobody decided on and everybody can see when a metric row sits
+     above a bento cell. */
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.12;
   font-variant-numeric: tabular-nums;
 }
 

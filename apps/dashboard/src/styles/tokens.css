@@ -77,9 +77,37 @@
      world as the background instead of a dark console laid over a bright
      field -- which is what it was, and it read as two sites in one.
 
-     Ink is a deep leaf green rather than neutral black. Pure black on this
+     Ink was a deep leaf green rather than neutral black. Pure black on this
      green is a hole; a green-black at the same weight reads as a shadow the
-     grass is casting. */
+     grass is casting.
+
+     That reasoning was sound and it is still half true -- but it described an
+     *ink*, and the values below were used for every piece of text on the site.
+     The consequence was that the reseller console read as agricultural rather
+     than expensive: #123a14 on white is a legible dark green, and a screen
+     full of it looks like produce, not like a product. Green ink is the
+     single strongest "farm" signal in the palette, and it was doing the job of
+     the words.
+
+     So the *words* are neutral now and the *ground* stays green. The canvas,
+     the accents and the aurora are untouched -- the farm is still the farm,
+     it is just no longer colouring every sentence. A deep neutral with a
+     trace of green in it (#14181d, not #000) keeps the warmth of the original
+     without the hue landing on the reader.
+
+     Measured against the surfaces these sit on, rather than picked by eye:
+
+       #14181d   17.8:1 on white   15.9:1 on the canvas
+       #414a54    9.0:1 on white    8.1:1 on the canvas
+       #5f6871    5.7:1 on white    5.1:1 on the canvas
+
+     The old #527a55 measured 4.39:1 on the canvas -- under the WCAG AA
+     threshold for body text, on every surface in the product. That was a real
+     defect, not a taste call, and it is gone rather than traded away.
+
+     The three steps are further apart now as well: primary-over-secondary was
+     1.65:1 with the green ink and is 1.98:1 with this, so the hierarchy a
+     reader perceives is doing more work than it used to. */
   --bg-canvas: #eaf6e2;
   --bg-raised: rgba(255, 255, 255, 0.62);
   --surface: rgba(255, 255, 255, 0.72);
@@ -87,14 +115,14 @@
   --surface-glass: rgba(255, 255, 255, 0.6);
   --surface-glass-strong: rgba(255, 255, 255, 0.86);
 
-  --text-primary: #123a14;
-  --text-secondary: #2f5c33;
-  --text-muted: #527a55;
-  --text-inverse: #f4fbee;
-  --text-on-inverse: #123a14;
+  --text-primary: #14181d;
+  --text-secondary: #414a54;
+  --text-muted: #5f6871;
+  --text-inverse: #f5f8f6;
+  --text-on-inverse: #14181d;
 
-  --border: rgba(18, 58, 20, 0.14);
-  --border-strong: rgba(18, 58, 20, 0.28);
+  --border: rgba(20, 24, 29, 0.13);
+  --border-strong: rgba(20, 24, 29, 0.26);
 
   /* Accents sampled from the same frame: the pond, the grass, the sun, and
      the mountain haze. Green is the primary because it is what the eye reads
@@ -116,7 +144,31 @@
   --radius-xl: 26px;
   --radius-pill: 999px;
 
-  /* --- rhythm: the space between things, not inside them --- */
+  /* --- rhythm: the space between things, not inside them ---
+     A scale, added because there wasn't one. The kit and the feature
+     stylesheets between them used thirty distinct spacing values -- including
+     7px, 9px, 11px, `12px 13px` and `17px 18px 19px` -- and none of them
+     could be checked against anything. Nothing stops a stylesheet from
+     inventing a 17px when there is no scale to be wrong against, and a page
+     that invents one reads as improvised even when every individual value is
+     reasonable.
+
+     Ten steps, 4px base. Anything that does not fit is genuinely a one-off
+     and should look like one in the source, not like a tenth step. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 56px;
+  --space-10: 72px;
+
+  /* The three named ones stay -- they are read in the public pages and in the
+     shell -- and now coincide with steps 5, 7 and 10. They are names for the
+     role, not a second scale. */
   --space-card: 20px;
   --space-gutter: 32px;
   --space-section: 72px;
@@ -145,9 +197,37 @@
      green-grey cast and a lower alpha than a black shadow, or every surface
      reads as a grey smudge on paper. `--shadow-glow` is the coloured bloom
      that says it is *live*, and it is deliberately the only place an accent
-     casts light rather than being lit. */
-  --shadow-lift: 0 10px 26px -14px rgba(15, 48, 20, 0.4), 0 1px 2px 0 rgba(255, 255, 255, 0.6) inset;
-  --shadow-float: 0 22px 48px -20px rgba(15, 48, 20, 0.46), 0 1px 2px 0 rgba(255, 255, 255, 0.7) inset;
+     casts light rather than being lit.
+
+     -----------------------------------------------------------------------
+     NOW FOUR, AND THE CAST IS NEARLY NEUTRAL
+
+     Three shadows for every card-like thing was the same single-token-per-level
+     mistake in a different place: `.ui-card`, `.ui-metric`, `.ui-bento-cell`
+     and `.ui-action-card` all carried the identical `--shadow-lift`, so a page
+     of twelve panels had one elevation and therefore no hierarchy at all. It
+     read flat the way a wall of identical tiles reads flat -- not because any
+     one of them is badly drawn.
+
+     `--shadow-rest` is for a nested tile that should sit *in* something.
+     `--shadow-crown` is for the one surface on a screen that is genuinely the
+     subject. Between them a page can have a floor, a middle and a peak.
+
+     Every rung keeps a white inset highlight along the top edge, and that
+     inset now carries more of the depth than the drop does. It is what makes
+     a pale translucent sheet read as a physical object lit from above: the
+     shadow says an object is above the page, the inset says it has a surface
+     facing the light. `--shadow-crown` adds a dark hairline along the bottom
+     inner edge, which is the detail that separates a plate from a piece of
+     paper.
+
+     The cast moved from saturated green to a near-neutral with a whisper of
+     it left, for the same reason the ink did: a green shadow over a green
+     ground is not a shadow, it is a stain. */
+  --shadow-rest: 0 1px 2px 0 rgba(18, 26, 24, 0.06), 0 1px 1px 0 rgba(255, 255, 255, 0.75) inset;
+  --shadow-lift: 0 10px 26px -14px rgba(18, 26, 24, 0.4), 0 1px 2px 0 rgba(255, 255, 255, 0.6) inset;
+  --shadow-float: 0 22px 48px -20px rgba(18, 26, 24, 0.46), 0 1px 2px 0 rgba(255, 255, 255, 0.7) inset;
+  --shadow-crown: 0 34px 72px -30px rgba(18, 26, 24, 0.5), 0 1px 2px 0 rgba(255, 255, 255, 0.85) inset, 0 -1px 0 0 rgba(18, 26, 24, 0.055) inset;
   --shadow-glow: 0 0 0 1px rgba(47, 127, 212, 0.34), 0 12px 30px -12px rgba(47, 127, 212, 0.5);
 
   /* --- the backdrop ---
