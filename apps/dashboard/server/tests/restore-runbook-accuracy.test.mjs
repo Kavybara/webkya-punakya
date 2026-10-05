@@ -149,13 +149,11 @@ test("the checklist tells the owner to check backup health after restoring", () 
   );
 });
 
-test("the quick path claims a self-contained archive, and it is", () => {
+test("the quick path carries the build and explicitly requires restoring configuration", () => {
   // The quick path tells an owner with a dead server that extract-upload-run is
   // enough. That is only true if the archive really carries what a fresh server
   // needs, and this is checked against the payload builder rather than trusted:
-  // if `.env` or the built assets fall out of the bundle, a restore to a new VPS
-  // starts up with no Sheets credentials and no dist, and fails in a way that
-  // looks like a code problem rather than a missing file.
+  // Built assets travel in the archive; configuration must be restored separately.
   const payloadBuilder = readFileSync(new URL("../../../../packages/shared/runtime-backup.mjs", import.meta.url), "utf8");
   const quickPath = runbook.slice(runbook.indexOf("### Jalur cepat"), runbook.indexOf("## 8."));
 
@@ -169,12 +167,9 @@ test("the quick path claims a self-contained archive, and it is", () => {
     payloadBuilder.indexOf("function activeRentalCount"),
   );
 
-  // Must survive: the two files a fresh server cannot start without. `.env`
-  // carries the Sheets and WhatsApp credentials, and `dist` is the built app --
-  // the first is unrecoverable anywhere else, the second would need a build step
-  // the quick path does not mention. Note `dist` is gitignored, so it is easy to
-  // assume it is excluded from backups too. It is not.
-  for (const mustSurvive of ["dist", ".env"]) {
+  // dist is gitignored but must remain in a restore archive.
+  assert.match(runbook, /\.env.*TIDAK ikut arsip/);
+  for (const mustSurvive of ["dist"]) {
     assert.ok(
       !excluded.includes(`"${mustSurvive}"`),
       `${mustSurvive} is now excluded from the backup. The quick path's "self-contained" claim and its missing-files note both need correcting.`,

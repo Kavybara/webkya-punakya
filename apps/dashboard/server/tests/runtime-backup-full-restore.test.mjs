@@ -3,10 +3,13 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import crypto from "node:crypto";
 import test from "node:test";
 
 import {
   createRuntimeBackupPayload,
+  encryptBackupForTransport,
   writeRuntimeBackupFile,
 } from "../../../../packages/shared/runtime-backup.mjs";
 
@@ -15,8 +18,9 @@ async function writeFile(filePath, value) {
   await fs.writeFile(filePath, value);
 }
 
-test("runtime backup writes a full restore archive with source, dashboard build, and data -- but no .env and no WhatsApp session", async () => {
+test("runtime backup writes a full restore archive with source, dashboard build, and data -- but no .env and no WhatsApp session", async (t) => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "kavya-runtime-backup-full-"));
+  t.after(() => fs.rm(rootDir, { recursive: true, force: true }));
   const runtimeDir = path.join(rootDir, "apps", "dashboard", "runtime");
   const outputDir = path.join(runtimeDir, "backups");
   const authDir = path.join(runtimeDir, "baileys-auth");
@@ -100,4 +104,58 @@ test("runtime backup writes a full restore archive with source, dashboard build,
     assert.equal(entries.includes(removedLegacy), false, `${removedLegacy} should not be included`);
   }
   assert.equal(entries.some((entry) => entry.includes("node_modules")), false);
+});
+
+test("encrypted backup restores latest reseller, list and paused rental data; a wrong key is refused", async (t) => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "kavya-restore-drill-"));
+  t.after(() => fs.rm(rootDir, { recursive: true, force: true }));
+  const runtimeDir = path.join(rootDir, "runtime");
+  const whatsappDbDir = path.join(runtimeDir, "whatsapp-database");
+  const dashboardDbPath = path.join(runtimeDir, "kavya-db.json");
+  const db = { resellers: [{ id: "seller-current", whatsapp: "628111222333", passwordHash: "fixture-hash" }], whatsappRentals: [{ id: "group-current", status: "paused" }] };
+  const lists = { "120363000000000000@g.us": { picsart: { content: "latest price 4000", updatedAt: "2026-10-06T10:00:00Z" } } };
+  await writeFile(path.join(rootDir, "package.json"), "{}");
+  await writeFile(path.join(rootDir, "apps", "bot", "index.js"), "// fixture previous code\n");
+  await writeFile(dashboardDbPath, JSON.stringify(db));
+  await writeFile(path.join(whatsappDbDir, "lists.json"), JSON.stringify(lists));
+  const payload = await createRuntimeBackupPayload({ rootDir, runtimeDir, dashboardDbPath, whatsappDbDir, baileysAuthDir: path.join(runtimeDir, "baileys-auth"), reason: "restore-drill" });
+  const backup = await writeRuntimeBackupFile({ payload, outputDir: path.join(rootDir, "backups") });
+  const passphrase = "fixture-restore-passphrase-not-a-live-secret";
+  const encrypted = await encryptBackupForTransport(backup, { passphrase });
+  const decryptScript = fileURLToPath(new URL("../../../../scripts/maintenance/decrypt-runtime-backup.mjs", import.meta.url));
+  const decrypted = path.join(rootDir, "restored.tar.gz");
+  const badOutput = path.join(rootDir, "wrong-key.tar.gz");
+  const invoke = (key, output) => spawnSync(process.execPath, [decryptScript, encrypted.filePath, output], { cwd: rootDir, env: { ...process.env, BACKUP_ENCRYPTION_KEY: key }, encoding: "utf8" });
+  assert.notEqual(invoke("fixture-wrong-passphrase", badOutput).status, 0);
+  await assert.rejects(fs.access(badOutput));
+  const result = invoke(passphrase, decrypted);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(await fs.readFile(decrypted), await fs.readFile(backup.filePath));
+  const restored = path.join(rootDir, "restored");
+  await fs.mkdir(restored);
+  const extract = spawnSync("tar", ["-xzf", path.basename(decrypted), "-C", restored], { cwd: rootDir, encoding: "utf8" });
+  assert.equal(extract.status, 0, extract.stderr);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(restored, "apps", "dashboard", "runtime", "kavya-db.json"), "utf8")), db);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(restored, "apps", "dashboard", "runtime", "whatsapp-database", "lists.json"), "utf8")), lists);
+  await assert.rejects(fs.access(path.join(restored, ".env")));
+  const hash = (buffer) => crypto.createHash("sha256").update(buffer).digest("hex");
+  const restoredDb = path.join(restored, "apps", "dashboard", "runtime", "kavya-db.json");
+  const dataHash = hash(await fs.readFile(restoredDb));
+  const restoredData = JSON.parse(await fs.readFile(restoredDb, "utf8"));
+  assert.equal(restoredData.resellers.length, db.resellers.length);
+  assert.equal(restoredData.whatsappRentals.length, db.whatsappRentals.length);
+  const codePath = path.join(restored, "apps", "bot", "index.js");
+  const previousCode = await fs.readFile(codePath);
+  await fs.writeFile(codePath, "// fixture rejected update\n");
+  await fs.writeFile(codePath, previousCode);
+  assert.equal(hash(await fs.readFile(codePath)), hash(previousCode));
+  assert.equal(hash(await fs.readFile(restoredDb)), dataHash, "code rollback must not roll back live data");
+  const damaged = Buffer.from(await fs.readFile(encrypted.filePath));
+  damaged[damaged.length - 1] ^= 1;
+  const tamperedPath = path.join(rootDir, "tampered.enc");
+  await fs.writeFile(tamperedPath, damaged);
+  const tamperedOutput = path.join(rootDir, "tampered.tar.gz");
+  const tampered = spawnSync(process.execPath, [decryptScript, tamperedPath, tamperedOutput], { cwd: rootDir, env: { ...process.env, BACKUP_ENCRYPTION_KEY: passphrase }, encoding: "utf8" });
+  assert.notEqual(tampered.status, 0);
+  await assert.rejects(fs.access(tamperedOutput));
 });

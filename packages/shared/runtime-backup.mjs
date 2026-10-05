@@ -282,7 +282,7 @@ export async function createRuntimeBackupPayload(options = {}) {
       whatsapp_service_runtime: whatsappServiceRuntimeDir,
     },
     notes: {
-      env: "Raw .env ikut disalin agar backup WhatsApp bisa dipakai memulihkan VPS baru tanpa konfigurasi ulang dari nol.",
+      env: ".env tidak ikut backup. Pulihkan konfigurasi dari password manager sebelum menjalankan aplikasi.",
       excluded_runtime_dirs: "Folder backup/tmp/node_modules/pglite tidak dimasukkan supaya backup tidak rekursif dan tidak membengkak.",
       project_source: "Seluruh source project utama ikut disalin dengan pendekatan full-project backup, kecuali artefak besar, data legacy, dan folder temporary yang memang tidak perlu dibawa dua kali.",
       legacy_data: includeLegacyData
@@ -397,9 +397,10 @@ async function writeUploadableArchive({ payload, outputDir, fileName }) {
         "File Backup Kavya",
         "",
         "Upload dan extract arsip ini ke root aplikasi pada VPS/Linux untuk memulihkan data runtime.",
-        "Isi utama: full source project, file .env, database/list, sewa grup, setting grup, produk, stok, order, reseller, deposit, managed account, dan auth WhatsApp jika tersedia.",
+        "Isi utama: source project, data runtime, list dan sewa grup, produk, stok, order, reseller, deposit, dan managed account.",
         "Folder node_modules, tmp, backup lama, release/output besar, dan runtime test tidak ikut agar file tidak membengkak.",
-        "Karena .env ikut disalin, file backup ini harus diperlakukan sebagai file rahasia.",
+        ".env tidak ikut backup; isi ulang konfigurasi sebelum start. Sesi WhatsApp tidak ikut secara default dan perlu pairing ulang.",
+        "Backup berisi data pelanggan dan credential akun. Perlakukan arsip sebagai file rahasia; pengiriman WhatsApp wajib terenkripsi.",
         "",
       ].join("\n"),
     );
