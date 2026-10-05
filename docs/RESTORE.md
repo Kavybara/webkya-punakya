@@ -14,7 +14,7 @@ buka file ini.
 |---|---|---|
 | File `File Backup.tar.gz.enc` | Arsip terenkripsi berisi seluruh data | WhatsApp kamu (dikirim otomatis) |
 | `BACKUP_ENCRYPTION_KEY` | Tanpa ini arsip **tidak bisa dibuka sama sekali** | `~/.ssh/kavya_backup_encryption_key.txt` di komputermu, atau `.env` proyek |
-| Kredensial Google Sheets | Stok & akun sold disinkron dari sini | Sudah ikut **di dalam** arsip sebagai `.env` |
+| Kredensial Google Sheets | Stok & akun sold disinkron dari sini | **Tidak ikut arsip** — isi ulang di `.env` VPS setelah restore |
 | Akses root VPS | Untuk menaruh arsip kembali | SSH ke `root@178.83.188.210` |
 
 > **PENTING.** Tanpa `BACKUP_ENCRYPTION_KEY`, file `.enc` itu tidak bisa dipulihkan
@@ -157,19 +157,27 @@ Yang dipulihkan, dan di mana:
 ```
 apps/dashboard/runtime/kavya-db.json          ← order, saldo, akun, stok
 apps/dashboard/runtime/whatsapp-database/      ← data bot
-apps/dashboard/runtime/baileys-auth/           ← sesi WhatsApp (kalau ada)
-.env                                            ← kredensial produksi
 <seluruh source project>
 ```
 
-**Periksa `.env` dulu sebelum start.** Arsip menyertakan `.env` lama, dan itu
-*akan* menimpa konfigurasi yang sekarang kalau ada yang berubah sejak backup
-dibuat. Kalau `.env` di VPS sekarang lebih baru, keep yang sekarang:
-
-```bash
-cp .env /root/env-sekarang-backup
-# bandingkan keduanya sebelum memutuskan mana yang dipakai
-```
+> **`.env` TIDAK ikut arsip.** Arsip dulu menyalin `.env` apa adanya, jadi
+> `OWNER_PASSWORD`, `AUTH_SECRET`, token Cloudflare, dan kunci Sheets ikut
+>-terkirim ke WhatsApp tiap 24 jam. Sekarang `.env` dikecualikan dari arsip.
+>
+> Konsekuensinya satu: **isi ulang `.env` di VPS secara manual sebelum start.**
+> Pastikan minimal ini ada:
+>
+> ```bash
+> nano .env
+> # wajib ada: OWNER_PASSWORD, AUTH_SECRET, SESSION_SECRET,
+> #            WHATSAPP_BOT_TOKEN, WHATSAPP_INBOUND_TOKEN
+> # untuk Sheets: GOOGLE_SHEETS_* (kredensial Sheets kamu)
+> # wajib untuk membuka arsip: BACKUP_ENCRYPTION_KEY
+> ```
+>
+> `baileys-auth/` juga tidak ikut secara default, jadi bot perlu di-pair ulang
+> dengan scan QR setelah restore — lihat langkah 8. Set
+> `RUNTIME_BACKUP_INCLUDE_WHATSAPP_SESSION=true` kalau mau sesi ikut terarsip.
 
 ---
 
@@ -205,22 +213,23 @@ npm run web:build
 npm start
 ```
 
-Selesai. Arsipnya **self-contained** — source project, `.env`, `kavya-db.json`,
-`whatsapp-database/`, `baileys-auth/`, dan `dist/` hasil build semuanya ikut
-dalam satu file itu. Tidak ada langkah tersembunyi di luar `npm install`.
+Selesai. Arsipnyabring source project, `kavya-db.json`, `whatsapp-database/`,
+dan `dist/` hasil build dalam satu file itu.
 
-Yang tidak ikut hanya `node_modules`, `.git`, `coverage`, dan `tmp` — dan
-`node_modules` memang harus dipasang ulang di server mana pun.
+Yang **tidak** ikut: `node_modules` (harus dipasang ulang), `.git`, `coverage`,
+`tmp`, **`.env`**, dan **`baileys-auth/`**.
 
-Dua hal yang perlu kamu tahu, bukan langkah tambahan:
+Tiga hal yang perlu kamu tahu:
 
 - **`.enc` atau bukan?** Kalau file yang kamu terima **tidak** berakhiran `.enc`,
-  jangan jalankan decrypt — langsung `tar xzf`. Backup terjadwal mengirim file
-  polos, jadi file yang paling sering kamu terima justru yang tidak terenkripsi.
-- **Cek `.env` setelah extract.** Arsip membawa `.env` dari waktu backup dibuat.
-  Kalau kamu sudah mengganti password Sheets atau token sejak itu, yang kembali
-  adalah versi lama — dan sistem akan jalan normal dengan kredensial usang tanpa
-  error apa pun.
+  jangan jalankan decrypt — langsung `tar xzf`. Backup manual (`npm run
+  runtime:backup:send`) mengirim `.enc`; backup otomatis 24 jam juga sudah
+  terenkripsi sejak perbaikan ini. Kalau kamu menerima file polos, itu arsip
+  lama dari sebelum perbaikan — tetap bisa dipakai, tapi jangan reliant.
+- **`.env` tidak ada di arsip.** Isi ulang manual sebelum `npm start`. Kalau
+  tidak, proses akan start dengan konfigurasi kosong dan gagal dengan error yang
+  tidak multifokal.
+- **Bot harus di-pair ulang.** Scan QR setelah restore — lihat langkah 8.
 
 Kalau ternyata VPS lama masih hidup dan masih bisa di-ssh, **jangan pakai jalur
 ini** — langkah 5 (simpan data lama dulu) itu wajib, kalau tidak transaksinya

@@ -15,14 +15,16 @@ async function writeFile(filePath, value) {
   await fs.writeFile(filePath, value);
 }
 
-test("runtime backup writes a full restore archive with source, dashboard build, env, data, and WhatsApp auth", async () => {
+test("runtime backup writes a full restore archive with source, dashboard build, and data -- but no .env and no WhatsApp session", async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "kavya-runtime-backup-full-"));
   const runtimeDir = path.join(rootDir, "apps", "dashboard", "runtime");
   const outputDir = path.join(runtimeDir, "backups");
   const authDir = path.join(runtimeDir, "baileys-auth");
   const whatsappDbDir = path.join(runtimeDir, "whatsapp-database");
 
-  await writeFile(path.join(rootDir, ".env"), "OWNER_PASSWORD=private-owner-password\n");
+  // A placeholder, not a credential -- this fixture exists to be searched for
+  // in the archive listing, never to be a working password.
+  await writeFile(path.join(rootDir, ".env"), "OWNER_PASSWORD=fixture-placeholder-value\n");
   await writeFile(path.join(rootDir, "package.json"), "{\"name\":\"kavya-test\"}\n");
   await writeFile(path.join(rootDir, "apps", "bot", "index.js"), "console.log('bot')\n");
   await writeFile(path.join(rootDir, "apps", "dashboard", "server", "auto-order.js"), "export const ok = true;\n");
@@ -59,7 +61,6 @@ test("runtime backup writes a full restore archive with source, dashboard build,
   assert.equal(list.status, 0, list.stderr);
   const entries = list.stdout.split(/\r?\n/).filter(Boolean);
   for (const expected of [
-    "./.env",
     "./package.json",
     "./apps/bot/index.js",
     "./apps/dashboard/server/auto-order.js",
@@ -68,10 +69,27 @@ test("runtime backup writes a full restore archive with source, dashboard build,
     "./apps/dashboard/runtime/whatsapp-database/groups.json",
     "./apps/dashboard/runtime/whatsapp-database/lists.json",
     "./apps/dashboard/runtime/whatsapp-database/rentals.json",
-    "./apps/dashboard/runtime/baileys-auth/creds.json",
   ]) {
     assert.ok(entries.includes(expected), `${expected} should be included`);
   }
+
+  /*
+   * `.env` and the Baileys session are asserted ABSENT, which is the opposite
+   * of what this test used to claim.
+   *
+   * It previously listed both as things that "should be included", which
+   * documented the leak as intended behavior -- a restore archive carrying live
+   * `OWNER_PASSWORD` and a paired WhatsApp device session, sent over WhatsApp on
+   * a 24-hour schedule. `docs/RESTORE.md` already covers re-pairing the bot by
+   * QR scan, so the restore path does not need the session.
+   */
+  for (const excluded of [
+    "./.env",
+    "./apps/dashboard/runtime/baileys-auth/creds.json",
+  ]) {
+    assert.equal(entries.includes(excluded), false, `${excluded} must not be included`);
+  }
+
   for (const removedLegacy of [
     "./database/group.json",
     "./database/list.json",

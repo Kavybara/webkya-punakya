@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { createRuntimeBackupPayload, writeRuntimeBackupFile } from "../../../packages/shared/runtime-backup.mjs";
+import { createRuntimeBackupPayload, encryptBackupForTransport, writeRuntimeBackupFile } from "../../../packages/shared/runtime-backup.mjs";
 import { selectRuntimeBackupPostSendRemovals } from "../../../packages/shared/runtime-backup-retention.mjs";
 import { logSuccess, logWarning } from "./panel-log.js";
 
@@ -124,6 +124,27 @@ export async function autoBackupOnConnect({ config, logger, store, sendMessage, 
     return { ...backup, sent: false, reason: "connection_not_stable", removedBackupFiles };
   }
 
+  /*
+   * Encrypt before sending. This path used to attach the raw archive, which is
+   * how a backup that looked like housekeeping was really a scheduled export of
+   * production credentials to a chat that cloud-syncs to every paired device.
+   * The manual script had encrypted for transport all along; the scheduler just
+   * never called it.
+   *
+   * Fails closed. If `BACKUP_ENCRYPTION_KEY` is missing or too short, the
+   * backup is built and kept locally but NOT sent -- a scheduled job that cannot
+   * encrypt must not quietly fall back to the plaintext behaviour it replaced.
+   * The operator sees the warning; the alternative is silent regression to the
+   * leak whenever the env var goes missing on a redeploy.
+   */
+  let transportBackup;
+  try {
+    transportBackup = await encryptBackupForTransport(backup);
+  } catch (error) {
+    logWarning("Auto backup tidak dikirim karena gagal dienkripsi", error);
+    return { ...backup, sent: false, reason: "encryption_failed", error: error.message };
+  }
+
   let sent = true;
   let sendReason = "";
   await sendMessage(
@@ -131,8 +152,8 @@ export async function autoBackupOnConnect({ config, logger, store, sendMessage, 
     "",
     "",
     "",
-    backup.filePath,
-    BACKUP_DISPLAY_FILE_NAME,
+    transportBackup.filePath,
+    transportBackup.fileName,
     { retryDelaysMs: [2000], timeoutMs: 15_000 },
   ).catch((error) => {
     sent = false;
@@ -145,6 +166,8 @@ export async function autoBackupOnConnect({ config, logger, store, sendMessage, 
   });
 
   logSuccess(sent ? "File Backup terkirim ke owner" : "File Backup dibuat");
+  // Cleanup keys off the original `backup`, so the `.enc` sidecar is not what
+  // retention looks at -- the retention helper decides by the plaintext name.
   const removedBackupFiles = await cleanupBackupsAfterSendAttempt({ config, backup, sent });
   if (sent && config.backup?.deleteAfterSend && removedBackupFiles) {
     logSuccess("File Backup lokal dihapus setelah terkirim ke owner");

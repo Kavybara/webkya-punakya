@@ -1,8 +1,7 @@
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
-import crypto from "node:crypto";
 import path from "node:path";
-import { createRuntimeBackupPayload, writeRuntimeBackupFile } from "../../packages/shared/runtime-backup.mjs";
+import { createRuntimeBackupPayload, encryptBackupForTransport, writeRuntimeBackupFile } from "../../packages/shared/runtime-backup.mjs";
 import { selectRuntimeBackupPostSendRemovals } from "../../packages/shared/runtime-backup-retention.mjs";
 
 const rootDir = process.cwd();
@@ -165,22 +164,10 @@ async function sendBackupToOwner({ backup, dashboardDb }) {
   return { sent: response.ok && data.success !== false, reason: data.error || "" };
 }
 
-async function encryptBackupForTransport(backup) {
-  const passphrase = usableSecret(process.env.BACKUP_ENCRYPTION_KEY);
-  if (passphrase.length < 16) {
-    throw new Error("BACKUP_ENCRYPTION_KEY wajib diisi minimal 16 karakter sebelum backup dikirim ke WhatsApp");
-  }
-  const salt = crypto.randomBytes(16);
-  const iv = crypto.randomBytes(12);
-  const key = crypto.scryptSync(passphrase, salt, 32, { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
-  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-  const plaintext = await fs.readFile(backup.filePath);
-  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-  const header = Buffer.from(`${JSON.stringify({ version: 1, algorithm: "aes-256-gcm", salt: salt.toString("base64url"), iv: iv.toString("base64url"), tag: cipher.getAuthTag().toString("base64url") })}\n`);
-  const encryptedPath = `${backup.filePath}.enc`;
-  await fs.writeFile(encryptedPath, Buffer.concat([Buffer.from("KAVYA-BACKUP-V1\n"), header, ciphertext]), { mode: 0o600 });
-  return { ...backup, filePath: encryptedPath, fileName: `${backup.fileName}.enc` };
-}
+// Encryption for transport now lives in `packages/shared/runtime-backup.mjs`.
+// It was inline here, which meant the bot's 24-hour scheduler -- the path that
+// actually runs unattended -- sent plaintext archives while this manual path
+// encrypted. One implementation, both callers.
 
 async function main() {
   const payload = await createRuntimeBackupPayload({

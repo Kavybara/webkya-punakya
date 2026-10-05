@@ -108,6 +108,25 @@ async function readFileBundle(rootPath, options = {}) {
   return { root, files, skipped, count: Object.keys(files).length };
 }
 
+/*
+ * Files that must never enter a backup archive, by name, in any directory.
+ *
+ * `.env` was previously swept in by the recursive walk below, which is how a
+ * backup that nobody thought of as secret ended up carrying live production
+ * credentials: `AUTH_SECRET`, `SESSION_SECRET`, `CLOUDFLARED_TOKEN`,
+ * `PAKASIR_API_KEY`, the Gmail app password, `OWNER_PASSWORD`. It left the host
+ * over WhatsApp on the scheduler every 24h.
+ *
+ * The walk excludes these by name rather than by path, because `.env` can sit at
+ * any level in a monorepo and only the basename is consistent.
+ *
+ * Cost of excluding: `GOOGLE_SHEETS_*` no longer travels with the archive, so a
+ * restore re-authenticates Sheets. That is the right trade -- `docs/RESTORE.md`
+ * already warns that a stale shipped `.env` overwrites newer VPS config, so the
+ * file was a restore hazard as much as a leak.
+ */
+const SECRET_FILE_NAMES = new Set([".env", "backup_encryption_key.txt"]);
+
 async function readProjectSourceBundle(rootDir) {
   const root = path.resolve(rootDir);
   const excludeDirNames = new Set([
@@ -148,6 +167,10 @@ async function readProjectSourceBundle(rootDir) {
       }
 
       if (!entry.isFile()) continue;
+      if (SECRET_FILE_NAMES.has(entry.name.toLowerCase())) {
+        skipped.push({ path: rel, reason: "secret_file" });
+        continue;
+      }
       if (isGeneratedBackupFileName(entry.name) || /\.(?:tar\.gz|tgz|zip|enc)$/i.test(entry.name)) {
         skipped.push({ path: rel, reason: "excluded_file" });
         continue;
@@ -206,6 +229,21 @@ export async function createRuntimeBackupPayload(options = {}) {
     : {};
   const envExample = await readTextIfExists(path.join(rootDir, ".env.example"));
 
+  /*
+   * `baileys-auth` holds a paired WhatsApp device session. Whoever holds it can
+   * send as this account, so it is account-takeover material rather than backup
+   * data -- and it was shipping over WhatsApp itself, to a chat that cloud-syncs
+   * to every paired device.
+   *
+   * It is opt-in rather than removed. `docs/RESTORE.md:278` already tells the
+   * reader to re-scan the QR when `baileys-auth` is absent, so the restore path
+   * is designed to survive without it; but a deliberate operator on a locked-down
+   * VPS may still want the session captured. So: off unless asked for.
+   */
+  const includeWhatsAppSession = /^(1|true|yes|on)$/i.test(
+    String(process.env.RUNTIME_BACKUP_INCLUDE_WHATSAPP_SESSION || ""),
+  );
+
   const fileBundles = {
     database: includeLegacyData
       ? await readFileBundle(path.join(rootDir, "database"), {
@@ -215,9 +253,16 @@ export async function createRuntimeBackupPayload(options = {}) {
     dashboard_runtime: await readFileBundle(runtimeDir, {
       excludeDirNames: [".git", "node_modules", "backups", "tmp", "pglite", "baileys-auth"],
     }),
-    whatsapp_auth: await readFileBundle(baileysAuthDir, {
-      excludeDirNames: [".git", "node_modules", "backups", "tmp"],
-    }),
+    whatsapp_auth: includeWhatsAppSession
+      ? await readFileBundle(baileysAuthDir, {
+          excludeDirNames: [".git", "node_modules", "backups", "tmp"],
+        })
+      : {
+          root: baileysAuthDir,
+          files: {},
+          skipped: [{ path: "", reason: "whatsapp_session_excluded" }],
+          count: 0,
+        },
     whatsapp_service_runtime: await readFileBundle(whatsappServiceRuntimeDir, {
       excludeDirNames: [".git", "node_modules", "backups", "tmp"],
     }),
@@ -418,4 +463,57 @@ async function writeUploadableArchive({ payload, outputDir, fileName }) {
 
 export async function writeRuntimeBackupFile({ payload, outputDir }) {
   return writeUploadableArchive({ payload, outputDir });
+}
+
+/**
+ * AES-256-GCM encrypts an archive for transport.
+ *
+ * This used to live inline in `scripts/maintenance/runtime-backup.mjs`, which
+ * meant only the manual path was protected: the bot's 24-hour scheduler called
+ * `writeRuntimeBackupFile` and sent the result unencrypted. One implementation,
+ * both callers, so the two paths cannot drift apart again.
+ *
+ * The passphrase is read from the environment rather than from the backup, and
+ * `BACKUP_ENCRYPTION_KEY` is now excluded from the payload -- an archive that
+ * carries its own decryption key is not encrypted, it is just base64 with a
+ * header. It hard-fails below 16 characters rather than sending a weakly keyed
+ * file that looks protected.
+ */
+export async function encryptBackupForTransport(backup, options = {}) {
+  const passphrase = String(options.passphrase ?? process.env.BACKUP_ENCRYPTION_KEY ?? "").trim();
+  /*
+   * Rejects the documented placeholders, not just short values.
+   *
+   * `.env.example:19` ships `BACKUP_ENCRYPTION_KEY=replace-with-a-separate-long-backup-passphrase`,
+   * which is 49 characters and would sail past a length check alone -- so an
+   * operator who copied the example and never edited it would encrypt every
+   * backup to a passphrase published in the repo. This mirrors `usableSecret`
+   * in `scripts/maintenance/runtime-backup.mjs`, which is where the manual path
+   * already guarded against exactly this.
+   */
+  if (passphrase.length < 16 || /^(change-me|your-|replace-)/i.test(passphrase)) {
+    throw new Error(
+      "BACKUP_ENCRYPTION_KEY wajib diisi minimal 16 karakter sebelum backup dikirim ke WhatsApp",
+    );
+  }
+  const salt = crypto.randomBytes(16);
+  const iv = crypto.randomBytes(12);
+  const key = crypto.scryptSync(passphrase, salt, 32, { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const plaintext = await fs.readFile(backup.filePath);
+  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  const header = Buffer.from(
+    `${JSON.stringify({
+      version: 1,
+      algorithm: "aes-256-gcm",
+      salt: salt.toString("base64url"),
+      iv: iv.toString("base64url"),
+      tag: cipher.getAuthTag().toString("base64url"),
+    })}\n`,
+  );
+  const encryptedPath = `${backup.filePath}.enc`;
+  await fs.writeFile(encryptedPath, Buffer.concat([Buffer.from("KAVYA-BACKUP-V1\n"), header, ciphertext]), {
+    mode: 0o600,
+  });
+  return { ...backup, filePath: encryptedPath, fileName: `${backup.fileName}.enc` };
 }
