@@ -33,6 +33,47 @@ export function registerWarrantyRoutes(app, deps) {
   } = deps;
   const replacementFlights = new Map();
 
+  /*
+   * One replacement in flight per claim, with the mode remembered beside it.
+   *
+   * Keying by claim alone is what makes this a mutual exclusion -- two
+   * concurrent replacements of the same claim must not both run. It used to be
+   * shared between `/replace` and `/replace-manual` with no mode recorded, so a
+   * manual replace arriving while a stock replace was running simply awaited
+   * that flight and answered with *its* result: HTTP 200, a body that looked
+   * exactly right, and the credentials the owner had just typed discarded with
+   * nothing logged anywhere. The service's own idempotency could not catch it,
+   * because the request never reached the service.
+   *
+   * Same claim and same mode stays a dedupe, because that is a retry of one
+   * operation and awaiting the running one is the correct answer. Same claim and
+   * a different mode is a genuinely different operation, so it is refused
+   * rather than answered with somebody else's answer.
+   */
+  function claimReplacementFlight(claimId, mode, start) {
+    const active = replacementFlights.get(claimId);
+    if (active) {
+      if (active.mode !== mode) {
+        const error = new Error(
+          "Penggantian akun untuk klaim ini sedang berjalan dengan mode lain. Tunggu sampai selesai, lalu coba lagi.",
+        );
+        error.status = 409;
+        error.code = "replacement_in_flight_other_mode";
+        return Promise.reject(error);
+      }
+      return active.promise;
+    }
+    const entry = { mode };
+    entry.promise = start().finally(() => {
+      // Only clear our own entry. A later flight for the same claim cannot
+      // start while this one is still in the map, but the guard costs nothing
+      // and makes the ownership explicit rather than assumed.
+      if (replacementFlights.get(claimId) === entry) replacementFlights.delete(claimId);
+    });
+    replacementFlights.set(claimId, entry);
+    return entry.promise;
+  }
+
   async function recordNotification(claimId, patch = {}) {
     if (!updateDb) return;
     await updateDb((db) => {
@@ -482,22 +523,10 @@ export function registerWarrantyRoutes(app, deps) {
   }
 
   app.post("/api/warranty-claims/:id/replace", requireAuth(["owner"]), async (req, res) => {
-    const claimId = req.params.id;
-    let flight = replacementFlights.get(claimId);
-    if (!flight) {
-      flight = executeReplacement(req).finally(() => replacementFlights.delete(claimId));
-      replacementFlights.set(claimId, flight);
-    }
-    res.json(await flight);
+    res.json(await claimReplacementFlight(req.params.id, "stock", () => executeReplacement(req)));
   });
 
   app.post("/api/warranty-claims/:id/replace-manual", requireAuth(["owner"]), async (req, res) => {
-    const claimId = req.params.id;
-    let flight = replacementFlights.get(claimId);
-    if (!flight) {
-      flight = executeReplacement(req, "manual").finally(() => replacementFlights.delete(claimId));
-      replacementFlights.set(claimId, flight);
-    }
-    res.json(await flight);
+    res.json(await claimReplacementFlight(req.params.id, "manual", () => executeReplacement(req, "manual")));
   });
 }
