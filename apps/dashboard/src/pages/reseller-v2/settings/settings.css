@@ -18,14 +18,14 @@
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
   align-items: start;
-  gap: 18px;
-  margin-top: 18px;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
 }
 
 .reseller-v2-settings-content {
   display: grid;
   min-width: 0;
-  gap: 18px;
+  gap: var(--space-4);
 }
 
 /* ------------------------------------------------------------------ *
@@ -35,15 +35,15 @@
 .reseller-v2-settings-aside {
   position: sticky;
   top: 28px;
-  padding: 12px;
+  padding: var(--space-3);
 }
 
 .reseller-v2-settings-identity {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 12px 13px;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-raised);
@@ -60,7 +60,7 @@
 }
 .reseller-v2-settings-identity span {
   display: block;
-  margin-top: 3px;
+  margin-top: var(--space-1);
   overflow: hidden;
   color: var(--text-muted);
   font-size: 11px;
@@ -70,25 +70,26 @@
 
 .reseller-v2-settings-tabs {
   display: grid;
-  gap: 3px;
-  margin-top: 10px;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
 }
 .reseller-v2-settings-tabs button {
   display: flex;
   min-height: 44px;
   align-items: center;
-  gap: 10px;
-  padding: 0 13px;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   background: transparent;
   color: var(--text-secondary);
   font: inherit;
   font-size: 12.5px;
-  font-weight: 650;
+  font-weight: 600;
   text-align: left;
   cursor: pointer;
   transition:
+    border-color var(--duration-normal) var(--ease-out-expo),
     background-color var(--duration-normal) var(--ease-out-expo),
     color var(--duration-normal) var(--ease-out-expo),
     box-shadow 260ms var(--ease-out-expo);
@@ -97,10 +98,15 @@
   background: var(--surface-hover);
   color: var(--text-primary);
 }
+/* The third selected-state recipe, now the same as the other two: accent edge,
+   10% wash, glow. This one was the only at 16% and the only on `--shadow-lift`,
+   so a sidebar section that was open and a filter that was on were two
+   different-looking shades of the same meaning. */
 .reseller-v2-settings-tabs button.is-active {
-  background: color-mix(in srgb, var(--accent-violet) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent-violet) 50%, transparent);
+  background: color-mix(in srgb, var(--accent-violet) 10%, transparent);
   color: var(--text-primary);
-  box-shadow: var(--shadow-lift);
+  box-shadow: var(--shadow-glow);
 }
 .reseller-v2-settings-tabs button:focus-visible {
   outline: 2px solid var(--accent-cyan);
@@ -139,7 +145,7 @@
 .reseller-v2-settings-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  gap: var(--space-4);
 }
 .reseller-v2-settings-form-grid.is-single { grid-template-columns: minmax(0, 1fr); }
 
@@ -147,7 +153,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .reseller-v2-settings-button {
@@ -155,10 +161,13 @@
   min-height: 42px;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 0 16px;
+  gap: var(--space-2);
+  padding: 0 var(--space-4);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  /* Pill at every variant, which is what `.ui-button` does -- a primary that
+     is a pill next to a secondary that is not reads as two different products
+     sharing a form. */
+  border-radius: var(--radius-pill);
   background: var(--bg-raised);
   color: var(--text-secondary);
   font: inherit;
@@ -184,13 +193,19 @@
   outline: 2px solid var(--accent-cyan);
   outline-offset: 2px;
 }
+/* `.is-primary` here means exactly what `.ui-button.is-primary` means, so it
+   is the same recipe -- and the two consoles were disagreeing about what the
+   main action on a screen looks like, which is most of why they read as two
+   products rather than one. */
 .reseller-v2-settings-button.is-primary {
   border-color: transparent;
-  background: var(--status-success);
-  color: var(--text-inverse);
+  background: var(--accent-violet);
+  box-shadow: 0 1px 0 0 color-mix(in srgb, white 20%, transparent) inset;
+  color: var(--text-on-inverse);
 }
 .reseller-v2-settings-button.is-primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--status-success) 84%, black);
+  background: color-mix(in srgb, var(--accent-violet) 86%, white);
+  box-shadow: var(--shadow-glow);
 }
 .reseller-v2-settings-button.is-danger {
   border-color: color-mix(in srgb, var(--status-danger) 42%, transparent);
@@ -239,8 +254,8 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 15px 16px;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-raised);
@@ -249,7 +264,7 @@
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 11px;
+  gap: var(--space-3);
 }
 .reseller-v2-settings-session-icon {
   display: inline-flex;
@@ -259,7 +274,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   margin: 0;
   color: var(--text-primary);
   font-size: 12.5px;

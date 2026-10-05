@@ -14,7 +14,7 @@
 .reseller-v2-orders {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: var(--space-5);
 }
 
 /* --- the transaction reference ------------------------------------------ */
@@ -39,7 +39,7 @@
 .reseller-v2-orders-total {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--space-1);
   min-width: 0;
 }
 
@@ -75,7 +75,7 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 /* --- the pending-payments drawer ---------------------------------------- */
@@ -83,11 +83,11 @@
 .reseller-v2-orders-pending {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .reseller-v2-orders-pending-card {
-  padding: 16px;
+  padding: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
@@ -99,7 +99,7 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .reseller-v2-orders-pending-card > header > div,
@@ -107,7 +107,7 @@
 .reseller-v2-orders-template > header > div {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--space-1);
   min-width: 0;
 }
 
@@ -128,7 +128,7 @@
 
 .reseller-v2-orders-pending-card .reseller-v2-orders-actions {
   justify-content: flex-start;
-  margin-top: 14px;
+  margin-top: var(--space-3);
 }
 
 /* --- the QRIS dialog ----------------------------------------------------- */
@@ -136,7 +136,7 @@
 .reseller-v2-orders-qris {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-4);
 }
 
 /*
@@ -153,7 +153,7 @@
   align-self: center;
   width: 240px;
   height: 240px;
-  padding: 12px;
+  padding: var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--fx-scan-plate);
@@ -164,8 +164,8 @@
 .reseller-v2-orders-delivery {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 16px;
+  gap: var(--space-3);
+  padding: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
@@ -174,15 +174,15 @@
 .reseller-v2-orders-template {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding-top: 14px;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
   border-top: 1px solid var(--border);
 }
 
 .reseller-v2-orders-template pre {
   max-height: 320px;
   margin: 0;
-  padding: 16px;
+  padding: var(--space-4);
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -214,8 +214,8 @@
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 14px;
-  padding: 10px 14px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   border-top: 1px solid var(--border);
 }
 
@@ -266,7 +266,7 @@
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 4px;
+    gap: var(--space-1);
   }
   .reseller-v2-orders-summary.is-grid dd {
     text-align: left;

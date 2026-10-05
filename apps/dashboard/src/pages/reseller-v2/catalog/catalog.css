@@ -16,7 +16,7 @@
  */
 
 .reseller-v2-catalog-panel {
-  margin-top: 18px;
+  margin-top: var(--space-4);
 }
 
 /* The header the legacy page centred above the grid. It is a panel header, so
@@ -35,8 +35,8 @@
 
 .reseller-v2-catalog-toolbar {
   display: grid;
-  gap: 12px;
-  padding: 18px;
+  gap: var(--space-3);
+  padding: var(--space-4);
   border-bottom: 1px solid var(--border);
 }
 
@@ -44,8 +44,8 @@
   display: flex;
   min-height: 46px;
   align-items: center;
-  gap: 9px;
-  padding: 0 14px;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-raised);
@@ -89,13 +89,13 @@
 .reseller-v2-catalog-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
-  padding: 20px;
+  gap: var(--space-4);
+  padding: var(--space-5);
 }
 
 .reseller-v2-catalog-skeleton {
   min-height: 280px;
-  padding: 20px;
+  padding: var(--space-5);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
@@ -117,7 +117,7 @@
   border-radius: var(--radius-lg);
   background: var(--surface);
   backdrop-filter: blur(var(--glass-blur)) saturate(140%);
-  box-shadow: var(--shadow-lift);
+  box-shadow: var(--shadow-rest);
   transition:
     border-color var(--duration-normal) var(--ease-out-expo),
     background var(--duration-normal) var(--ease-out-expo),
@@ -129,7 +129,7 @@
   border-color: var(--border-strong);
   background: var(--surface-hover);
   transform: translateY(-3px);
-  box-shadow: var(--shadow-float);
+  box-shadow: var(--shadow-lift);
 }
 
 /* Expansion is a state the reader can lose track of in a grid of cards, so
@@ -182,8 +182,8 @@
   display: inline-flex;
   min-height: 24px;
   align-items: center;
-  gap: 4px;
-  padding: 0 10px;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
   border-radius: 999px;
   backdrop-filter: blur(8px) saturate(140%);
   background: var(--fx-art-plate);
@@ -223,7 +223,7 @@
    own logo, so this is one of the few places in the app that opts out of the
    palette on purpose. tokens.css says so once, where the exception lives. */
 .reseller-v2-catalog-mark span {
-  padding: 0 8px;
+  padding: 0 var(--space-2);
   color: var(--fx-art-plate-ink);
   font-size: 11px;
   font-weight: 800;
@@ -240,7 +240,7 @@
 }
 
 .reseller-v2-catalog-body {
-  padding: 17px 18px 19px;
+  padding: var(--space-4) var(--space-4) var(--space-5);
 }
 
 .reseller-v2-catalog-body h3 {
@@ -262,8 +262,8 @@
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 12px;
-  margin-top: 16px;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
 }
 
 .reseller-v2-catalog-facts span,
@@ -277,7 +277,7 @@
 }
 
 .reseller-v2-catalog-facts strong {
-  margin-top: 3px;
+  margin-top: var(--space-1);
   color: var(--text-primary);
   font-size: 16px;
   font-weight: 700;
@@ -289,7 +289,7 @@
 }
 
 .reseller-v2-catalog-facts > div:last-child span + span {
-  margin-top: 4px;
+  margin-top: var(--space-1);
 }
 
 /* ------------------------------------------------------------------ *
@@ -297,22 +297,22 @@
  * ------------------------------------------------------------------ */
 
 .reseller-v2-catalog-variants {
-  padding: 17px 18px 19px;
+  padding: var(--space-4) var(--space-4) var(--space-5);
   border-top: 1px solid var(--border);
 }
 
 .reseller-v2-catalog-variants-title {
-  margin: 0 0 11px;
+  margin: 0 0 var(--space-3);
   color: var(--text-muted);
   font-size: 10px;
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
 .reseller-v2-catalog-variant-list {
   display: grid;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .reseller-v2-catalog-variant {
@@ -321,8 +321,8 @@
   min-height: 60px;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 11px;
-  padding: 10px 12px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-raised);
@@ -387,7 +387,7 @@
   overflow: hidden;
   color: var(--text-primary);
   font-size: 12.5px;
-  font-weight: 650;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -401,7 +401,7 @@
 
 .reseller-v2-catalog-variant-copy small {
   overflow: hidden;
-  margin-top: 4px;
+  margin-top: var(--space-1);
   color: var(--text-muted);
   font-size: 10px;
   text-overflow: ellipsis;
@@ -418,7 +418,7 @@
 
 .reseller-v2-catalog-variant-price small {
   display: block;
-  margin-top: 3px;
+  margin-top: var(--space-1);
   color: var(--text-muted);
   font-size: 9px;
   font-weight: 500;
@@ -427,9 +427,9 @@
 .reseller-v2-catalog-duration-switch {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 4px;
-  margin-top: 16px;
-  padding: 4px;
+  gap: var(--space-1);
+  margin-top: var(--space-4);
+  padding: var(--space-1);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-raised);
@@ -442,7 +442,7 @@
   background: transparent;
   color: var(--text-secondary);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 600;
   cursor: pointer;
   transition:
     border-color var(--duration-normal) var(--ease-out-expo),
@@ -465,15 +465,15 @@
 .reseller-v2-catalog-duration-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
-  gap: 9px;
-  margin-top: 14px;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
 }
 
 .reseller-v2-catalog-duration-option {
   min-width: 0;
   min-height: 64px;
   overflow: hidden;
-  padding: 10px 11px;
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-raised);
@@ -517,7 +517,7 @@
 }
 
 .reseller-v2-catalog-duration-price {
-  margin-top: 5px;
+  margin-top: var(--space-1);
   color: var(--text-primary);
   font-size: 12px;
   font-weight: 700;
@@ -530,12 +530,13 @@
   min-height: 46px;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  margin-top: 16px;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
   border: 0;
-  border-radius: var(--radius-sm);
-  background: var(--status-success);
-  color: var(--text-inverse);
+  border-radius: var(--radius-pill);
+  background: var(--accent-violet);
+  box-shadow: 0 1px 0 0 color-mix(in srgb, white 20%, transparent) inset;
+  color: var(--text-on-inverse);
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
@@ -546,10 +547,12 @@
     opacity var(--duration-fast) var(--ease-out-expo);
 }
 
+/* The accent lightens and casts a glow on hover, matching
+   `.ui-button.is-primary:hover`. It used to darken toward black. */
 .reseller-v2-catalog-checkout:hover:not(:disabled):not(.is-pending) {
-  background: color-mix(in srgb, var(--status-success) 84%, black);
+  background: color-mix(in srgb, var(--accent-violet) 86%, white);
   transform: translateY(-1px);
-  box-shadow: var(--shadow-lift);
+  box-shadow: var(--shadow-glow);
 }
 
 .reseller-v2-catalog-checkout:disabled {
@@ -588,7 +591,7 @@
    two lines instead of being cut off mid-amount. */
 .reseller-v2-catalog-mobile-bar .reseller-v2-catalog-split {
   display: block;
-  margin-top: 4px;
+  margin-top: var(--space-1);
   overflow: visible;
   white-space: normal;
 }
@@ -607,8 +610,8 @@
   display: none;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
   background: var(--surface-glass-strong);
@@ -636,7 +639,7 @@
 }
 
 .reseller-v2-catalog-mobile-bar span {
-  margin-top: 3px;
+  margin-top: var(--space-1);
   color: var(--text-secondary);
   font-size: 11px;
 }
@@ -646,12 +649,12 @@
   min-height: 42px;
   flex: 0 0 auto;
   align-items: center;
-  gap: 7px;
-  padding: 0 16px;
+  gap: var(--space-2);
+  padding: 0 var(--space-4);
   border: 0;
-  border-radius: var(--radius-md);
-  background: var(--status-success);
-  color: var(--text-inverse);
+  border-radius: var(--radius-pill);
+  background: var(--accent-violet);
+  color: var(--text-on-inverse);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
@@ -663,9 +666,9 @@
 }
 
 .reseller-v2-catalog-mobile-bar button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--status-success) 84%, black);
+  background: color-mix(in srgb, var(--accent-violet) 86%, white);
   transform: translateY(-1px);
-  box-shadow: var(--shadow-lift);
+  box-shadow: var(--shadow-glow);
 }
 
 .reseller-v2-catalog-mobile-bar button:disabled {
@@ -705,14 +708,14 @@
 @media (max-width: 767px) {
   .reseller-v2-catalog-grid {
     grid-template-columns: minmax(0, 1fr);
-    gap: 14px;
-    padding: 14px;
+    gap: var(--space-3);
+    padding: var(--space-3);
   }
 
   .reseller-v2-catalog-toolbar,
   .reseller-v2-catalog-body,
   .reseller-v2-catalog-variants {
-    padding-inline: 14px;
+    padding-inline: var(--space-3);
   }
 
   .reseller-v2-catalog-art {

@@ -343,7 +343,7 @@ export default function ResellerV2AccountsPage() {
           ? `Google Sheets diperbarui ${updatedAt || "baru saja"}.`
           : `Menampilkan snapshot sinkronisasi terakhir${updatedAt ? `, dimuat ${updatedAt}` : ""}. Klik Perbarui untuk sinkronisasi Google Sheets terbaru.`}
       </p>
-      {!error ? <section className="reseller-v2-panel reseller-v2-accounts-panel">
+      {!error ? <section className="reseller-v2-panel">
         <div className="reseller-v2-accounts-toolbar">
           <label>
             <Search size={17} />

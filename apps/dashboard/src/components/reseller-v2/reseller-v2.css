@@ -28,9 +28,9 @@
 
 .reseller-v2-side-balance {
   display: grid;
-  gap: 8px;
-  margin: 16px;
-  padding: 15px;
+  gap: var(--space-2);
+  margin: var(--space-4);
+  padding: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface);
@@ -38,7 +38,7 @@
 }.reseller-v2-side-balance > span {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-2);
   color: var(--text-muted);
   font-size: 11px;
 }.reseller-v2-side-balance strong {
@@ -48,35 +48,40 @@
 }.reseller-v2-side-balance .reseller-v2-balance-link {
   color: var(--text-primary);
   font-size: 18px;
-  font-weight: 750;
+  font-weight: 700;
   text-decoration: none;
 }.reseller-v2-side-balance > button {
   display: flex;
   min-height: 36px;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: var(--space-1);
   border: 0;
-  border-radius: var(--radius-sm);
-  background: var(--status-success);
-  color: var(--text-inverse);
+  border-radius: var(--radius-pill);
+  background: var(--accent-violet);
+  box-shadow: 0 1px 0 0 color-mix(in srgb, white 20%, transparent) inset;
+  color: var(--text-on-inverse);
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
   transition: background 200ms var(--ease-out-expo), transform 200ms var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo);
 }
-.reseller-v2-side-balance > button:hover { background: color-mix(in srgb, var(--status-success) 84%, black); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+/* Hover follows `.ui-button.is-primary:hover` exactly -- lighter accent plus the
+   glow. It used to darken the fill by mixing it toward black, which on a
+   saturated button reads as dirt rather than as light. */
+.reseller-v2-side-balance > button:hover { background: color-mix(in srgb, var(--accent-violet) 86%, white); transform: translateY(-1px); box-shadow: var(--shadow-glow); }
 .reseller-v2-topup {
   display: inline-flex;
   height: 40px;
   flex: 0 0 auto;
   align-items: center;
-  gap: 5px;
-  padding: 0 15px;
+  gap: var(--space-1);
+  padding: 0 var(--space-4);
   border: 0;
-  border-radius: var(--radius-sm);
-  background: var(--status-success);
-  color: var(--text-inverse);
+  border-radius: var(--radius-pill);
+  background: var(--accent-violet);
+  box-shadow: 0 1px 0 0 color-mix(in srgb, white 20%, transparent) inset;
+  color: var(--text-on-inverse);
   font-size: 11px;
   font-weight: 700;
   line-height: 1;
@@ -85,31 +90,39 @@
   cursor: pointer;
   transition: background 200ms var(--ease-out-expo), transform 200ms var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo);
 }
-.reseller-v2-topup:hover { background: color-mix(in srgb, var(--status-success) 84%, black); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.reseller-v2-topup:hover { background: color-mix(in srgb, var(--accent-violet) 86%, white); transform: translateY(-1px); box-shadow: var(--shadow-glow); }
 .reseller-v2-top-balance {
   display: inline-flex;
   min-height: 38px;
   align-items: center;
-  gap: 6px;
-  padding: 0 12px;
+  gap: var(--space-1);
+  padding: 0 var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   background: var(--surface);
   backdrop-filter: blur(var(--glass-blur));
   color: var(--text-secondary);
   font-size: 11px;
-  font-weight: 650;
+  font-weight: 600;
   white-space: nowrap;
 }
+/* The panel's section label. It follows the kit's one label recipe -- the
+   same 10px/600/0.09em muted uppercase that `.ui-label` and `.ui-panel-eyebrow`
+   use -- rather than the ninth one, which was 9px/700/0.16em in accent blue.
+
+   The accent made a screen of eleven panels carry a coloured word above every
+   heading, so the label stopped being a label and became a rule. It is also
+   the only recipe in the app that coloured its label; eight others were all
+   muted, so this one was the drift rather than the intent. */
 .reseller-v2-panel header > span,
 .reseller-v2-panel header div > span,
 .reseller-v2-cell header > span,
 .reseller-v2-cell header div > span {
-  margin: 0 0 7px;
-  color: var(--accent-violet);
-  font-size: 9px;
-  font-weight: 750;
-  letter-spacing: 0.16em;
+  margin: 0 0 var(--space-2);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
 }
 
@@ -125,14 +138,18 @@
   padding-bottom: 0;
 }
 
+/* The bento cell's header. Same 20px 24px padding and the same 15px title as
+   the panel header -- it is the same role at a different width, not a third
+   kind of header. Only the fixed height is its own, and that exists because a
+   grid row has to agree with its neighbours. */
 .reseller-v2-cell > header {
   display: flex;
   min-height: 62px;
   flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
-  padding: 14px 20px;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-6);
   border-bottom: 1px solid var(--border);
 }
 
@@ -142,7 +159,7 @@
 
 .reseller-v2-cell > header h2 {
   margin: 0;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .reseller-v2-cell > header a {
@@ -159,7 +176,7 @@
 
 .reseller-v2-cell > .reseller-v2-compact-list,
 .reseller-v2-cell > .reseller-v2-order-list,
-.reseller-v2-cell > .ui-empty {
+.reseller-v2-cell > .ui-state {
   min-height: 0;
   flex: 1 1 auto;
   overflow-y: auto;
@@ -173,13 +190,13 @@
   min-height: 44px;
   flex: 0 0 auto;
   align-items: center;
-  gap: 9px;
+  gap: var(--space-2);
   margin-top: auto;
-  padding: 0 20px;
+  padding: 0 var(--space-5);
   border-top: 1px solid var(--border);
   color: var(--text-secondary);
   font-size: 11px;
-  font-weight: 650;
+  font-weight: 600;
   text-decoration: none;
   transition: color var(--duration-normal) var(--ease-out-expo), background var(--duration-normal) var(--ease-out-expo);
 }
@@ -198,11 +215,11 @@
   transform: translateX(3px);
 }
 .reseller-v2-greeting {
-  margin-bottom: 24px;
+  margin-bottom: var(--space-6);
 }.reseller-v2-greeting span {
   color: var(--text-primary);
   font-size: 14px;
-  font-weight: 650;
+  font-weight: 600;
 }
 .reseller-v2-greeting p {
   margin: 3px 0 0;
@@ -210,9 +227,19 @@
   font-size: 11px;
 }
 .reseller-v2-bento {
-  margin-top: 20px;
+  margin-top: var(--space-5);
 }
 
+/* The in-page panel. Same box as `.ui-panel` -- border, radius, glass --
+   because it is the same object, and it used to be two pixels away from it in
+   every direction while casting a different shadow, so a `.ui-panel` and a
+   `.reseller-v2-panel` on one screen looked like two components from two
+   products. `.ui-panel` is the floating one (dialogs, drawers, sheets); this
+   is the one a page is built out of, which is why it keeps `--shadow-lift`
+   where `.ui-card` has dropped to `--shadow-rest`.
+
+   Only what the box needs is written here. Padding, radius, glass and blur
+   are the kit's numbers, not this file's. */
 .reseller-v2-panel {
   min-width: 0;
   overflow: hidden;
@@ -225,24 +252,29 @@
 .reseller-v2-account-summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
-  margin-bottom: 16px;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
 }
+/* Four summary tiles. A `.ui-card` by another name -- it had the same box at
+   `--shadow-lift` and rose to `--shadow-float`, exactly like the panel it sits
+   on, so the page had two elevations and no hierarchy. It is a plain card, so
+   it now sits at `--shadow-rest` and warms to `--shadow-lift`, and it does not
+   lift on hover: a lift is a promise the tile can be pressed, and it cannot. */
 .reseller-v2-account-summary article {
   display: grid;
   min-height: 118px;
   grid-template-columns: auto 1fr;
   align-items: center;
-  gap: 8px 10px;
-  padding: 20px;
+  gap: var(--space-2) 10px;
+  padding: var(--space-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface-glass);
   backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
-  box-shadow: var(--shadow-lift);
+  box-shadow: var(--shadow-rest);
   transition: border-color var(--duration-normal) var(--ease-out-expo), background var(--duration-normal) var(--ease-out-expo), box-shadow var(--duration-normal) var(--ease-out-expo);
 }
-.reseller-v2-account-summary article:hover { border-color: var(--border-strong); background: var(--surface-hover); box-shadow: var(--shadow-float); }
+.reseller-v2-account-summary article:hover { border-color: var(--border-strong); background: var(--surface-hover); box-shadow: var(--shadow-lift); }
 .reseller-v2-account-summary article svg {
   color: var(--accent-cyan);
 }
@@ -256,16 +288,16 @@
 }
 .reseller-v2-accounts-toolbar {
   display: grid;
-  gap: 12px;
-  padding: 18px;
+  gap: var(--space-3);
+  padding: var(--space-4);
   border-bottom: 1px solid var(--border);
 }
 .reseller-v2-accounts-toolbar label {
   display: flex;
   min-height: 44px;
   align-items: center;
-  gap: 9px;
-  padding: 0 13px;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-raised);
@@ -284,49 +316,64 @@
 .reseller-v2-account-view-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .reseller-v2-account-view-tabs button {
   display: inline-flex;
   min-height: 36px;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 0 13px;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   background: var(--bg-raised);
   color: var(--text-secondary);
   font-size: 12px;
-  font-weight: 750;
+  font-weight: 700;
   cursor: pointer;
   transition: border-color var(--duration-normal) var(--ease-out-expo), background-color var(--duration-normal) var(--ease-out-expo), color var(--duration-normal) var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo);
 }
-.reseller-v2-account-view-tabs button:hover,
-.reseller-v2-account-view-tabs button.is-active {
-  border-color: color-mix(in srgb, var(--accent-violet) 58%, transparent);
-  background: color-mix(in srgb, var(--accent-violet) 16%, transparent);
+/* Hover and selected are one rule, which means hovering a filter lights it up
+   exactly as turning it on does -- so a chip under the cursor and a chip that
+   is on were the same picture, and the only way to tell them apart was to
+   move the mouse away and look again. `ui.css` argues the same point for
+   `.ui-metric.is-interactive`: a filter that is on wants a coloured edge,
+   because a filled lozenge reads as a button being pressed.
+
+   Hover is therefore only the neutral edge, and selected owns the accent. A
+   selected chip that is also hovered keeps its own accent (the `is-active`
+   rule is the later of the two), so resting the cursor on the filter you are
+   already filtering by does not fade it back to looking unselected. */
+.reseller-v2-account-view-tabs button:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
   color: var(--text-primary);
 }
-.reseller-v2-account-view-tabs button.is-active { box-shadow: var(--shadow-glow); }
+.reseller-v2-account-view-tabs button.is-active {
+  border-color: color-mix(in srgb, var(--accent-violet) 50%, transparent);
+  background: color-mix(in srgb, var(--accent-violet) 10%, transparent);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-glow);
+}
 .reseller-v2-account-view-tabs button span {
   display: inline-flex;
   min-width: 22px;
   min-height: 22px;
   align-items: center;
   justify-content: center;
-  padding: 0 7px;
+  padding: 0 var(--space-2);
   border-radius: 999px;
   background: var(--bg-raised);
   color: inherit;
   font-size: 11px;
 }
 .reseller-v2-accounts-loading {
-  padding: 22px;
+  padding: var(--space-5);
 }
 .reseller-v2-accounts-freshness {
   margin: 0;
-  padding: 11px 13px;
+  padding: var(--space-3) var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-raised);
@@ -345,8 +392,8 @@
     minmax(140px, 0.7fr)
     minmax(190px, 0.85fr)
     minmax(180px, auto);
-  gap: 16px;
-  padding: 13px 18px;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--border);
   background: var(--bg-raised);
   color: var(--text-muted);
@@ -366,8 +413,8 @@
     minmax(190px, 0.85fr)
     minmax(180px, auto);
   align-items: center;
-  gap: 16px;
-  padding: 14px 18px;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
   border: 0;
   border-bottom: 1px solid var(--border);
   background: transparent;
@@ -399,32 +446,37 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: var(--space-1);
   flex-wrap: wrap;
 }
 .reseller-v2-new-badge {
   display: inline-flex;
-  margin-left: 7px;
-  padding: 2px 7px;
+  margin-left: var(--space-2);
+  padding: var(--space-1) var(--space-2);
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent-violet) 18%, transparent);
   color: color-mix(in srgb, var(--accent-violet) 34%, var(--text-primary));
   font-size: 9px;
   font-style: normal;
-  font-weight: 750;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
+/* Tinted with the accent rather than the success green. The banner says there
+   is stock waiting to be bought, which is an offer rather than an outcome --
+   green is reserved for things that already went through (`.reseller-v2-topup-success`),
+   and a box that meant "action available" while wearing "already done" is how a
+   pending purchase ends up looking settled. */
 .reseller-v2-purchase-banner {
   display: flex;
   min-height: 68px;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 16px 18px;
-  border: 1px solid color-mix(in srgb, var(--status-success) 22%, transparent);
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--accent-violet) 26%, transparent);
   border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--status-success) 6%, transparent);
+  background: color-mix(in srgb, var(--accent-violet) 7%, transparent);
 }
 .reseller-v2-purchase-banner div,
 .reseller-v2-purchase-banner span {
@@ -435,7 +487,7 @@
   font-size: 14px;
 }
 .reseller-v2-purchase-banner span {
-  margin-top: 4px;
+  margin-top: var(--space-1);
   color: var(--text-secondary);
   font-size: 13px;
 }
@@ -445,16 +497,17 @@
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-sm);
-  background: var(--status-success);
-  padding: 0 17px;
-  color: var(--text-inverse);
+  border-radius: var(--radius-pill);
+  background: var(--accent-violet);
+  box-shadow: 0 1px 0 0 color-mix(in srgb, white 20%, transparent) inset;
+  padding: 0 var(--space-5);
+  color: var(--text-on-inverse);
   font-size: 13px;
   font-weight: 700;
   text-decoration: none;
   transition: background 200ms var(--ease-out-expo), transform 200ms var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo);
 }
-.reseller-v2-purchase-banner a:hover { background: color-mix(in srgb, var(--status-success) 84%, black); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.reseller-v2-purchase-banner a:hover { background: color-mix(in srgb, var(--accent-violet) 86%, white); transform: translateY(-1px); box-shadow: var(--shadow-glow); }
 @media (max-width: 560px) {
   .reseller-v2-purchase-banner {
     align-items: stretch;
@@ -462,7 +515,7 @@
   }
 }
 .reseller-v2-account-list small {
-  margin-top: 4px;
+  margin-top: var(--space-1);
   color: var(--text-muted);
   font-size: 10px;
 }
@@ -477,26 +530,36 @@
 .reseller-v2-detail-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  margin-bottom: 16px;
-  padding: 4px;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+  padding: var(--space-1);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-raised);
 }
 .reseller-v2-detail-tabs button {
   min-height: 42px;
-  border: 0;
+  /* Transparent rather than `0`: the selected state now draws a border, and a
+     border that appears on selection moves the label 1px sideways. The track
+     below already carries the real edge. */
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   font-size: 12px;
-  font-weight: 650;
-  transition: background 200ms var(--ease-out-expo), color 200ms var(--ease-out-expo);
+  font-weight: 600;
+  transition: border-color 200ms var(--ease-out-expo), background 200ms var(--ease-out-expo), color 200ms var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo);
 }
+/* Same selected recipe as `.reseller-v2-account-view-tabs button.is-active`
+   and `.reseller-v2-settings-tabs button.is-active` -- accent edge, 10% wash,
+   glow. It used to be `--surface-hover` with no accent at all, so switching a
+   view inside the drawer and switching a filter on the accounts page both said
+   "on" in two colours that did not match either. */
 .reseller-v2-detail-tabs button.is-active {
-  background: var(--surface-hover);
+  border-color: color-mix(in srgb, var(--accent-violet) 50%, transparent);
+  background: color-mix(in srgb, var(--accent-violet) 10%, transparent);
   color: var(--text-primary);
+  box-shadow: var(--shadow-glow);
 }
 .reseller-v2-delivery-template {
   overflow: hidden;
@@ -508,8 +571,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 14px;
+  gap: var(--space-3);
+  padding: var(--space-3);
   border-bottom: 1px solid var(--border);
 }
 .reseller-v2-delivery-template > header span,
@@ -517,23 +580,24 @@
   display: inline-flex;
   min-height: 40px;
   align-items: center;
-  gap: 7px;
-  padding: 0 13px;
+  gap: var(--space-2);
+  padding: 0 var(--space-4);
   border: 0;
-  border-radius: var(--radius-sm);
-  background: var(--status-success);
-  color: var(--text-inverse);
+  border-radius: var(--radius-pill);
+  background: var(--accent-violet);
+  box-shadow: 0 1px 0 0 color-mix(in srgb, white 20%, transparent) inset;
+  color: var(--text-on-inverse);
   font-size: 11px;
-  font-weight: 750;
+  font-weight: 700;
   cursor: pointer;
   transition: background 200ms var(--ease-out-expo), transform 200ms var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo);
 }
-.reseller-v2-delivery-template > header button:hover { background: color-mix(in srgb, var(--status-success) 84%, black); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.reseller-v2-delivery-template > header button:hover { background: color-mix(in srgb, var(--accent-violet) 86%, white); transform: translateY(-1px); box-shadow: var(--shadow-glow); }
 .reseller-v2-delivery-template pre {
   max-height: min(58svh, 520px);
   margin: 0;
   overflow: auto;
-  padding: 18px;
+  padding: var(--space-4);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--text-secondary);
@@ -542,8 +606,8 @@
 .reseller-v2-account-detail dl > div {
   display: grid;
   grid-template-columns: 145px 1fr;
-  gap: 12px;
-  padding: 12px 14px;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3);
   border-bottom: 1px solid var(--border);
 }
 .reseller-v2-account-detail dl > div:last-child {
@@ -560,14 +624,14 @@
   overflow-wrap: anywhere;
 }
 .reseller-v2-credential-block {
-  margin-top: 16px;
+  margin-top: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   overflow: hidden;
   background: var(--bg-raised);
 }
 .reseller-v2-credential-block > header {
-  padding: 14px;
+  padding: var(--space-3);
   border-bottom: 1px solid var(--border);
 }
 .reseller-v2-credential-block > header span,
@@ -581,14 +645,14 @@
 }
 .reseller-v2-credential-block > header strong,
 .reseller-v2-credential-block > header small {
-  margin-top: 3px;
+  margin-top: var(--space-1);
   color: var(--text-muted);
   font-size: 10px;
   font-weight: 500;
 }
 .reseller-v2-credential-block > p {
   margin: 0;
-  padding: 13px 14px;
+  padding: var(--space-3) var(--space-3);
   color: var(--text-muted);
   font-size: 10px;
 }
@@ -596,8 +660,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
-  padding: 14px;
+  gap: var(--space-3);
+  padding: var(--space-3);
   border-bottom: 1px solid var(--border);
 }
 .reseller-v2-credential-row > div:first-child {
@@ -608,7 +672,7 @@
   display: block;
 }
 .reseller-v2-credential-row span {
-  margin-bottom: 5px;
+  margin-bottom: var(--space-1);
   color: var(--text-muted);
   font-size: 10px;
 }
@@ -618,14 +682,14 @@
 }
 .reseller-v2-credential-row > div:last-child {
   display: flex;
-  gap: 6px;
+  gap: var(--space-1);
 }
 .reseller-v2-credential-row button {
   display: inline-flex;
   min-height: 36px;
   align-items: center;
-  gap: 5px;
-  padding: 0 10px;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface);
@@ -642,13 +706,13 @@
   min-width: 18px;
   height: 18px;
   place-items: center;
-  padding: 0 4px;
+  padding: 0 var(--space-1);
   border: 2px solid var(--bg-canvas);
   border-radius: 999px;
   background: var(--status-danger);
   color: var(--text-inverse);
   font-size: 9px;
-  font-weight: 750;
+  font-weight: 700;
 }
 .reseller-v2-topup-overlay {
   position: fixed;
@@ -656,7 +720,7 @@
   z-index: 100;
   display: grid;
   place-items: center;
-  padding: 20px;
+  padding: var(--space-5);
   background: color-mix(in srgb, var(--bg-canvas) 76%, transparent);
   backdrop-filter: blur(10px) saturate(120%);
 }
@@ -676,14 +740,14 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  padding: 20px 22px;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-5);
   border-bottom: 1px solid var(--border);
 }
 .reseller-v2-topup-dialog > header span {
   color: var(--accent-violet);
   font-size: 9px;
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: 0.15em;
   text-transform: uppercase;
 }
@@ -712,15 +776,15 @@
 .reseller-v2-topup-dialog > header button:hover { border-color: var(--border-strong); background: var(--surface-hover); color: var(--text-primary); transform: translateY(-1px); }
 .reseller-v2-topup-body {
   display: grid;
-  gap: 15px;
-  padding: 22px;
+  gap: var(--space-4);
+  padding: var(--space-5);
 }
 .reseller-v2-topup-body label > span {
   display: block;
-  margin-bottom: 7px;
+  margin-bottom: var(--space-2);
   color: var(--text-secondary);
   font-size: 11px;
-  font-weight: 650;
+  font-weight: 600;
 }
 .reseller-v2-topup-body label em {
   color: var(--text-muted);
@@ -732,7 +796,7 @@ select,
 textarea) {
   width: 100%;
   min-height: 44px;
-  padding: 10px 13px;
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   outline: 0;
@@ -746,8 +810,8 @@ select,
 textarea):focus { border-color: color-mix(in srgb, var(--accent-violet) 70%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-violet) 14%, transparent); }
 .reseller-v2-topup-instruction {
   display: grid;
-  gap: 6px;
-  padding: 14px;
+  gap: var(--space-1);
+  padding: var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface);
@@ -770,7 +834,7 @@ span) {
 .reseller-v2-topup-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .reseller-v2-topup-actions :is(button,
 a) {
@@ -778,8 +842,8 @@ a) {
   min-height: 42px;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 0 15px;
+  gap: var(--space-1);
+  padding: 0 var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface);
@@ -797,15 +861,15 @@ a) {
 .reseller-v2-topup-actions .is-primary,
 .reseller-v2-topup-actions a {
   border-color: transparent;
-  background: var(--status-success);
-  color: var(--text-inverse);
+  background: var(--accent-violet);
+  color: var(--text-on-inverse);
   font-weight: 700;
 }
 .reseller-v2-topup-actions .is-primary:hover,
-.reseller-v2-topup-actions a:hover { border-color: transparent; background: color-mix(in srgb, var(--status-success) 84%, black); color: var(--text-on-inverse); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.reseller-v2-topup-actions a:hover { border-color: transparent; background: color-mix(in srgb, var(--accent-violet) 86%, white); color: var(--text-on-inverse); transform: translateY(-1px); box-shadow: var(--shadow-glow); }
 .reseller-v2-topup-error {
   margin: 0;
-  padding: 12px;
+  padding: var(--space-3);
   border: 1px solid color-mix(in srgb, var(--status-danger) 30%, transparent);
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--status-danger) 8%, transparent);
@@ -818,15 +882,15 @@ a) {
 }
 .reseller-v2-topup-success {
   display: flex;
-  gap: 9px;
-  padding: 13px;
+  gap: var(--space-2);
+  padding: var(--space-3);
   border: 1px solid color-mix(in srgb, var(--status-success) 25%, transparent);
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--status-success) 7%, transparent);
 }
 .reseller-v2-topup-success span {
   display: block;
-  margin-top: 3px;
+  margin-top: var(--space-1);
   color: var(--text-secondary);
   font-size: 11px;
 }
@@ -840,20 +904,20 @@ a) {
    as an error the moment the field is empty would mean it scolds every dealer
    who opens the dialog. */
 .reseller-v2-topup-hint {
-  margin-top: 6px;
+  margin-top: var(--space-1);
   color: var(--text-muted);
   font-size: 11px;
   line-height: 1.5;
 }
 .reseller-v2-topup-details {
   display: grid;
-  gap: 8px;
+  gap: var(--space-2);
   margin: 0;
 }
 .reseller-v2-topup-details > div {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
   padding: 11px 0;
   border-bottom: 1px solid var(--border);
 }
@@ -865,21 +929,24 @@ a) {
   margin: 0;
   color: var(--text-primary);
   font-size: 11px;
-  font-weight: 650;
+  font-weight: 600;
 }
+/* The panel header, matched to `.ui-panel header` exactly: 20px 24px, a 16px
+   gap, and the same 15px title. It was 18px 22px / 14px / 14px with a 68px
+   min-height, which put a panel and a dialog two pixels apart on every edge
+   of the same screen. */
 .reseller-v2-panel header {
   display: flex;
-  min-height: 68px;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
-  padding: 18px 22px;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-6);
   border-bottom: 1px solid var(--border);
 }.reseller-v2-panel header span {
   display: block;
 }.reseller-v2-panel header h2 {
   margin: 0;
-  font-size: 14px;
+  font-size: 15px;
 }
 .reseller-v2-panel header a {
   color: var(--text-secondary);
@@ -898,7 +965,7 @@ a) {
 .reseller-v2-cell .reseller-v2-action-grid {
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
-  padding: 6px 10px 10px;
+  padding: var(--space-1) var(--space-2) var(--space-2);
 }
 
 .reseller-v2-compact-list {
@@ -909,8 +976,8 @@ a) {
   min-height: 62px;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 20px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-5);
   border-bottom: 1px solid var(--border);
   color: inherit;
   text-decoration: none;
@@ -930,7 +997,7 @@ a) {
   font-size: 11px;
 }
 .reseller-v2-compact-list small {
-  margin-top: 4px;
+  margin-top: var(--space-1);
   color: var(--text-muted);
   font-size: 9px;
 }
@@ -939,11 +1006,11 @@ a) {
   display: grid;
   grid-template-columns: 1.2fr 1fr 0.7fr 0.8fr 0.8fr;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-3);
 }
 .reseller-v2-order-head {
   min-height: 38px;
-  padding: 0 20px;
+  padding: 0 var(--space-5);
   border-bottom: 1px solid var(--border);
   background: var(--bg-raised);
   color: var(--text-muted);
@@ -952,7 +1019,7 @@ a) {
 }
 .reseller-v2-order-row {
   min-height: 64px;
-  padding: 9px 20px;
+  padding: var(--space-2) var(--space-5);
   border-bottom: 1px solid var(--border);
   color: var(--text-secondary);
   font-size: 10px;
@@ -974,14 +1041,14 @@ a) {
   font-size: 10px;
 }
 .reseller-v2-order-row > div small {
-  margin-top: 3px;
+  margin-top: var(--space-1);
   color: var(--text-muted);
   font-size: 9px;
 }
 .reseller-v2-order-row > span:last-child {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-1);
 }
 
 /* ------------------------------------------------------------------ *
@@ -1025,7 +1092,7 @@ a) {
     margin-top: -5px;
   }
   .reseller-v2-bento {
-    margin-top: 14px;
+    margin-top: var(--space-3);
   }
   .reseller-v2-cell {
     overflow: visible;
@@ -1040,8 +1107,8 @@ a) {
     display: grid;
     min-height: 122px;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px;
-    padding: 14px;
+    gap: var(--space-2);
+    padding: var(--space-3);
   }
   .reseller-v2-order-row > span:nth-child(2),
   .reseller-v2-order-row > strong {
@@ -1051,11 +1118,11 @@ a) {
     grid-column: 1 / -1;
   }
   .reseller-v2-panel header {
-    padding: 16px;
+    padding: var(--space-4);
   }
   .reseller-v2-compact-list > a {
     min-height: 68px;
-    padding-inline: 16px;
+    padding-inline: var(--space-4);
   }
 }
 
@@ -1063,9 +1130,9 @@ a) {
 .reseller-guide-intro {
   display: flex;
   align-items: center;
-  gap: 15px;
-  margin-bottom: 18px;
-  padding: 20px 22px;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+  padding: var(--space-5) var(--space-5);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background:
@@ -1084,7 +1151,7 @@ a) {
 }
 .reseller-guide-intro p,
 .reseller-guide-player-title p {
-  margin: 0 0 4px;
+  margin: 0 0 var(--space-1);
   color: var(--text-muted);
   font-size: 10px;
   font-weight: 700;
@@ -1101,7 +1168,7 @@ a) {
 }
 .reseller-guide-intro > div:last-child > span {
   display: block;
-  margin-top: 5px;
+  margin-top: var(--space-1);
   color: var(--text-secondary);
   font-size: 13px;
   line-height: 1.55;
@@ -1110,19 +1177,19 @@ a) {
   display: grid;
   grid-template-columns: minmax(260px, 0.34fr) minmax(0, 1fr);
   align-items: start;
-  gap: 18px;
+  gap: var(--space-4);
 }
 .reseller-guide-selector {
   display: grid;
-  gap: 10px;
+  gap: var(--space-2);
 }
 .reseller-guide-selector > button {
   display: grid;
   min-height: 94px;
   grid-template-columns: auto auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
-  padding: 14px;
+  gap: var(--space-3);
+  padding: var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-raised);
@@ -1177,7 +1244,7 @@ a) {
 }
 .reseller-guide-selector-copy small {
   overflow: hidden;
-  margin-top: 5px;
+  margin-top: var(--space-1);
   color: var(--text-muted);
   font-size: 11px;
   line-height: 1.45;
@@ -1195,23 +1262,23 @@ a) {
   min-height: 70px;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 16px 20px;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--border);
 }
 .reseller-guide-player-title {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: var(--space-3);
 }
 .reseller-guide-duration,
 .reseller-guide-demo-label {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   color: var(--text-secondary);
   font-size: 11px;
-  font-weight: 650;
+  font-weight: 600;
 }
 .reseller-guide-video-wrap {
   position: relative;
@@ -1233,7 +1300,7 @@ a) {
   position: absolute;
   top: 12px;
   left: 12px;
-  padding: 6px 10px;
+  padding: var(--space-1) var(--space-2);
   border: 1px solid var(--border-strong);
   border-radius: 999px;
   background: color-mix(in srgb, var(--bg-canvas) 78%, transparent);
@@ -1243,18 +1310,18 @@ a) {
 .reseller-guide-detail {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(210px, 0.34fr);
-  gap: 18px;
-  padding: 20px;
+  gap: var(--space-4);
+  padding: var(--space-5);
   border-top: 1px solid var(--border);
 }
 .reseller-guide-detail h3 {
-  margin: 0 0 13px;
+  margin: 0 0 var(--space-3);
   color: var(--text-primary);
   font-size: 14px;
 }
 .reseller-guide-detail ol {
   display: grid;
-  gap: 9px;
+  gap: var(--space-2);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1263,7 +1330,7 @@ a) {
   display: grid;
   grid-template-columns: 26px minmax(0, 1fr);
   align-items: start;
-  gap: 10px;
+  gap: var(--space-2);
 }
 .reseller-guide-detail li > span {
   display: grid;
@@ -1285,7 +1352,7 @@ a) {
 }
 .reseller-guide-detail aside {
   align-self: start;
-  padding: 16px;
+  padding: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-raised);
@@ -1293,7 +1360,7 @@ a) {
 .reseller-guide-detail aside > span {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-2);
   color: var(--status-success);
   font-size: 11px;
   font-weight: 700;
@@ -1303,18 +1370,19 @@ a) {
   min-height: 44px;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  margin-top: 15px;
-  padding: 0 16px;
-  border-radius: var(--radius-sm);
-  background: var(--status-success);
-  color: var(--text-inverse);
+  gap: var(--space-1);
+  margin-top: var(--space-4);
+  padding: 0 var(--space-5);
+  border-radius: var(--radius-pill);
+  background: var(--accent-violet);
+  box-shadow: 0 1px 0 0 color-mix(in srgb, white 20%, transparent) inset;
+  color: var(--text-on-inverse);
   font-size: 12px;
-  font-weight: 750;
+  font-weight: 700;
   text-decoration: none;
   transition: background 200ms var(--ease-out-expo), transform 200ms var(--ease-out-expo), box-shadow 260ms var(--ease-out-expo);
 }
-.reseller-guide-detail aside a:hover { background: color-mix(in srgb, var(--status-success) 84%, black); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.reseller-guide-detail aside a:hover { background: color-mix(in srgb, var(--accent-violet) 86%, white); transform: translateY(-1px); box-shadow: var(--shadow-glow); }
 @media (max-width: 1050px) {
   .reseller-guide-layout {
     grid-template-columns: 1fr;
@@ -1327,7 +1395,7 @@ a) {
 @media (max-width: 767px) {
   .reseller-guide-intro {
     align-items: flex-start;
-    padding: 16px;
+    padding: var(--space-4);
   }
 
   .reseller-guide-intro h2,
@@ -1353,7 +1421,7 @@ a) {
 
   .reseller-guide-detail {
     grid-template-columns: 1fr;
-    padding: 16px;
+    padding: var(--space-4);
   }
 }
 @media (max-width: 900px) {
@@ -1371,7 +1439,7 @@ a) {
   .reseller-v2-account-list > button > span:nth-of-type(3)::before {
     content: attr(data-label);
     display: block;
-    margin-bottom: 3px;
+    margin-bottom: var(--space-1);
     color: var(--text-muted);
     font-size: 9px;
     font-weight: 800;
@@ -1382,7 +1450,7 @@ a) {
   .reseller-v2-panel > header {
     align-items: flex-start;
     flex-direction: column;
-    gap: 10px;
+    gap: var(--space-2);
   }
   .reseller-v2-account-summary {
     grid-template-columns: 1fr;
@@ -1393,7 +1461,7 @@ a) {
   .reseller-v2-account-list > button {
     min-height: 88px;
     grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
+    gap: var(--space-2);
   }
   .reseller-v2-account-list > button > span:first-of-type {
     grid-column: auto;
@@ -1403,7 +1471,7 @@ a) {
   }
   .reseller-v2-account-detail dl > div {
     grid-template-columns: 1fr;
-    gap: 5px;
+    gap: var(--space-1);
   }
   .reseller-v2-credential-row {
     align-items: stretch;

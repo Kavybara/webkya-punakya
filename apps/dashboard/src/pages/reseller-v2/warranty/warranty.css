@@ -11,8 +11,8 @@
    you press" means one thing across the product. */
 
 .reseller-v2-warranty-loading {
-  margin-top: 14px;
-  padding: 22px;
+  margin-top: var(--space-3);
+  padding: var(--space-5);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
@@ -20,7 +20,7 @@
 
 .reseller-v2-warranty-target {
   margin: 14px 0 0;
-  padding: 11px 14px;
+  padding: var(--space-3) var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-raised);
@@ -35,7 +35,7 @@
 }
 
 .reseller-v2-warranty-panel {
-  margin-top: 14px;
+  margin-top: var(--space-3);
 }
 
 .reseller-v2-warranty-panel > header {
@@ -56,7 +56,7 @@
 
 .reseller-v2-warranty-panel-note {
   margin: 0;
-  padding: 14px 20px;
+  padding: var(--space-3) var(--space-5);
   border-bottom: 1px solid var(--border);
   background: var(--bg-raised);
   color: var(--text-secondary);
@@ -66,12 +66,12 @@
 
 .reseller-v2-warranty-form {
   display: grid;
-  gap: 18px;
-  padding: 20px;
+  gap: var(--space-4);
+  padding: var(--space-5);
 }
 
 .reseller-v2-warranty-selected {
-  padding: 17px;
+  padding: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-raised);
@@ -81,8 +81,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 15px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
 }
 
 .reseller-v2-warranty-selected-head > div {
@@ -91,10 +91,10 @@
 
 .reseller-v2-warranty-selected-head span {
   display: block;
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
   color: var(--text-muted);
   font-size: 9px;
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
@@ -112,7 +112,7 @@
 .reseller-v2-warranty-details {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  column-gap: 26px;
+  column-gap: var(--space-6);
   margin: 0;
 }
 
@@ -125,7 +125,7 @@
 .reseller-v2-warranty-evidence-status {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   margin: 9px 0 0;
   color: var(--text-secondary);
   font-size: 11px;
@@ -134,13 +134,13 @@
 
 .reseller-v2-warranty-evidence input[type="file"] {
   min-height: 44px;
-  padding: 7px 10px;
+  padding: var(--space-2) var(--space-2);
   cursor: pointer;
 }
 
 .reseller-v2-warranty-evidence input[type="file"]::file-selector-button {
-  margin-right: 11px;
-  padding: 0 14px;
+  margin-right: var(--space-3);
+  padding: 0 var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface);
@@ -168,11 +168,12 @@
   min-height: 50px;
   align-items: center;
   justify-content: center;
-  gap: 9px;
+  gap: var(--space-2);
   border: 0;
-  border-radius: var(--radius-sm);
-  background: var(--status-success);
-  color: var(--text-inverse);
+  border-radius: var(--radius-pill);
+  background: var(--accent-violet);
+  box-shadow: 0 1px 0 0 color-mix(in srgb, white 20%, transparent) inset;
+  color: var(--text-on-inverse);
   font: inherit;
   font-size: 13px;
   font-weight: 700;
@@ -185,9 +186,9 @@
 }
 
 .reseller-v2-warranty-submit:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--status-success) 84%, black);
+  background: color-mix(in srgb, var(--accent-violet) 86%, white);
   transform: translateY(-1px);
-  box-shadow: var(--shadow-lift);
+  box-shadow: var(--shadow-glow);
 }
 
 .reseller-v2-warranty-submit:active:not(:disabled) {
@@ -210,7 +211,7 @@
 }
 
 .reseller-v2-warranty-history {
-  margin-top: 14px;
+  margin-top: var(--space-3);
 }
 
 .reseller-v2-warranty-claims {
@@ -221,8 +222,8 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 14px;
-  padding: 16px 20px;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--border);
 }
 
@@ -245,7 +246,7 @@
 }
 
 .reseller-v2-warranty-claim small {
-  margin-top: 5px;
+  margin-top: var(--space-1);
   color: var(--text-muted);
   font-size: 11px;
   line-height: 1.55;
@@ -254,7 +255,7 @@
 
 .reseller-v2-warranty-claim-note {
   margin: 9px 0 0;
-  padding: 10px 12px;
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-raised);
@@ -270,7 +271,7 @@
 .reseller-v2-warranty-claim-evidence {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   margin: 9px 0 0;
   color: var(--text-muted);
   font-size: 10.5px;
@@ -279,12 +280,12 @@
 @media (max-width: 767px) {
   .reseller-v2-warranty-panel > header {
     flex-direction: column;
-    gap: 8px;
+    gap: var(--space-2);
   }
 
   .reseller-v2-warranty-form,
   .reseller-v2-warranty-panel-note {
-    padding: 16px;
+    padding: var(--space-4);
   }
 
   .reseller-v2-warranty-details {
@@ -293,7 +294,7 @@
 
   .reseller-v2-warranty-claim {
     grid-template-columns: minmax(0, 1fr);
-    gap: 10px;
+    gap: var(--space-2);
   }
 
   .reseller-v2-warranty-submit {
