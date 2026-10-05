@@ -1963,9 +1963,19 @@ async function readJsonIfExists(filePath, fallback) {
   }
 }
 
+/*
+ * Written through a temp file and a rename, not a bare `fs.writeFile`.
+ *
+ * The list files this writes are not ours alone. The bot reads two of these
+ * exact paths -- `apps/bot/database/lists.json` and `database/list.json`, via
+ * `readLegacyLists` (`apps/bot/lib/json-store.js:354`) -- and writes them itself
+ * through `writeLegacyLists`. `fs.writeFile` truncates the target before it
+ * writes, so a bot read landing in that window parses invalid JSON. The bot
+ * catches that per-path and skips it (`json-store.js:362`), which does not fail
+ * loudly: the group simply looks like it has no list entries for one poll.
+ */
 async function writeJsonFilePretty(filePath, value) {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await writeJsonFileAtomic(filePath, value);
 }
 
 async function readFirstNonEmptyJson(filePaths, fallback) {
@@ -2063,7 +2073,24 @@ async function readLegacyGroupLists() {
   const hasModernLists = modernLists && typeof modernLists === "object" && !Array.isArray(modernLists) && Object.keys(modernLists).length > 0;
   const sourceLists = hasModernLists ? modernLists : mergeDashboardGroupMaps(appBotLists, legacyLists);
   if (!hasModernLists && sourceLists && Object.keys(sourceLists).length > 0) {
-    await writeJsonFilePretty(modernListPath, sourceLists).catch(() => {});
+    /*
+     * This is a backfill of the modern file from the two legacy copies, and it
+     * writes the same `lists.json` that `cleanupExpiredRentalGroupLists`
+     * rewrites. Both go through the one list queue so a cleanup cannot delete a
+     * group and have this backfill put it straight back.
+     *
+     * It stays best-effort (`.catch`): a read must not start failing because a
+     * cache-warming write could not land, and the caller has a usable value
+     * either way.
+     */
+    await queueLegacyListMutation(async () => {
+      // Re-read under the queue. Between the read above and this write, a
+      // concurrent writer may have populated the modern file, and backfilling
+      // from the legacy copies would then overwrite newer data with older.
+      const current = await readJsonIfExists(modernListPath, {});
+      if (current && typeof current === "object" && !Array.isArray(current) && Object.keys(current).length > 0) return;
+      await writeJsonFilePretty(modernListPath, sourceLists);
+    }).catch(() => {});
   }
 
   return Object.entries(sourceLists).map(([groupJid, groupData]) => {
@@ -2098,35 +2125,63 @@ function rentalExpiredForCleanup(rental = {}, now = Date.now()) {
   return timestamp > 0 && timestamp <= now - retentionDays * 86400000;
 }
 
+/*
+ * This deletes whole group entries from three list files that a different
+ * process -- the bot -- also reads and writes.
+ *
+ * Two things were wrong with it. The read and the write were not serialised
+ * against each other, so a concurrent `readLegacyGroupLists` backfill or a bot
+ * `writeLegacyLists` could land between them and be erased by the whole-file
+ * write. And it was a bare truncating `fs.writeFile`, which the bot can read
+ * mid-write.
+ *
+ * The queue is the same shape as `queueLegacyRentalMutation` below, and for the
+ * same reason: the *reads* have to be inside the queued task. Ordering only the
+ * writes would leave both callers merging into the same stale base, which is the
+ * race unchanged. One queue covers all three files so a group cannot be deleted
+ * from one copy and survive in another.
+ */
+let legacyListWriteQueue = Promise.resolve();
+
+function queueLegacyListMutation(task) {
+  // `then(task, task)`, not `then(task)`: a rejected predecessor must not reject
+  // the chain, or every later list write fails too.
+  const run = legacyListWriteQueue.then(task, task);
+  legacyListWriteQueue = run.catch(() => undefined);
+  return run;
+}
+
 async function cleanupExpiredRentalGroupLists() {
-  const rentals = await readLegacyRentals();
-  const expiredGroupJids = Object.entries(rentals)
-    .filter(([, rental]) => rentalExpiredForCleanup(rental))
-    .map(([groupJid]) => groupJid)
-    .filter(Boolean);
-  if (!expiredGroupJids.length) return { cleaned: 0, groups: [] };
+  return queueLegacyListMutation(async () => {
+    const rentals = await readLegacyRentals();
+    const expiredGroupJids = Object.entries(rentals)
+      .filter(([, rental]) => rentalExpiredForCleanup(rental))
+      .map(([groupJid]) => groupJid)
+      .filter(Boolean);
+    if (!expiredGroupJids.length) return { cleaned: 0, groups: [] };
 
-  const listPaths = [
-    whatsappDatabasePath("lists.json"),
-    path.join(legacyRootDir, "apps", "bot", "database", "lists.json"),
-    path.join(legacyRootDir, "database", "list.json"),
-  ];
-  const cleanedGroups = new Set();
-  for (const listPath of listPaths) {
-    const lists = await readJsonIfExists(listPath, {});
-    if (!lists || typeof lists !== "object" || Array.isArray(lists)) continue;
-    let changed = false;
-    for (const groupJid of expiredGroupJids) {
-      if (Object.prototype.hasOwnProperty.call(lists, groupJid)) {
-        delete lists[groupJid];
-        cleanedGroups.add(groupJid);
-        changed = true;
+    const listPaths = [
+      whatsappDatabasePath("lists.json"),
+      path.join(legacyRootDir, "apps", "bot", "database", "lists.json"),
+      path.join(legacyRootDir, "database", "list.json"),
+    ];
+    const cleanedGroups = new Set();
+    for (const listPath of listPaths) {
+      const lists = await readJsonIfExists(listPath, {});
+      if (!lists || typeof lists !== "object" || Array.isArray(lists)) continue;
+      let changed = false;
+      for (const groupJid of expiredGroupJids) {
+        if (Object.prototype.hasOwnProperty.call(lists, groupJid)) {
+          delete lists[groupJid];
+          cleanedGroups.add(groupJid);
+          changed = true;
+        }
       }
+      if (changed) await writeJsonFilePretty(listPath, lists);
     }
-    if (changed) await writeJsonFilePretty(listPath, lists);
-  }
 
-  return { cleaned: cleanedGroups.size, groups: Array.from(cleanedGroups) };
+    return { cleaned: cleanedGroups.size, groups: Array.from(cleanedGroups) };
+  });
 }
 
 async function readActiveLegacyGroupLists() {
