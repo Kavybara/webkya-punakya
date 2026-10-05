@@ -1,4 +1,5 @@
 import { databaseLossMessage, detectDatabaseLoss } from "../services/data-loss-detector.js";
+import { bootstrapMetadata } from "../services/system-dto-service.js";
 
 export function registerSystemRoutes(app, deps) {
   const {
@@ -85,10 +86,7 @@ export function registerSystemRoutes(app, deps) {
 
   app.get("/api/bootstrap", requireAuth(["owner"]), async (_req, res) => {
     const db = await readDbSnapshot();
-    res.json({
-      whatsappRentals: await mergedWhatsappRentals(db),
-      whatsappGroupLists: await readActiveLegacyGroupLists(),
-    });
+    res.json(bootstrapMetadata(await mergedWhatsappRentals(db), await readActiveLegacyGroupLists()));
   });
 
   app.get("/api/events", requireAuth(["owner", "reseller"]), async (req, res) => {

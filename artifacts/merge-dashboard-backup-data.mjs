@@ -52,18 +52,23 @@ active.settings = {
  * of this script, which meant it was committed to the repository *and* written
  * to terminal scrollback and CI logs on every run.
  *
- * Nothing about the merge needs it. On the next boot the server reads
+ * Dropping the *plaintext* field is safe. On the next boot the server reads
  * OWNER_PASSWORD from the environment and re-hashes it into ownerPasswordHash
- * (server/index.js, migrateOwnerCredentials), so the plaintext field is a
- * legacy input that is deleted again immediately afterwards. Dropping it here
- * cannot lock the owner out -- the .env value wins.
+ * (server/index.js, migrateOwnerCredentials); and if .env has no such value,
+ * migrateOwnerCredentials falls back to hashing a surviving plaintext field
+ * before deleting it. Either way the credential still exists afterwards, and it
+ * also clears any stale plaintext carried in by the spread above.
  *
- * The delete also clears the field carried in from the backup by the spread
- * above, so a stale plaintext password sitting inside an old backup cannot be
- * merged into the live database.
+ * Dropping ownerPasswordHash -- which an earlier version of this file also did
+ * -- was a lockout waiting to happen. That hash is the *only* usable credential
+ * once the plaintext is gone. If .env has no OWNER_PASSWORD (it ships empty in
+ * .env.example), migrateOwnerCredentials then has nothing left to hash: every
+ * branch of its owner-password cascade tests false, ownerPasswordHash stays
+ * undefined, and no password can authenticate at all. The credential survives
+ * here; the secret's exposure in git history is a rotation problem, which is
+ * what docs/ROTATE-CREDENTIALS.md section 4.2 is for.
  */
 delete active.settings.ownerPassword;
-delete active.settings.ownerPasswordHash;
 
 for (const key of [
   "resellers",

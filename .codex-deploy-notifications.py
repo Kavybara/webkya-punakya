@@ -7,6 +7,9 @@ import paramiko
 
 
 def password():
+    configured = os.environ.get("VPS_PASSWORD", "").strip()
+    if configured:
+        return configured
     for candidate in (".env", "apps/dashboard/.env"):
         if not os.path.exists(candidate):
             continue
@@ -17,7 +20,7 @@ def password():
                 if line and not line.startswith("#") and "=" in line:
                     key, value = line.split("=", 1)
                     values[key.strip()] = value.strip().strip('"').strip("'")
-        for key in ("VPS_PASSWORD", "OWNER_PASSWORD"):
+        for key in ("VPS_PASSWORD",):
             if values.get(key):
                 return values[key]
     raise RuntimeError("VPS password is not configured locally")
