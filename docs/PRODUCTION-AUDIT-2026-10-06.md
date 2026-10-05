@@ -5,8 +5,11 @@
 Penilaian sementara: **84/100, layak diuji di staging dengan catatan**.
 Ini penilaian engineering berbasis bukti lokal, bukan sertifikasi.
 Target minimal 90/100 belum terbukti: workflow CI belum dijalankan di GitHub dan
-integrasi eksternal belum diuji live. Tidak ada push, deploy, rotasi credential,
-rewrite history, atau perubahan layanan eksternal dalam pekerjaan ini.
+alur integrasi eksternal lengkap belum diuji live. Tidak ada push, deploy,
+rotasi credential, atau rewrite history. Dengan izin pengguna, satu pesan
+WhatsApp owner dan satu invoice QRIS Rp1.000 yang belum dibayar dibuat; inbox
+email uji diperiksa read-only. Tidak ada order aplikasi, stok, list grup,
+status rental, profil owner atau konfigurasi integrasi yang diubah oleh probe.
 
 Baseline perubahan: commit cdd4c46, branch feat/kavya-console-redesign.
 Perubahan awal pengguna, termasuk dependensi framer-motion pada root, dipertahankan.
@@ -22,16 +25,27 @@ Perubahan awal pengguna, termasuk dependensi framer-motion pada root, dipertahan
 | P1.5 Dependensi | Audit produksi root/dashboard/bot nol vulnerability; Axios/Router/ws/form-data/protobufjs/sharp diperbarui | Full audit dashboard masih 5 high pada toolchain build |
 | P1.6 Backup | .env dan sesi Baileys tidak masuk default; runbook dan README arsip diselaraskan | Database settings dan credential akun tetap rahasia dalam backup; opt-in session tersedia |
 | P1.7 Rental | Database utama authoritative, kosong/rusak fail-closed; pause dibaca langsung; journal/reconcile/rollback mirror, permission 0600 | Dua file tidak atomik sebagai satu transaksi; kegagalan rollback bisa meninggalkan mirror berbeda sampai reconcile |
-| P1.8 CI | Workflow install terkunci, audit runtime, unit, typecheck, lint, build, bot check, browser dan paket release | Belum ada hasil GitHub Actions hijau; npm ci belum diuji di clean Linux lokal |
-| P2.9 E2E | 10 tes desktop/mobile pada build produksi: login owner/reseller, payment/fulfillment idempotent, manual warranty, expiry, rental paused | Pembelian/replacement API-assisted; transport provider fixture, bukan transaksi/WhatsApp/Sheets live atau UI checkout penuh |
-| P2.10 Restore | Arsip terenkripsi ke direktori kosong; salah key dan tampering ditolak; hash, jumlah record, list terbaru dan rental paused cocok | Rollback kode berupa simulasi fixture, bukan deployment rollback VPS atau boot restored app penuh |
+| P1.8 CI | Workflow install terkunci; clean local clone Windows menjalankan npm ci di tiga package, audit runtime, typecheck, bot check dan build | Belum ada GitHub Actions hijau atau clean install Linux; push ditahan atas permintaan pengguna |
+| P2.9 E2E | 12 tes desktop/mobile pada build produksi, termasuk katalog, checkout, pembayaran dan akun terkirim melalui UI | Callback provider disimulasikan; replacement dan beberapa pemeriksaan API-assisted, bukan alur paid payment/warranty/Sheets live |
+| P2.10 Restore | Arsip terenkripsi ke direktori kosong; hash/record/pause/list cocok; boot kode hasil restore, login reseller, kegagalan rollout dan rollback kode diuji | Boot memakai dependency lokal yang ditautkan; bukan restore/rollback deployment Linux VPS |
 | P2.11 Observability | DTO, mirror, logging dipisahkan; request ID, redaksi error/secret/URL, structured HTTP logs, health mirror/Sheets | index.js masih besar; belum ada APM atau pengujian failover provider live |
 
 ## Verifikasi
 
 - Bot: 63 tes lulus.
-- Dashboard: 838 tes lulus.
-- Browser: 10/10 lulus, desktop dan mobile; dijalankan ulang sesudah build terbaru.
+- Dashboard: 840 tes lulus.
+- Browser: 12/12 lulus, desktop dan mobile; termasuk checkout UI dan delivery.
+- Clean local clone Windows: npm ci root/dashboard/bot, tiga audit runtime,
+  typecheck, bot check dan build produksi lulus. Install scripts dijalankan;
+  checkout sementara dibersihkan, tanpa push atau perubahan runtime pengguna.
+- Restore boot drill menghidupkan entrypoint hasil restore dan memverifikasi
+  login, list terbaru serta rental paused. Simulasi kode rollout rusak gagal
+  boot; rollback kode mengembalikan hash dan boot tanpa mengubah database.
+- Live: login owner berhasil; pesan WhatsApp owner diterima dan dikonfirmasi
+  pengguna. Provider membuat invoice QRIS Rp1.000, belum dibayar, tanpa
+  order aplikasi atau konsumsi stok. Autentikasi inbox IMAP berhasil; pencarian
+  email Netflix untuk alamat uji milik pengguna di INBOX 24 jam terakhir kosong.
+  Tidak membaca body email, meminta kode Netflix, atau membuktikan ekstraksi kode.
 - Typecheck, ESLint, build produksi, bot syntax check dan git diff --check lulus.
 - Audit npm --omit=dev root/dashboard/bot: 0 vulnerability.
 - Coverage terfokus: rental mirror 100% line, 95.92% branch, 91.67% function;
@@ -49,6 +63,7 @@ npm run lint --prefix apps/dashboard
 npm run whatsapp:check
 npm run app:build
 npm run test:e2e --prefix apps/dashboard
+node scripts/maintenance/verify-clean-install.mjs
 npm audit --omit=dev --audit-level=high
 npm audit --prefix apps/dashboard --omit=dev --audit-level=high
 npm audit --prefix apps/bot --omit=dev --audit-level=high
@@ -74,18 +89,23 @@ git diff --check cdd4c46
    reconcile. Journal tidak menjamin dua filesystem berubah atomik.
 5. Backup memuat data pribadi dan credential database. Pengiriman harus
    terenkripsi, key disimpan terpisah, dan offsite recovery harus diuji.
-6. Build/E2E lokal belum membuktikan email-code, WhatsApp pengiriman, Pakasir
-   live, Google Sheets writeback, Cloudflare atau kondisi VPS.
+6. Pesan WhatsApp owner sudah terbukti diterima, pembuatan invoice Pakasir dan
+   autentikasi inbox live berhasil. Ini belum membuktikan kode email baru,
+   pembayaran sampai webhook/fulfillment live, warranty/Sheets writeback,
+   seluruh grup atau ketahanan VPS. Probe live menggunakan versi yang sedang
+   terpasang, bukan perubahan lokal ini. Public health live masih mengembalikan
+   diagnosis detail; perbaikan local belum dideploy dan belum tervalidasi live.
 7. Health detail memakai status/snapshot yang tersedia; konfigurasi provider
    tidak boleh diperlakukan sebagai hasil probe sukses.
 
 ## Sebelum Target 90/100
 
-Jalankan workflow GitHub dengan persetujuan push, staging memakai data uji,
-transaksi payment sandbox yang disetujui, pengiriman WhatsApp/email, Sheets
-writeback, dan restore/boot/rollback pada Linux kosong. Lengkapi browser checkout
-serta migrasi toolchain build. Audit ulang dari hasil nyata, bukan menaikkan angka
-karena checklist kode selesai.
+Jalankan workflow GitHub dengan persetujuan push, staging kode baru memakai data
+uji, payment sampai callback/fulfillment, kode Netflix baru milik pengguna,
+Sheets writeback dan warranty yang disetujui, serta restore/boot/rollback pada
+Linux kosong. Migrasi toolchain build membutuhkan pemeriksaan visual terpisah.
+Audit ulang dari hasil nyata, bukan menaikkan angka karena checklist kode selesai.
+Lihat LIVE-VERIFICATION-2026-10-06.md untuk batas probe eksternal.
 
 ## File Berubah
 
@@ -117,12 +137,14 @@ Daftar relatif terhadap root repository sejak baseline di atas, plus laporan ini
 - `apps/dashboard/server/services/system-dto-service.js`
 - `apps/dashboard/server/store.js`
 - `apps/dashboard/server/tests/code-release.test.mjs`
+- `apps/dashboard/server/tests/boot-helper-existing-runtime.test.mjs`
 - `apps/dashboard/server/tests/helpers/boot-server.mjs`
 - `apps/dashboard/server/tests/legacy-import-empty-source.test.mjs`
 - `apps/dashboard/server/tests/observability.test.mjs`
 - `apps/dashboard/server/tests/rental-legacy-write-queue.test.mjs`
 - `apps/dashboard/server/tests/rental-mirror-service.test.mjs`
 - `apps/dashboard/server/tests/restore-runbook-accuracy.test.mjs`
+- `apps/dashboard/server/tests/restore-boot-drill.test.mjs`
 - `apps/dashboard/server/tests/route-modules.test.mjs`
 - `apps/dashboard/server/tests/runtime-backup-full-restore.test.mjs`
 - `apps/dashboard/server/tests/server-root-path.test.mjs`
@@ -147,4 +169,6 @@ Daftar relatif terhadap root repository sejak baseline di atas, plus laporan ini
 - `scripts/deploy/create-code-release.mjs`
 - `scripts/deploy/release-files.mjs`
 - `scripts/startup/kavya-start.mjs`
+- `scripts/maintenance/verify-clean-install.mjs`
 - `docs/PRODUCTION-AUDIT-2026-10-06.md`
+- `docs/LIVE-VERIFICATION-2026-10-06.md`
