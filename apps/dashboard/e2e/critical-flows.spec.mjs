@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import fs from "node:fs/promises";
+import path from "node:path";
 import { withServer, fixtureDatabase } from "../server/tests/helpers/boot-server.mjs";
 import { hashPassword } from "../server/security.js";
 
@@ -86,7 +87,7 @@ test("reseller completes catalog selection, checkout and account delivery throug
   }, { database: fixture(), preload });
 });
 
-test("manual warranty replacement and expired credential access stay isolated", async ({ page }) => {
+test("reseller claim and owner manual replacement work through the UI without duplicate notifications", async ({ page }, testInfo) => {
   const db = fixture();
   const now = new Date().toISOString();
   const future = new Date(Date.now() + 30 * 86400000).toISOString();
@@ -95,14 +96,41 @@ test("manual warranty replacement and expired credential access stay isolated", 
   db.managedAccounts = [{ id: "acct-active", stockId: "stk-1", orderId: "ORD-FIXTURE", sourceOrderId: "ORD-FIXTURE", resellerId: "res-kya", productId: "netflix", variantId: "netflix-1m", product: "Netflix", variant: "1 Bulan", email: "fixture-account@example.test", password: "fixture-account-password", profile: "a", startedAt: now, expiresAt: future, durationDays: 30, status: "active" },
     { id: "acct-expired", resellerId: "res-kya", product: "Netflix", email: "expired@example.test", password: "expired-canary-password", pin: "9876", expiresAt: "2020-01-01", status: "expired" }];
   await withServer(async ({ base, databasePath }) => {
-    await login(page, base, "owner", "boot-test-password");
-    const claimResult = await ok(await page.request.post(`${base}/api/warranty-claims`, { data: { accountId: "acct-active", issue: "Tidak dapat login" } }));
+    await login(page, base, "kya", password);
+    await page.goto(`${base}/reseller-v2/warranty`);
+    await page.getByLabel("Pilih Akun", { exact: true }).selectOption("acct-active");
+    await page.getByLabel(/^Kendala/).fill("Tidak dapat login pada akun fixture");
+    const evidence = await page.screenshot();
+    await page.getByLabel(/^Bukti Kendala/).setInputFiles({ name: "fixture-evidence.png", mimeType: "image/png", buffer: evidence });
+    await expect(page.getByRole("status").filter({ hasText: /siap dikirim/ })).toBeVisible();
+    const created = page.waitForResponse(response => response.url().endsWith("/api/warranty-claims") && response.request().method() === "POST");
+    await page.getByRole("button", { name: "Buat Klaim Garansi", exact: true }).click();
+    const claimResult = await ok(await created);
     const claimId = claimResult.claim?.id || claimResult.id;
+    await page.request.post(`${base}/api/auth/logout`);
+    await login(page, base, "owner", "boot-test-password");
+    await page.goto(`${base}/owner-v2/warranty?claim=${encodeURIComponent(claimId)}`);
+    await page.getByRole("button", { name: "Ganti manual / By Order", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Login atau email akun baru", { exact: true }).fill("new@example.test");
+    await dialog.getByLabel("Password akun baru", { exact: true }).fill("fixture-replacement-password");
+    await dialog.getByLabel("Profil", { exact: true }).fill("b");
+    await dialog.getByLabel("Catatan Owner", { exact: true }).fill("Fixture replacement");
+    await page.screenshot({ path: testInfo.outputPath("warranty-replacement.png"), fullPage: true });
+    const replaced = page.waitForResponse(response => response.url().endsWith(`/api/warranty-claims/${claimId}/replace-manual`) && response.request().method() === "POST");
+    await dialog.getByRole("button", { name: "Simpan pengganti", exact: true }).click();
     const replacementData = { reason: "Fixture replacement", account: { email: "new@example.test", password: "fixture-replacement-password", profile: "b" } };
-    const first = await ok(await page.request.post(`${base}/api/warranty-claims/${claimId}/replace-manual`, { data: replacementData }));
+    const first = await ok(await replaced);
     expect(first.claim.status).toBe("replaced");
+    const outboundFile = path.join(path.dirname(databasePath), "provider-messages.jsonl");
+    const messages = () => fs.readFile(outboundFile, "utf8").then(text => text.trim().split("\n").map(line => JSON.parse(line)));
+    const sent = await messages();
+    expect(sent).toHaveLength(3);
+    expect(sent.every(message => ["628111222333", "6281234567890"].includes(message.to))).toBe(true);
+    expect(JSON.stringify(sent)).not.toContain("fixture-replacement-password");
     const again = await ok(await page.request.post(`${base}/api/warranty-claims/${claimId}/replace-manual`, { data: replacementData }));
     expect(again.idempotent).toBe(true);
+    expect(await messages()).toHaveLength(sent.length);
     const saved = JSON.parse(await fs.readFile(databasePath, "utf8"));
     expect(saved.managedAccounts.filter((item) => item.email === "new@example.test")).toHaveLength(1);
     await page.goto("about:blank");
@@ -115,7 +143,11 @@ test("manual warranty replacement and expired credential access stay isolated", 
     expect((await page.request.get(`${base}/api/accounts/acct-expired/credentials`)).status()).toBe(403);
     await page.goto(`${base}/reseller-v2/warranty`);
     await expect(page.getByRole("heading", { name: /Garansi/ }).first()).toBeVisible();
-  }, { database: db, preload });
+    await page.getByRole("link", { name: "Buka di Akun Saya", exact: true }).click();
+    await expect(page).toHaveURL(/\/reseller-v2\/accounts\?account=/);
+    const replacementDelivery = await ok(await page.request.get(`${base}/api/accounts/${first.claim.replacement.newAccountId}/delivery`));
+    expect(JSON.stringify(replacementDelivery)).toContain("fixture-replacement-password");
+  }, { database: db, preload, env: { E2E_TRANSPORT_AUDIT: "1" } });
 });
 
 test("rental active and paused states persist through owner update and page reload", async ({ page }) => {
