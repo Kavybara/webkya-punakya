@@ -2,6 +2,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
 import { canonicalRentalMap, createRentalMirror } from "./services/rental-mirror-service.js";
+import { installConsoleRedaction, requestTelemetry } from "../../../packages/shared/observability.mjs";
 import { ImapFlow } from "imapflow";
 import { execFile, spawn } from "node:child_process";
 import crypto from "node:crypto";
@@ -181,6 +182,8 @@ for (const envPath of [
 const whatsappDatabaseDir = path.resolve(
   process.env.WHATSAPP_DATABASE_DIR || path.join(legacyRootDir, "apps", "bot", "database"),
 );
+installConsoleRedaction({ structured: true });
+app.use(requestTelemetry());
 const configuredPort = process.env.DASHBOARD_API_PORT || process.env.API_PORT || process.env.SERVER_PORT || process.env.PORT;
 const configuredHost = process.env.DASHBOARD_API_HOST || process.env.API_HOST;
 const port = Number(configuredPort || 4174);
@@ -9347,7 +9350,7 @@ app.use((req, res, next) => {
   });
 });
 
-app.use(async (error, _req, res, _next) => {
+app.use(async (error, req, res, _next) => {
   if (error?.maintenance?.reason) {
     await updateDb((db) => {
       if (error.maintenance.source !== "google_sheets" || !isGoogleSheetsQuotaError(error.maintenance.reason || "")) {
@@ -9360,7 +9363,8 @@ app.use(async (error, _req, res, _next) => {
   if (status === 429 && error.retryAfterSeconds) {
     res.setHeader("Retry-After", String(Math.max(1, Math.ceil(error.retryAfterSeconds))));
   }
-  res.status(status).json({ error: error.message || "Server error" });
+  console.error({ event: "http_error", requestId: req.requestId, status, error });
+  res.status(status).json({ error: status >= 500 ? "Server error. Hubungi owner dengan nomor referensi ini." : error.message || "Server error", requestId: req.requestId });
 });
 
 await ensureDb();

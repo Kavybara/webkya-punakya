@@ -440,6 +440,8 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 loadRootEnvFile();
+const { installConsoleRedaction } = await import("../../packages/shared/observability.mjs");
+installConsoleRedaction();
 
 const webPort = String(process.env.SERVER_PORT || process.env.DASHBOARD_API_PORT || process.env.PORT || "1912");
 const whatsappPort = String(process.env.WHATSAPP_PORT || "4016");
@@ -466,8 +468,7 @@ function readDashboardDb() {
   try {
     return JSON.parse(readFileSync(dashboardDbPath, "utf8"));
   } catch (error) {
-    logWarn(`Dashboard database belum bisa dibaca: ${error.message}`);
-    return { settings: {} };
+    throw new Error(`Database startup tidak dapat dibaca; file asli tidak diubah: ${error.message}`, { cause: error });
   }
 }
 

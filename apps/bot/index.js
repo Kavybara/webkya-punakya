@@ -1,4 +1,5 @@
 import { config } from "./config.js";
+import { installConsoleRedaction } from "../../packages/shared/observability.mjs";
 import { createLogger } from "./lib/logger.js";
 import { ensureRuntimeDirs } from "./lib/runtime.js";
 import { JsonStore } from "./lib/json-store.js";
@@ -66,6 +67,7 @@ function isWhatsAppTransportError(error) {
   );
 }
 
+installConsoleRedaction();
 const logger = createLogger(config);
 let connection = null;
 

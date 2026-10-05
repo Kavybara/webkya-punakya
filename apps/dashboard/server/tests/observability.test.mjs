@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { redactLogValue, requestTelemetry, registerLogSecrets } from "../../../../packages/shared/observability.mjs";
+import { redactLogValue, requestTelemetry, registerLogSecrets, installConsoleRedaction } from "../../../../packages/shared/observability.mjs";
 
 test("logs redact nested secrets, URL tokens, Bearer values and registered opaque credentials", () => {
   registerLogSecrets({ arbitraryToken: "fixture-opaque-provider-value" });
@@ -8,6 +8,22 @@ test("logs redact nested secrets, URL tokens, Bearer values and registered opaqu
   const serialized = JSON.stringify(redacted);
   for (const secret of ["do-not-log", "secret-key", "secret-value", "opaque-session-token", "fixture-opaque-provider-value"]) assert.equal(serialized.includes(secret), false);
   assert.equal(redacted.nested.ok, "visible");
+});
+
+test("console wrapping protects secret errors and can be restored without side effects", () => {
+  const original = console.error;
+  const lines = [];
+  console.error = (line) => lines.push(line);
+  const restore = installConsoleRedaction({ structured: true });
+  try {
+    console.error(new Error("token=fixture-console-secret"));
+    const record = JSON.parse(lines[0]);
+    assert.equal(record.level, "error");
+    assert.equal(record.message.includes("fixture-console-secret"), false);
+    assert.equal(redactLogValue([null, new Error("password=fixture-error")])[1].message.includes("fixture-error"), false);
+    const circular = {}; circular.self = circular;
+    assert.equal(redactLogValue(circular).self, "[Circular]");
+  } finally { restore(); console.error = original; }
 });
 
 test("HTTP logs use generated IDs and route patterns, never request bodies, queries or raw personal paths", () => {

@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import { EventEmitter } from "node:events";
 import path from "node:path";
 import { defaultData } from "./default-data.js";
+import { registerLogSecrets } from "../../../packages/shared/observability.mjs";
 
 const rootDir = process.cwd();
 const runtimeDir = process.env.RUNTIME_PATH || path.join(rootDir, "runtime");
@@ -100,6 +101,7 @@ async function loadDbUnlocked(options = {}) {
     if (!loadInFlight) {
       loadInFlight = (async () => {
         const db = await readJsonFile(databasePath);
+        registerLogSecrets(db.settings || {});
         if (mergeMissing(db, defaultData) && persistMissing) {
           await writeJsonFileAtomic(databasePath, db);
         } else {
