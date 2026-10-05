@@ -119,6 +119,34 @@ async function handle(sock, messageInfo) {
 
     const [docId2, userData2] = receiverData;
 
+    /*
+     * Validasi ulang: pengirim dan penerima harus dua akun yang BERBEDA.
+     *
+     * Guard di atas (baris 78) hanya membandingkan nomor, jadi tidak menangkap
+     * kasus satu orang yang punya dua alias. `registerUser` (lib/users.js:242)
+     * mengizinkan satu akun memegang satu alias @lid dan satu @s.whatsapp.net
+     * sekaligus, dan `sender` bisa berupa JID @lid sementara `targetNumber`
+     * selalu hasil `convertToJid` yang mengembalikan nomor telepon. Digitnya
+     * berbeda, jadi guard lolos -- padahal `findUser` (lib/users.js:297)
+     * mencocokkan lewat alias dan mengembalikan entri db yang sama persis.
+     *
+     * Akibatnya dua baris update di bawah berlaku pada satu akun: yang pertama
+     * mengurangi saldo, yang kedua menambahkannya lagi dari nilai yang sudah
+     * dikurangi. Jadi saldo tidak berkurang, tapi bertambah -- dua kali jumlah
+     * yang dikirim. Tidak perlu balapan dan tidak butuh hak akses apa pun:
+     * cukup mengulang `.sendmoney <nomor sendiri> <jumlah>`.
+     *
+     * Yang benar: bandingkan identitas yang sudah diresolve, yaitu docId yang
+     * sama dengan yang dipakai `updateUser`, bukan digit yang sudah dinormalisasi.
+     */
+    if (docId1 === docId2) {
+      return await sock.sendMessage(
+        remoteJid,
+        { text: `⚠️ _Anda tidak bisa mengirim money ke nomor Anda sendiri._` },
+        { quoted: message }
+      );
+    }
+
     // Update money pengguna pengirim dan penerima
     await updateUser(sender, { money: userData1.money - moneyToSend });
     await updateUser(targetNumber, { money: userData2.money + moneyToSend });
