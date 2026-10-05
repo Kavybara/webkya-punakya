@@ -207,13 +207,30 @@ export class JsonStore {
   }
 
   async update(name, fallback, updater) {
-    this.writeQueue = this.writeQueue.then(async () => {
+    const task = async () => {
       const current = await this.read(name, fallback);
       const next = await updater(current);
       await this.write(name, next);
       return next;
-    });
-    return this.writeQueue;
+    };
+
+    /*
+     * `then(task, task)`, not `then(task)`.
+     *
+     * With a single handler, one rejected write leaves `this.writeQueue`
+     * permanently rejected. Every later `.then()` on a rejected promise never
+     * runs its callback, so the store silently stops persisting anything for the
+     * rest of the process's life -- and the caller of the *next* write sees the
+     * original error, not anything pointing at the queue. A transient disk
+     * error becomes a total outage.
+     *
+     * Passing `task` as the rejection handler too means the chain itself is
+     * never left rejected, while the caller still gets this call's own outcome
+     * from the returned promise. Same shape as the dashboard's `store.js`.
+     */
+    const run = this.writeQueue.then(task, task);
+    this.writeQueue = run.catch(() => undefined);
+    return run;
   }
 
   async getGroupList(groupJid) {
@@ -376,10 +393,35 @@ export class JsonStore {
   }
 
   async updateLegacyLists(updater) {
-    try {
+    /*
+     * Queued through the same `writeQueue` as `update()`, and for the same
+     * reason. This is a read-modify-write over two whole files: it reads both
+     * legacy copies, merges them, mutates the result, and writes all of it
+     * back. Unqueued, two mirror writes in flight both read the same base, both
+     * merge their own group, and both write the whole file back -- so the second
+     * write erases the first edit's group.
+     *
+     * That failure is invisible: this method is best-effort by design, so a lost
+     * write is indistinguishable from a deliberately skipped one. The primary
+     * store still holds the entry, but these mirrors are what the dashboard
+     * reads via `readLegacyGroupLists`, so the group stops appearing there.
+     *
+     * The read has to be inside the queued task. Ordering only the writes would
+     * leave both callers merging into the same stale base, which is the race
+     * unchanged while looking serialised.
+     */
+    const task = async () => {
       const lists = await this.readLegacyLists();
       const next = await updater(lists);
       await this.writeLegacyLists(next);
+    };
+
+    try {
+      // `then(task, task)` so one failed mirror does not poison the queue for
+      // every later write, primary or mirror.
+      const run = this.writeQueue.then(task, task);
+      this.writeQueue = run.catch(() => undefined);
+      await run;
     } catch {
       // Primary Kavya list storage has already been saved; legacy mirror is best-effort.
     }
