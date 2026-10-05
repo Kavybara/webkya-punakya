@@ -146,8 +146,18 @@ export function AppShell({
    * function in a `void` operator that promised nothing was awaited.
    */
   onRefresh?: () => void | Promise<void>;
-  /** Sits under the brand, above the navigation. The reseller's balance. */
-  sidebarTop?: ReactNode;
+  /**
+   * Sits under the brand, above the navigation. The reseller's balance.
+   *
+   * A render function rather than a node, because a collapsed rail is 72px
+   * wide and whatever sits in this slot has to be able to answer that. As a
+   * node the balance card was rendered at full width into the narrow rail,
+   * where its own margin and padding left six pixels of content box. Passing
+   * the state in means the slot's owner decides what a 72px rail means for it
+   * -- and it keeps the shell from needing a wrapper element or a `.ui-`
+   * selector inside a feature stylesheet to say so.
+   */
+  sidebarTop?: (state: { collapsed: boolean }) => ReactNode;
   /** Left of the search field. The owner's system status. */
   topbarLeading?: ReactNode;
   topbarActions?: (controls: { closePopovers: () => void }) => ReactNode;
@@ -263,8 +273,11 @@ export function AppShell({
       </div>
 
       {/* The reseller's balance sits here, between the brand and the
-          navigation, so the number is above the list of things that spend it. */}
-      {sidebarTop}
+          navigation, so the number is above the list of things that spend it.
+          It is handed `collapsed` because it is the one region of the rail
+          whose owner is a different codebase, and a 72px rail means something
+          different for a figure-and-button card than it does for a nav item. */}
+      {sidebarTop?.({ collapsed })}
 
       <ShellNav
         groups={navigation}

@@ -154,19 +154,49 @@ export function ResellerShell({
           </div>
         ) : null
       }
-      sidebarTop={
-        <div className="reseller-v2-side-balance">
-          <span>
-            <WalletCards size={15} aria-hidden="true" /> Saldo
-          </span>
-          <Link className="reseller-v2-balance-link" to={`${SUMMARY_PATH}#saldo`}>
-            {shownBalance}
-          </Link>
-          <button type="button" onClick={openTopUp} aria-label="Top Up saldo">
-            <Plus size={14} aria-hidden="true" /> Top Up
-          </button>
-        </div>
-      }
+      sidebarTop={({ collapsed }) =>
+          /* A collapsed rail is 72px wide. This card's own margin, padding and
+             border used to be resolved inside that anyway, leaving six pixels
+             of content box: the figure clipped to an ellipsis while the two
+             labels beside it overflowed the rail. Nothing in this file could
+             know the rail had collapsed, because the slot arrived as a node.
+
+             It arrives as a render function now, so the branch is here and the
+             shell keeps no knowledge of this card.
+
+             Collapsed, the figure stays -- a balance a reseller cannot see is
+             worse than a cramped one, and the expanded rail shows the same
+             number in the top bar, so this is the smaller of the two rather
+             than the only one. Only the words go; the icons carry the
+             accessible name, as the rail's own icon-only controls do. */
+          collapsed ? (
+            <div className="reseller-v2-side-balance is-compact">
+              <Link
+                className="reseller-v2-balance-link"
+                to={`${SUMMARY_PATH}#saldo`}
+                title={`Saldo ${shownBalance}`}
+              >
+                <WalletCards size={16} aria-hidden="true" />
+                {shownBalance}
+              </Link>
+              <button type="button" onClick={openTopUp} aria-label="Top Up saldo" title="Top Up">
+                <Plus size={14} aria-hidden="true" />
+              </button>
+            </div>
+          ) : (
+            <div className="reseller-v2-side-balance">
+              <span>
+                <WalletCards size={15} aria-hidden="true" /> Saldo
+              </span>
+              <Link className="reseller-v2-balance-link" to={`${SUMMARY_PATH}#saldo`}>
+                {shownBalance}
+              </Link>
+              <button type="button" onClick={openTopUp} aria-label="Top Up saldo">
+                <Plus size={14} aria-hidden="true" /> Top Up
+              </button>
+            </div>
+          )
+        }
       topbarActions={() => (
         <>
           <button type="button" onClick={openTopUp} className="reseller-v2-topup">

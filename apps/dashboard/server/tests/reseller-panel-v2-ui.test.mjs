@@ -60,6 +60,50 @@ test("topbar Top Up action stays compact and never wraps", async () => {
   assert.match(rule, /white-space:\s*nowrap/);
 });
 
+test("the sidebar balance card collapses with the rail instead of overflowing it", async () => {
+  const [shell, appShell, styles] = await Promise.all([
+    source("src/components/reseller-v2/ResellerShell.tsx"),
+    source("src/components/ui/AppShell.tsx"),
+    source("src/components/reseller-v2/reseller-v2.css"),
+  ]);
+
+  /* This one was invisible to the whole suite: the card rendered correctly in
+     a 248px rail and simply broke in a 72px one, and nothing here had a
+     viewport. The rail's other regions drop their words when collapsed
+     (`!collapsed ? <span>...</span> : null`), so the contract is that the
+     balance card answers to the same state. */
+  assert.match(
+    shell,
+    /sidebarTop=\{\(\{ collapsed \}\) =>/,
+    "the balance slot must receive the rail's collapsed state",
+  );
+  assert.match(
+    appShell,
+    /sidebarTop\?:\s*\(state:\s*\{\s*collapsed:\s*boolean\s*\}\)\s*=>\s*ReactNode/,
+    "the slot must stay a render function, so a consumer cannot be handed a node that cannot react to collapse",
+  );
+  assert.match(appShell, /sidebarTop\?\.\(\{ collapsed \}\)/);
+
+  // Both branches are rendered, so a collapsed rail never mounts the words.
+  assert.match(shell, /collapsed \? \(/);
+  assert.match(shell, /is-compact/);
+  assert.match(shell, /openTopUp/);
+
+  // The compact card must not re-introduce the box that overflowed: no plate,
+  // no padding of its own, and a figure that is allowed to ellipsis rather
+  // than spill past the rail edge.
+  const compact = styles.match(/\.reseller-v2-side-balance\.is-compact \{([\s\S]*?)\}/)?.[1] || "";
+  assert.match(compact, /padding:\s*0/);
+  assert.match(compact, /border:\s*0/);
+  assert.match(compact, /overflow:\s*hidden/);
+  assert.match(styles, /\.reseller-v2-side-balance\.is-compact[^{]*\{[^}]*text-overflow:\s*ellipsis/);
+
+  // It must not be re-implemented as a kit selector from the feature
+  // stylesheet -- that boundary is what ui-kit.test.mjs polices, and a second
+  // route to the same state would drift back out of it.
+  assert.doesNotMatch(styles, /\.ui-shell-rail-top/);
+});
+
 test("account credentials are masked in a reseller-owned detail drawer", async () => {
   const accountPage = await source("src/pages/reseller-v2/accounts/page.tsx");
 

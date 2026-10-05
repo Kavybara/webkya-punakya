@@ -45,7 +45,52 @@
   overflow: hidden;
   font-size: 18px;
   text-overflow: ellipsis;
-}.reseller-v2-side-balance .reseller-v2-balance-link {
+}/* The card in a collapsed rail. The branch itself is in the markup, because the
+   rail is 72px there and no amount of CSS can un-shrink six pixels of content
+   box -- the labels are gone rather than clipped, and the words are no longer
+   in the DOM to overflow with.
+
+   What is left gives up the card entirely: no margin of its own, no border, no
+   plate. A rounded rectangle around two icons in a 72px rail is a box with
+   nothing in it. */
+.reseller-v2-side-balance.is-compact {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  margin: var(--space-2) var(--space-2) 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: hidden;
+}
+.reseller-v2-side-balance.is-compact .reseller-v2-balance-link {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-1);
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reseller-v2-side-balance.is-compact > button {
+  display: grid;
+  width: 28px;
+  min-height: 28px;
+  flex: 0 0 auto;
+  padding: 0;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--accent-violet);
+  color: var(--text-on-inverse);
+}
+
+.reseller-v2-side-balance .reseller-v2-balance-link {
   color: var(--text-primary);
   font-size: 18px;
   font-weight: 700;
@@ -70,6 +115,8 @@
    glow. It used to darken the fill by mixing it toward black, which on a
    saturated button reads as dirt rather than as light. */
 .reseller-v2-side-balance > button:hover { background: color-mix(in srgb, var(--accent-violet) 86%, white); transform: translateY(-1px); box-shadow: var(--shadow-glow); }
+
+
 .reseller-v2-topup {
   display: inline-flex;
   height: 40px;
