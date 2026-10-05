@@ -20,6 +20,13 @@ import test from "node:test";
 const runbook = readFileSync(new URL("../../../../docs/RESTORE.md", import.meta.url), "utf8");
 const sheetsSync = readFileSync(new URL("../google-sheets.js", import.meta.url), "utf8");
 
+test("restore documentation distinguishes env secrets from backed-up database settings", () => {
+  assert.match(runbookRow("Kredensial Google Sheets"), /settings/);
+  assert.match(runbook, /pengaturan database.*kredensial/i);
+  const backup = readFileSync(new URL("../../../../packages/shared/runtime-backup.mjs", import.meta.url), "utf8");
+  assert.match(backup, /pengaturan database.*kredensial/i);
+});
+
 // The table is markdown; pull the row for one data kind out of it by its label
 // rather than asserting on prose, so rewording the cell cannot break this.
 function runbookRow(label) {

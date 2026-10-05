@@ -401,6 +401,7 @@ async function writeUploadableArchive({ payload, outputDir, fileName }) {
         "Folder node_modules, tmp, backup lama, release/output besar, dan runtime test tidak ikut agar file tidak membengkak.",
         ".env tidak ikut backup; isi ulang konfigurasi sebelum start. Sesi WhatsApp tidak ikut secara default dan perlu pairing ulang.",
         "Backup berisi data pelanggan dan credential akun. Perlakukan arsip sebagai file rahasia; pengiriman WhatsApp wajib terenkripsi.",
+        "Pengaturan database dapat berisi kredensial integrasi dan ikut backup meskipun .env dikecualikan.",
         "",
       ].join("\n"),
     );

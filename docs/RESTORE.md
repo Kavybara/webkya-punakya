@@ -14,13 +14,17 @@ buka file ini.
 |---|---|---|
 | File `File Backup.tar.gz.enc` | Arsip terenkripsi berisi seluruh data | WhatsApp kamu (dikirim otomatis) |
 | `BACKUP_ENCRYPTION_KEY` | Tanpa ini arsip **tidak bisa dibuka sama sekali** | `~/.ssh/kavya_backup_encryption_key.txt` di komputermu, atau `.env` proyek |
-| Kredensial Google Sheets | Stok & akun sold disinkron dari sini | **Tidak ikut arsip** — isi ulang di `.env` VPS setelah restore |
+| Kredensial Google Sheets | Stok & akun sold disinkron dari sini | Jika hanya di `.env`, isi ulang; jika di `settings` database, dapat ikut arsip |
 | Akses root VPS | Untuk menaruh arsip kembali | SSH ke `root@178.83.188.210` |
 
 > **PENTING.** Tanpa `BACKUP_ENCRYPTION_KEY`, file `.enc` itu tidak bisa dipulihkan
 > oleh siapa pun, termasuk kamu. Kalau kamu tidak tahu di mana key-nya disimpan,
 > itu penting untuk dicari sekarang: temukan dulu sebelum kejadian. Arsip
 > tidak berguna tanpa key.
+
+Pengaturan database (`settings`) dapat berisi kredensial integrasi dan ikut
+backup. Pengecualian `.env` tidak menghapus rahasia yang tersimpan dalam database.
+Simpan arsip dan kunci secara terpisah; jangan membagikan hasil dekripsi.
 
 ---
 
