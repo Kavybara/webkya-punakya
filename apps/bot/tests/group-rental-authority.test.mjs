@@ -45,6 +45,33 @@ test("dashboard whatsappRentals is authoritative over stale bot rental store", a
   assert.equal(result.reason, "group_rental_missing");
 });
 
+test("empty or unreadable canonical database never falls back to an active legacy rental", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "kavya-rental-failclosed-"));
+  const dashboardDbPath = path.join(root, "kavya-db.json");
+  const args = { remoteJid: "group@g.us", commandInfo: { command: "bot" }, isOwner: false,
+    config: { dashboardDatabasePath: dashboardDbPath, paths: { projectRoot: root } },
+    store: { read: async () => ({ "group@g.us": { status: "active", daysLeft: 30 } }) } };
+  for (const content of [JSON.stringify({ whatsappRentals: [] }), "{broken"]) {
+    resetRentalGateCache();
+    await writeFile(dashboardDbPath, content);
+    assert.equal((await shouldBlockExpiredGroup(args)).block, true);
+  }
+});
+
+test("a pause takes effect on the next command, not after a stale cache timeout", async () => {
+  resetRentalGateCache();
+  const root = await mkdtemp(path.join(os.tmpdir(), "kavya-rental-pause-"));
+  const dashboardDbPath = path.join(root, "kavya-db.json");
+  const row = { id: "group@g.us", status: "active", daysLeft: 30 };
+  const args = { remoteJid: row.id, commandInfo: { command: "bot" }, isOwner: false,
+    config: { dashboardDatabasePath: dashboardDbPath, paths: { projectRoot: root } }, store: { read: async () => ({}) } };
+  await writeFile(dashboardDbPath, JSON.stringify({ whatsappRentals: [row] }));
+  assert.equal((await shouldBlockExpiredGroup(args)).block, false);
+  row.status = "paused";
+  await writeFile(dashboardDbPath, JSON.stringify({ whatsappRentals: [row] }));
+  assert.equal((await shouldBlockExpiredGroup(args)).block, true);
+});
+
 test("localized Indonesian rental end date overrides stale daysLeft", async () => {
   await withFrozenNow(new Date("2026-08-25T00:00:00+07:00").getTime(), async () => {
     resetRentalGateCache();
