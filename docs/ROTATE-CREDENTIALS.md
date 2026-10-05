@@ -9,6 +9,11 @@ seseorang membacanya:
 | Password root VPS | Pernah ditulis penuh di transcript chat |
 | `CLOUDFLARED_TOKEN` | Pernah ditulis penuh di transcript chat |
 
+Ditambah dua yang ditemukan lewat audit source (lihat bagian 4–5): `TENOR_API_KEY`
+dan password owner yang tertanam di `artifacts/merge-dashboard-backup-data.mjs`.
+Keduanya **sudah dihapus dari kodenya**, tapi masih ada di riwayat git — jadi
+memang harus dianggap bocor.
+
 Yang **tidak** termasuk: password akun reseller, API key Google, token WA bot —
 kalau salah satu bocor, gejalanya berbeda dan penanganannya juga berbeda.
 
@@ -138,3 +143,162 @@ Jangan panik, jangan hastily mengubah file lain. Urutan pemulihannya:
 
 Yang **tidak boleh** terjadi: menghapus `apps/dashboard/runtime`, database, atau
 `.env` karena ingin "mulai bersih". Semua data ada di sana.
+
+---
+
+# 4. Kredensial yang ditemukan lewat audit source
+
+Bagian 1–3 menangani kredensial yang bocor lewat chat. Dua di bawah bocor lewat
+**kode yang ikut ter-commit**, yang berbeda jenis: kuncinya ada di dalam
+repository, jadi siapa pun yang mengkloning (atau repository publik) punya
+salinannya.
+
+Keduanya sudah tidak ada di source sekarang. Yang tersisa adalah **riwayat
+git** — dan riwayat git tidak bisa dihapus tanpa rewrite, jadi rotasi tetap
+wajib dilakukan.
+
+| Kredensial | Ditemukan di | Sudah dicabut dari kode? |
+|---|---|---|
+| `TENOR_API_KEY` (Google API key) | `plugins/kavya/TOOLS/emoji mix.js` | Ya — dibaca dari `process.env` |
+| Password owner (plaintext) | `artifacts/merge-dashboard-backup-data.mjs` | Ya — dan tidak lagi dicetak ke stdout |
+
+## 4.1 `TENOR_API_KEY`
+
+Tidak damaging: key ini hanya memanggil Tenor untuk membuat stiker emoji, tidak
+menyentuh data uang atau akun. Tapi tetap dipublikasikan.
+
+1. Buka Google Cloud Console → project yang punya key tersebut.
+2. **APIs & Services → Credentials** → hapus key lama.
+3. Buat key baru, batasi **API restriction** ke Tenor v2 saja. Batasi juga
+   quota supaya tidak bisa dipakai untuk membanjiri billing.
+4. Taruh di `.env`:
+
+   ```
+   TENOR_API_KEY=<nilai baru>
+   ```
+
+5. Restart bot, lalu tes di grup: `.emojimix 😅+🤔`.
+
+Kalau `.emojimix` tidak pernah dipakai, **hapus saja key-nya** dan biarkan
+variabel kosong — perintahnya akan memberi pesan jelas, bukan crash.
+
+## 4.2 Password owner
+
+Nilai yang tadinya tertulis di `merge-dashboard-backup-data.mjs` adalah password
+login owner yang aktif, jadi ini kredensial paling serius di daftar ini.
+
+Setelah source dibersihkan, password itu **tidak lagi ada di kode** — tapi masih
+pernah ada, jadi harus diganti:
+
+1. Login ke dashboard sebagai owner.
+2. Ganti password lewat halaman pengaturan.
+3. Update juga `OWNER_PASSWORD` di `.env` VPS.
+
+Kenapa keduanya: `index.js` memprioritaskan `OWNER_PASSWORD` dari environment
+dan meng-hash ulang `ownerPasswordHash` dari situ setiap start. Kalau `.env`
+lama tidak diubah, password yang baru kamu set di dashboard akan **ditimpa
+kembali** oleh nilai lama di `.env` pada boot berikutnya.
+
+Setelah ganti, pastikan tidak ada sesi reseller/owner yang masih hidup dengan
+password lama — `docs/RESTORE.md` bagian rotasi menjelaskan alurnya.
+
+---
+
+# 5. Rencanarewrite riwayat (git filter-repo)
+
+Bagian ini **hanya rencana**. Belum dijalankan, dan tidak boleh dijalankan tanpa
+persetujuan eksplisit.
+
+## 5.1 Kenapa rewrite historis saja tidak cukup
+
+Menghapus key dari source sekarang **tidak** menghapusnya dari riwayat:
+
+```bash
+git log -S "AIza" --oneline --all     # key lama masih ada di commit lama
+```
+
+Selama commit itu masih ada di branch mana pun, atau di fork mana pun, atau di
+salinan yang sudah di-clone, kuncinya masih bocor. Karena itu urutannya:
+
+**rotasi dulu, rewrite belakangan (kalau memang mau).** Setelah rotasi, nilai
+lama sudah tidak berlaku, jadi rewrite hanya demi kerapian — bukan demi
+keamanan. Urutan sebaliknya membuang effort tanpa mengubah risiko.
+
+## 5.2 Prasyarat
+
+- [ ] Rotasi §4.1 dan §4.2 **sudah selesai dan terverifikasi**
+- [ ] Semua working tree bersih, tidak ada perubahan belum di-commit
+- [ ] Semua branch sudah di-push, tidak ada commit lokal yang hanya ada di laptop
+- [ ] Sudah tahu remote mana yang ada (GitHub, mirror, VPS)
+- [ ] Backup: `git clone --mirror <remote> backup.git` — **lakukan ini dulu**
+
+## 5.3 Blokir push dulu
+
+Sambil rewrite, jangan sampai ada push yang membawa versi lama:
+
+```bash
+git push --mirror   # dari clone utama JANGAN
+# sebagai gantinya, sementara nonaktifkan hook di server / block di CI
+```
+
+## 5.4 Ganti dengan placeholder
+
+`git filter-repo` tidak bisa "menghapus nilai" tanpa tahu nilainya, dan dokumen
+ini sengaja tidak memuat nilai kredensial. Jadi filenya ditulis dari nilai
+tersebut di mesin kamu:
+
+```bash
+# 1. clone mirror terpisah, JANGAN di repo kerja
+git clone --mirror <remote> ../kavya-rewrite.git
+cd ../kavya-rewrite.git
+
+# 2. jalankan filter untuk path yang sudah dibersihkan
+git filter-repo --invert-paths \
+  --path plugins/kavya/TOOLS/emoji\ mix.js \
+  --path artifacts/merge-dashboard-backup-data.mjs
+```
+
+Menghapus **path** lebih aman daripada menyunting isi file: tidak ada nilai
+kredensial yang perlu diketik ulang, dan tidak ada salah ketik yang bisa membuat
+rewritten repo.contains secret baru.
+
+> Kalau nanti kau butuh menyunting isi (bukan menghapus file), pakai
+> `--replace-text <file>`, dengan file replacement berisi
+> `literalNilaiLama==>PLACEHOLDER`. Jangan pernah menulis nilai aslinya di
+> shell — terminal history akan menyimpannya.
+
+## 5.5 Verifikasi
+
+```bash
+git log -S "AIza" --all --oneline        # harus kosong
+git log -S "ownerPassword:" --all --oneline
+git filter-repo --analyze                 # statistik perubahan
+```
+
+Lalu jalankan test gate di rewritten repo sebelum}squash:
+
+```bash
+cd apps/dashboard && npx tsc -b --force && node --test server/tests/
+node --test --test-force-exit apps/bot/tests/
+```
+
+## 5.6 Setelah rewrite
+
+```bash
+git push --force --mirror
+```
+
+Lalu **rotasi ulang** apa pun yang masihshared, karena clone/fork lama masih
+memegang nilai lama.
+
+> Peringatan. `--force` pada shared branch membatalkan riwayat untuk semua
+>`_collaborator`. Kalau repo ini publik dan sudah pernah di-fork, rewrite **tidak
+> bisa ditarik kembali** — isi riwayat di fork orang tetap ada. Untuk repository
+> publik, rotasi credential (bagian 4) adalah satu-satunya langkah yang benar-benar
+> bekerja, dan itu sudah dilakukan.
+
+## 5.7 Yang sengaja tidak dilakukan
+
+Tidak ada `git gc --aggressive --prune`, tidak ada penghapusan objek, tidak ada
+pengubahan timestamp commit. Semuanya tidak menambah keamanan: pada repo publik,
+`git clone` biasa sudah bisa menjangkau objek lama.

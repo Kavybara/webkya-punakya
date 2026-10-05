@@ -39,7 +39,6 @@ active.settings = {
   ownerUsername: "Kavya",
   ownerName: keepSettings.ownerName || incomingSettings.ownerName || "Kavya",
   ownerEmail: keepSettings.ownerEmail || incomingSettings.ownerEmail || "owner@kavya.id",
-  ownerPassword: "Tegaraja123",
   publicDomain: "https://vya.baby",
   botPublicUrl: "https://vya.baby",
   whatsappBotPublicUrl: "https://vya.baby/whatsapp-bot",
@@ -47,6 +46,23 @@ active.settings = {
   baileyQrisGenerateUrl: "https://vya.baby/api/orders",
   gmailRedirectUri: "https://vya.baby/api/gmail/oauth/callback",
 };
+
+/*
+ * The owner password used to be hardcoded here and echoed to stdout at the end
+ * of this script, which meant it was committed to the repository *and* written
+ * to terminal scrollback and CI logs on every run.
+ *
+ * Nothing about the merge needs it. On the next boot the server reads
+ * OWNER_PASSWORD from the environment and re-hashes it into ownerPasswordHash
+ * (server/index.js, migrateOwnerCredentials), so the plaintext field is a
+ * legacy input that is deleted again immediately afterwards. Dropping it here
+ * cannot lock the owner out -- the .env value wins.
+ *
+ * The delete also clears the field carried in from the backup by the spread
+ * above, so a stale plaintext password sitting inside an old backup cannot be
+ * merged into the live database.
+ */
+delete active.settings.ownerPassword;
 delete active.settings.ownerPasswordHash;
 
 for (const key of [
@@ -72,6 +88,13 @@ if (Array.isArray(source.whatsappRentals) && source.whatsappRentals.length > (ac
 }
 
 fs.writeFileSync(activePath, `${JSON.stringify(active, null, 2)}\n`);
+/*
+ * This summary used to print `ownerPassword` alongside `hasOwnerPasswordHash`.
+ * Even after the literal was removed, echoing the field would have written a
+ * live credential into terminal scrollback and any CI log that ran the script.
+ * The boolean below says what the operator actually needs to know -- whether a
+ * usable credential exists -- without disclosing it.
+ */
 console.log(
   JSON.stringify(
     {
@@ -83,7 +106,7 @@ console.log(
       whatsappRentals: active.whatsappRentals?.length || 0,
       whatsappGroupLists: active.whatsappGroupLists?.length || 0,
       ownerUsername: active.settings.ownerUsername,
-      ownerPassword: active.settings.ownerPassword,
+      hasOwnerPassword: Boolean(active.settings.ownerPassword),
       hasOwnerPasswordHash: Boolean(active.settings.ownerPasswordHash),
     },
     null,
