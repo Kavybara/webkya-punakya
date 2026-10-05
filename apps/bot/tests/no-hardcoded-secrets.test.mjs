@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 /*
  * No secret literal may sit in a tracked file.
@@ -24,7 +25,7 @@ import test from "node:test";
  * the scanner is meant to keep *out* of version control.
  */
 
-const REPO_ROOT = "C:/Users/tegar/Downloads/File Backup21";
+const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 
 const SCANNED_EXTENSIONS = new Set([
   ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx",

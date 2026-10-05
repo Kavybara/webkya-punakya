@@ -63,14 +63,17 @@ test("system route module keeps the existing endpoint contract", () => {
     routes.map(({ method, path }) => `${method.toUpperCase()} ${path}`),
     [
       "GET /api/health",
+      "GET /api/public/contact",
+      "GET /api/health/details",
       "GET /api/maintenance",
       "POST /api/maintenance",
       "GET /api/bootstrap",
       "GET /api/events",
     ],
   );
-  assert.deepEqual(routes[2].handlers[0].roles, ["owner"]);
-  assert.deepEqual(routes[4].handlers[0].roles, ["owner", "reseller"]);
+  assert.deepEqual(routes.find((r) => r.path === "/api/health/details").handlers[0].roles, ["owner"]);
+  assert.deepEqual(routes.find((r) => r.path === "/api/maintenance" && r.method === "post").handlers[0].roles, ["owner"]);
+  assert.deepEqual(routes.find((r) => r.path === "/api/events").handlers[0].roles, ["owner", "reseller"]);
 });
 
 test("auth route module keeps the existing endpoint contract", () => {

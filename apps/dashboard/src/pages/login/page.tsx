@@ -42,7 +42,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     let alive = true;
-    api.health().then((health) => {
+    api.publicContact().then((health) => {
       const nextNumber = normalizeWhatsapp(health.ownerWhatsAppNumber || "");
       if (alive && nextNumber) setOwnerWhatsapp(nextNumber);
     }).catch(() => undefined);

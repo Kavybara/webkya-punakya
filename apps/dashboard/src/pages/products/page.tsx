@@ -390,7 +390,7 @@ export default function ProductsPage() {
 
   useEffect(() => {
     loadCatalog().catch(console.error);
-    api.health().then((health) => {
+    api.publicContact().then((health) => {
       if (health.ownerWhatsAppNumber) setOwnerWhatsApp(health.ownerWhatsAppNumber);
     }).catch(console.error);
     return subscribeRealtime(() => {

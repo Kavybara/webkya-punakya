@@ -351,7 +351,7 @@ export default function ResellerV2WarrantyPage() {
       try {
         const [accountRows, health, claimRows] = await Promise.all([
           api.accounts({ view: "light" }),
-          api.health().catch(() => null),
+          api.publicContact().catch(() => null),
           api.warrantyClaims(),
         ]);
         if (!mounted.current || seq !== loadSeq.current) return;

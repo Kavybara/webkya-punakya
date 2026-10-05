@@ -32,7 +32,7 @@ import {
  * no request ever leaves the machine.
  */
 
-const HANDLER = "file:///C:/Users/tegar/Downloads/File%20Backup21/plugins/kavya/TOOLS/get.js";
+const HANDLER = new URL("../../../plugins/kavya/TOOLS/get.js", import.meta.url).href;
 
 const PUBLIC = [{ address: "93.184.216.34", family: 4 }];
 

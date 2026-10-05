@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import axios from "../../../node_modules/axios/index.js";
 
 import {
   SsrfBlockedError,
@@ -38,6 +39,33 @@ import {
  */
 
 const PUBLIC = [{ address: "93.184.216.34", family: 4 }];
+
+test("DNS resolution cannot hold a command indefinitely", async () => {
+  await assert.rejects(safeGet("https://example.com/", {
+    timeoutMs: 30,
+    resolveHostname: () => new Promise(() => {}),
+    request: async () => { throw new Error("must not request before DNS completes"); },
+  }), /timeout/i);
+});
+
+test("the default Axios requester receives a URL and a guarded HTTP config", async () => {
+  const previous = axios.request;
+  let received;
+  axios.request = async (config) => {
+    received = config;
+    return { status: 200, headers: { "content-type": "text/plain" }, data: Buffer.from("ok"), config };
+  };
+  try {
+    await safeGet("https://example.com/", { resolveHostname: async () => PUBLIC });
+    assert.equal(received.url, "https://example.com/");
+    assert.equal(received.method, "get");
+    assert.equal(received.proxy, false);
+    assert.equal(received.adapter, "http");
+    assert.equal(typeof received.lookup, "function");
+  } finally {
+    axios.request = previous;
+  }
+});
 
 /** A `request` stand-in that never touches the network. */
 function stubRequest(responder) {
@@ -252,29 +280,81 @@ test("a resolution failure is an error, not an open door", async () => {
 // DNS rebinding
 // ---------------------------------------------------------------------------
 
-test("the connection pins the address that was validated", async () => {
-  // The guard and the socket must agree. Validating a name, then letting the
-  // agent re-resolve it, leaves a window for a rebind between the two.
-  let answer = PUBLIC;
-  const resolveHostname = async () => answer;
-  const lookup = createPinnedLookup(resolveHostname);
+test("safeGet hands the socket a lookup pinned to the address it validated", async () => {
+  /*
+   * This is the test that should have existed the first time round.
+   *
+   * The previous version asserted `createPinnedLookup` works -- and it did --
+   * while `safeGet` went on to call plain `axios.get`, which resolves the
+   * hostname itself. Every rebinding defence was present in the module and
+   * absent from the request path, and a unit test on the unused function
+   * reported green.
+   *
+   * So this goes through `safeGet` and inspects the config the real requester
+   * receives. The stub stands in for axios, and axios forwards `lookup`
+   * straight to `http.request` (axios/dist/node/axios.cjs: `let lookup =
+   * own('lookup')` ... `options.lookup = lookup`), so if `lookup` is on the
+   * config the socket is pinned.
+   */
+  const request = stubRequest(() => plainText());
+
+  await safeGet("https://example.com/", {
+    resolveHostname: async () => PUBLIC,
+    request,
+  });
+
+  const config = request.calls[0];
+  assert.equal(typeof config.lookup, "function", "safeGet must pin the socket, not just check the name");
+
+  // Whatever the agent asks for, it gets the validated address back.
+  assert.deepEqual(
+    await new Promise((res, rej) =>
+      config.lookup("example.com", { all: true }, (e, a) => (e ? rej(e) : res(a))),
+    ),
+    PUBLIC,
+  );
+
+  const [single] = await new Promise((res, rej) =>
+    config.lookup("example.com", { all: false }, (e, a, f) => (e ? rej(e) : res([a, f]))),
+  );
+  assert.equal(
+    single,
+    PUBLIC[0].address,
+    "the single-address form must return the validated address too",
+  );
+});
+
+test("the pinned lookup ignores a hostname other than the one validated", async () => {
+  /*
+   * The pin must not become a redirect. A lookup that answers any hostname with
+   * the pinned address would let a redirect to `evil.example` connect to the
+   * address we judged for `good.example`. Pinning is per-request and per-hop;
+   * `safeGet` rebuilds it for each hop from that hop's own validation.
+   */
+  const lookup = createPinnedLookup(PUBLIC);
+
+  // A name with no pinned answer fails closed rather than resolving for real.
+  await assert.rejects(
+    () =>
+      new Promise((res, rej) =>
+        createPinnedLookup([])("example.com", { all: false }, (e, a) => (e ? rej(e) : res(a))),
+      ),
+    SsrfBlockedError,
+    "an empty pin must fail closed instead of falling back to the resolver",
+  );
+
+  // The pinned set is a copy: a caller mutating what it got back cannot retune
+  // the pin for the next lookup.
+  const pinned = await new Promise((res, rej) =>
+    lookup("example.com", { all: true }, (e, a) => (e ? rej(e) : res(a))),
+  );
+  pinned.push({ address: "127.0.0.1", family: 4 });
 
   assert.deepEqual(
     await new Promise((res, rej) =>
       lookup("example.com", { all: true }, (e, a) => (e ? rej(e) : res(a))),
     ),
     PUBLIC,
-  );
-
-  // Now the attacker flips the record.
-  answer = [{ address: "127.0.0.1", family: 4 }];
-  await assert.rejects(
-    () =>
-      new Promise((res, rej) =>
-        lookup("example.com", { all: false }, (e, a) => (e ? rej(e) : res(a))),
-      ),
-    SsrfBlockedError,
-    "the pinned lookup must re-check, not hand back a private address",
   );
 });
 

@@ -1042,6 +1042,12 @@ export const api = {
   health() {
     return request<HealthResult>("/health", { auth: false });
   },
+  healthDetails() {
+    return request<HealthResult>("/health/details");
+  },
+  publicContact() {
+    return request<{ ownerWhatsAppNumber: string; warrantyWhatsAppNumber: string }>("/public/contact", { auth: false });
+  },
   login(payload: { email: string; password: string; remember?: boolean; role?: "owner" | "reseller" | "auto" }) {
     return request<{ ok: boolean; role: "owner" | "reseller"; user: Record<string, unknown>; token?: string }>("/auth/login", {
       method: "POST",

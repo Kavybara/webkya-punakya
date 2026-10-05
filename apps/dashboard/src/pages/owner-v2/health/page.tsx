@@ -29,7 +29,7 @@ export default function OwnerConsoleHealthPage() {
     setLoading(true);
     setError("");
     try {
-      const [systemStatus, healthStatus] = await Promise.all([api.systemStatus(), api.health()]);
+      const [systemStatus, healthStatus] = await Promise.all([api.systemStatus(), api.healthDetails()]);
       setSystem(systemStatus);
       setHealth(healthStatus);
     } catch (cause) {

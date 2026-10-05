@@ -114,7 +114,7 @@ export default function OwnerConsoleResellersPage() {
     setLoading(true);
     setError("");
     setRequestsError("");
-    const results = await Promise.allSettled([api.resellers(), api.depositRequests(), api.health()]);
+    const results = await Promise.allSettled([api.resellers(), api.depositRequests(), api.healthDetails()]);
     if (results[0].status === "fulfilled") setResellers(results[0].value);
     else setError("Data reseller gagal dimuat.");
     if (results[1].status === "fulfilled") { setRequests(results[1].value); setRequestsError(""); }
