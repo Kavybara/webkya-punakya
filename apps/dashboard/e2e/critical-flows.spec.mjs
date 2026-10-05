@@ -98,7 +98,7 @@ test("reseller claim and owner manual replacement work through the UI without du
   await withServer(async ({ base, databasePath }) => {
     await login(page, base, "kya", password);
     await page.goto(`${base}/reseller-v2/warranty`);
-    await page.getByLabel("Pilih Akun", { exact: true }).selectOption("acct-active");
+    await page.getByRole("combobox", { name: /^Pilih Akun/ }).selectOption("acct-active");
     await page.getByLabel(/^Kendala/).fill("Tidak dapat login pada akun fixture");
     const evidence = await page.screenshot();
     await page.getByLabel(/^Bukti Kendala/).setInputFiles({ name: "fixture-evidence.png", mimeType: "image/png", buffer: evidence });
