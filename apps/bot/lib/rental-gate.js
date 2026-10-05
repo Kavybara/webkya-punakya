@@ -141,18 +141,16 @@ export function resetRentalGateCache() {
 
 export async function readDashboardRentalSources(config = {}) {
   const now = Date.now();
-  if (rentalDirectoryCache.expiresAt > now) return rentalDirectoryCache.sources;
+  if (!config.dashboardDatabasePath && rentalDirectoryCache.expiresAt > now) return rentalDirectoryCache.sources;
 
   const projectRoot = config.paths?.projectRoot || process.cwd();
   const sources = [];
   const dashboardDb = await readJsonObject(config.dashboardDatabasePath);
   const dashboardRentals = rentalMapFromRows(dashboardDb?.whatsappRentals || []);
-  if (rentalDirectoryHasEntries(dashboardRentals)) {
+  if (config.dashboardDatabasePath) {
     sources.push({ name: "dashboard-db.whatsappRentals", data: dashboardRentals, authoritative: true });
-    if (!/^(1|true|yes|on)$/i.test(String(process.env.WHATSAPP_RENTAL_ALLOW_STORE_FALLBACK || "").trim())) {
-      rentalDirectoryCache = { expiresAt: now + RENTAL_DIRECTORY_CACHE_MS, sources };
-      return sources;
-    }
+    rentalDirectoryCache = { expiresAt: now + RENTAL_DIRECTORY_CACHE_MS, sources };
+    return sources;
   }
 
   const candidates = [
@@ -184,7 +182,7 @@ export async function shouldBlockExpiredGroup({ store, remoteJid, commandInfo, i
 
   if (!rental) {
     const hasRentalDirectory = sources.some((source) => rentalDirectoryHasEntries(source.data));
-    if (hasRentalDirectory && !allowOwnerRentalCommand) return { block: true, rental: null, reason: "group_rental_missing" };
+    if ((dashboardAuthoritative || hasRentalDirectory) && !allowOwnerRentalCommand) return { block: true, rental: null, reason: "group_rental_missing" };
     return { block: false, rental: null };
   }
 

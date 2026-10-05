@@ -1,6 +1,7 @@
 import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
+import { canonicalRentalMap, createRentalMirror } from "./services/rental-mirror-service.js";
 import { ImapFlow } from "imapflow";
 import { execFile, spawn } from "node:child_process";
 import crypto from "node:crypto";
@@ -167,7 +168,7 @@ const app = express();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const distDir = path.join(__dirname, "..", "dist");
-const legacyRootDir = path.resolve(__dirname, "..", "..");
+const legacyRootDir = path.resolve(process.env.LEGACY_WHATSAPP_ROOT_DIR || path.join(__dirname, "..", "..", ".."));
 
 for (const envPath of [
   path.join(process.cwd(), ".env"),
@@ -2114,7 +2115,7 @@ async function readLegacyGroupLists() {
 }
 
 async function readLegacyRentals() {
-  return readFirstNonEmptyJson([whatsappDatabasePath("rentals.json"), legacySewaPath()], {});
+  return canonicalRentalMap(await readDbSnapshot());
 }
 
 function rentalExpiredForCleanup(rental = {}, now = Date.now()) {
@@ -2368,8 +2369,9 @@ async function writeJsonFileAtomic(filePath, value) {
     `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
   );
   try {
-    await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+    await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
     await renameWithRetry(tempPath, filePath);
+    await fs.chmod(filePath, 0o600);
   } catch (error) {
     await fs.rm(tempPath, { force: true }).catch(() => undefined);
     throw error;
@@ -2377,11 +2379,14 @@ async function writeJsonFileAtomic(filePath, value) {
 }
 
 async function writeLegacyRentals(rentals) {
-  const targets = [whatsappDatabasePath("rentals.json"), legacySewaPath()];
-  for (const targetPath of targets) {
-    await writeJsonFileAtomic(targetPath, rentals);
-  }
+  return rentalMirror.reconcile();
 }
+
+const rentalMirror = createRentalMirror({
+  readCanonical: readDbSnapshot,
+  targets: [whatsappDatabasePath("rentals.json"), legacySewaPath()],
+  journalPath: whatsappDatabasePath("rental-mirror-pending.json"),
+});
 
 async function upsertLegacyRental(groupJid, patch) {
   if (!String(groupJid || "").endsWith("@g.us")) return null;
@@ -2390,18 +2395,8 @@ async function upsertLegacyRental(groupJid, patch) {
   // build from the same stale base -- the exact race being fixed here.
   return queueLegacyRentalMutation(async () => {
     const rentals = await readLegacyRentals();
-    const current = rentals[groupJid] || {};
-    const status = String(patch.status ?? current.status ?? "").trim().toLowerCase();
-    const next = {
-      ...current,
-      ...(patch.linkGrub ? { linkGrub: patch.linkGrub } : {}),
-      start: patch.start || current.start || legacyTodayText(),
-      expired: Number(patch.expired ?? current.expired ?? expirationFromDays(patch.daysLeft || 0)),
-      ...(status ? { status } : {}),
-    };
-    rentals[groupJid] = next;
     await writeLegacyRentals(rentals);
-    return next;
+    return rentals[groupJid] || null;
   });
 }
 
@@ -2538,7 +2533,8 @@ function buildRentalBase(groupJid, rental, listCount) {
 
 async function mergedWhatsappRentals(db, options = {}) {
   const includeExpired = Boolean(options.includeExpired);
-  const [legacyRentals, groupLists] = await Promise.all([readLegacyRentals(), readLegacyGroupLists()]);
+  const legacyRentals = canonicalRentalMap(db);
+  const groupLists = await readLegacyGroupLists();
   const listCounts = new Map(groupLists.map((group) => [group.groupJid, group.total]));
   const directoryByJid = new Map((db.whatsappGroupDirectory || []).map((group) => [group.groupJid, group]));
   const groupIds = new Set(Object.keys(legacyRentals));
@@ -8539,6 +8535,7 @@ registerSystemRoutes(app, {
   setMaintenanceMode,
   updateDb,
   warrantyWhatsAppNumber,
+  rentalMirrorHealth: () => rentalMirror.health(),
 });
 
 registerAuthRoutes(app, {
@@ -9811,4 +9808,5 @@ async function runWhatsAppHealthAlertJob() {
 
 scheduleJob("whatsapp-health-alert", runWhatsAppHealthAlertJob, 45_000, 2 * 60 * 1000);
 
+scheduleJob("rental-mirror-reconciliation", () => rentalMirror.reconcile().catch(() => undefined), 1000, 30_000);
 reportScheduledJobs();

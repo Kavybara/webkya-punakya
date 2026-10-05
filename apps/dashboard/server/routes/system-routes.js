@@ -20,9 +20,23 @@ export function registerSystemRoutes(app, deps) {
     setMaintenanceMode,
     updateDb,
     warrantyWhatsAppNumber,
+    rentalMirrorHealth,
   } = deps;
 
   app.get("/api/health", async (_req, res) => {
+    await readDbSnapshot();
+    res.json({ ok: true });
+  });
+
+  app.get("/api/public/contact", async (_req, res) => {
+    const db = await readDbSnapshot();
+    res.json({
+      ownerWhatsAppNumber: db.settings?.ownerWhatsAppNumber || process.env.OWNER_WHATSAPP_NUMBER || "",
+      warrantyWhatsAppNumber: warrantyWhatsAppNumber(db),
+    });
+  });
+
+  app.get("/api/health/details", requireAuth(["owner"]), async (_req, res) => {
     const db = await readDb();
     const pakasir = getPakasirCredentials(db);
     const sheetsHealth = googleSheetsSyncHealth(db.settings || {});
@@ -34,8 +48,6 @@ export function registerSystemRoutes(app, deps) {
       googleSheetsLastSyncAttemptAt: sheetsHealth.lastAttemptAt,
       googleSheetsHealthy: sheetsHealth.healthy,
       googleSheetsFailedSections: sheetsHealth.failedSections,
-      ownerWhatsAppNumber: db.settings?.ownerWhatsAppNumber || process.env.OWNER_WHATSAPP_NUMBER || "",
-      warrantyWhatsAppNumber: warrantyWhatsAppNumber(db),
       whatsappInboundConfigured: Boolean(firstConfigured(db.settings?.whatsappInboundToken, process.env.WHATSAPP_INBOUND_TOKEN)),
       pakasirConfigured: pakasir.configured,
       maintenance: maintenanceMode(db),
@@ -44,6 +56,7 @@ export function registerSystemRoutes(app, deps) {
       // warning without re-deriving the condition -- and so the wording can
       // never disagree with the detector that decided to speak.
       databaseLossMessage: databaseLossMessage(databaseLoss),
+      rentalMirror: rentalMirrorHealth ? await rentalMirrorHealth() : { status: "unknown" },
     });
   });
 
@@ -72,9 +85,10 @@ export function registerSystemRoutes(app, deps) {
 
   app.get("/api/bootstrap", requireAuth(["owner"]), async (_req, res) => {
     const db = await readDbSnapshot();
-    db.whatsappRentals = await mergedWhatsappRentals(db);
-    db.whatsappGroupLists = await readActiveLegacyGroupLists();
-    res.json(db);
+    res.json({
+      whatsappRentals: await mergedWhatsappRentals(db),
+      whatsappGroupLists: await readActiveLegacyGroupLists(),
+    });
   });
 
   app.get("/api/events", requireAuth(["owner", "reseller"]), async (req, res) => {

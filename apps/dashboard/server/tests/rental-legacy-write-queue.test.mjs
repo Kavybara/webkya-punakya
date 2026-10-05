@@ -115,8 +115,8 @@ test("legacy rental writes are atomic, not a truncating overwrite", async () => 
 
   assert.match(
     write,
-    /writeJsonFileAtomic\(targetPath, rentals\)/,
-    "rentals.json must be written through the atomic writer",
+    /rentalMirror\.reconcile\(\)/,
+    "rental copies must be written through the recoverable mirror service",
   );
   assert.doesNotMatch(
     write,
