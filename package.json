@@ -25,6 +25,9 @@
     "backup:audit": "node ./scripts/deploy/import-legacy-wa-backup.mjs --dry-run",
     "wa:import-backup": "node ./scripts/deploy/import-legacy-wa-backup.mjs",
     "whatsapp:repair-auth": "node ./scripts/maintenance/repair-whatsapp-auth.mjs",
+    "release:code": "node ./scripts/deploy/create-code-release.mjs",
+    "test:bot": "node --test apps/bot/tests/",
+    "test:all": "npm run test:bot && npm run test:all --prefix apps/dashboard",
     "runtime:backup": "node ./scripts/maintenance/runtime-backup.mjs",
     "runtime:backup:send": "node ./scripts/maintenance/runtime-backup.mjs --send-whatsapp",
     "runtime:backup:decrypt": "node ./scripts/maintenance/decrypt-runtime-backup.mjs",
@@ -37,7 +40,7 @@
     "@hapi/boom": "^10.0.1",
     "api-autoresbot": "^1.0.6",
     "archiver": "8.0.0",
-    "axios": "1.18.1",
+    "axios": "1.20.0",
     "baileys": "^7.0.0-rc.9",
     "btch-downloader": "^2.8.2",
     "chalk": "^5.6.2",
@@ -48,6 +51,7 @@
     "file-type": "21.3.4",
     "fluent-ffmpeg": "^2.1.3",
     "form-data": "^4.0.1",
+    "framer-motion": "^13.4.6",
     "fs-extra": "^11.3.0",
     "imapflow": "^1.3.5",
     "jimp": "^1.6.0",
@@ -67,12 +71,12 @@
     "yt-search": "^2.12.1"
   },
   "overrides": {
-    "axios": "1.18.1",
+    "axios": "1.20.0",
     "brace-expansion@1": "1.1.21",
     "brace-expansion@5": "5.0.12",
     "undici@7": "7.29.1",
     "api-autoresbot": {
-      "axios": "1.18.1"
+      "axios": "1.20.0"
     },
     "btch-downloader": {
       "got": "11.8.6"
@@ -85,6 +89,6 @@
     }
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=20.19.0"
   }
 }
