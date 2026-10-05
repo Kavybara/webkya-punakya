@@ -52,6 +52,40 @@ test("purchase, authenticated payment reconciliation and fulfillment are idempot
   }, { database: fixture(), preload });
 });
 
+test("reseller completes catalog selection, checkout and account delivery through the browser", async ({ page }, testInfo) => {
+  await withServer(async ({ base, databasePath }) => {
+    await login(page, base, "kya", password);
+    await page.goto(`${base}/reseller-v2/catalog`);
+    const product = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "Netflix", exact: true }) });
+    await product.getByRole("button").first().click();
+    await product.getByRole("button", { name: /1 Bulan/ }).first().click();
+    await product.getByRole("button", { name: "Lanjut ke Checkout", exact: true }).click();
+    await expect(page).toHaveURL(/\/reseller\/checkout/);
+    await page.getByLabel(/Netflix Device/).fill("Android TV");
+    await page.screenshot({ path: testInfo.outputPath("checkout.png"), fullPage: true });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+    const created = page.waitForResponse((response) => response.url().endsWith("/api/orders") && response.request().method() === "POST");
+    await page.getByRole("button", { name: "Lanjut ke Pembayaran", exact: true }).click();
+    const order = await ok(await created);
+    await expect(page.getByRole("heading", { name: "Selesaikan pembayaran", exact: true })).toBeVisible();
+    // Simulate the provider callback; every reseller action remains in the UI.
+    await ok(await page.request.post(`${base}/api/pakasir/webhook`, {
+      headers: { "x-pakasir-secret": "fixture-webhook-secret" },
+      data: { order_id: order.paymentRef, status: "completed" },
+    }));
+    await page.getByRole("button", { name: "Cek Status Pembayaran", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Pesanan selesai", exact: true })).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: "Tampilkan", exact: true }).click();
+    await expect(page.getByText(/fixture-account-password/).first()).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("delivered.png"), fullPage: true });
+    const saved = JSON.parse(await fs.readFile(databasePath, "utf8"));
+    expect(saved.orders).toHaveLength(1);
+    expect(saved.orders[0].id).toBe(order.id);
+    expect(saved.orders[0].orderStatus).toBe("completed");
+    expect(saved.managedAccounts.filter((item) => item.orderId === order.id)).toHaveLength(1);
+  }, { database: fixture(), preload });
+});
+
 test("manual warranty replacement and expired credential access stay isolated", async ({ page }) => {
   const db = fixture();
   const now = new Date().toISOString();

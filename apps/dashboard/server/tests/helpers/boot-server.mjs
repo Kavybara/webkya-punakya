@@ -59,13 +59,16 @@ export function fixtureDatabase(overrides = {}) {
   };
 }
 
-export async function withServer(run, { database, env = {}, timeoutMs = 90_000, preload } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kavya-boot-"));
+export async function withServer(run, { database, env = {}, timeoutMs = 90_000, preload, runtimeRoot, serverEntry = SERVER_ENTRY } = {}) {
+  const dir = runtimeRoot ? path.resolve(runtimeRoot) : fs.mkdtempSync(path.join(os.tmpdir(), "kavya-boot-"));
   const databasePath = path.join(dir, "kavya-db.json");
   const port = 20_000 + Math.floor(Math.random() * 20_000);
-  fs.writeFileSync(databasePath, JSON.stringify(database || fixtureDatabase(), null, 2));
+  if (runtimeRoot) {
+    if (database) throw new Error("existing_runtime_must_not_be_reseeded");
+    fs.accessSync(databasePath);
+  } else fs.writeFileSync(databasePath, JSON.stringify(database || fixtureDatabase(), null, 2));
 
-  const child = spawn(process.execPath, [...(preload ? ["--import", preload] : []), SERVER_ENTRY], {
+  const child = spawn(process.execPath, [...(preload ? ["--import", preload] : []), serverEntry], {
     // Run from the throwaway directory. The server loads the repository .env
     // by absolute path regardless of cwd, so credentials are neutralised
     // through the environment instead — dotenv never overrides a variable
@@ -134,7 +137,8 @@ export async function withServer(run, { database, env = {}, timeoutMs = 90_000, 
   try {
     let ready = false;
     let lastError = "";
-    for (let attempt = 0; attempt < 120 && !ready; attempt += 1) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline && !ready && child.exitCode === null) {
       try {
         const response = await get("/api/public/catalog");
         if (response.ok) ready = true;
@@ -153,6 +157,7 @@ export async function withServer(run, { database, env = {}, timeoutMs = 90_000, 
     // handle outlives the kill signal briefly, and removing the directory too
     // early fails with EBUSY.
     await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5_000))]);
+    if (runtimeRoot) return;
     try {
       fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     } catch {
