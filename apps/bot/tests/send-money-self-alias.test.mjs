@@ -48,8 +48,8 @@ import test from "node:test";
  * first. That keeps this test off the real user database entirely.
  */
 
-const HANDLER = "file:///C:/Users/tegar/Downloads/File%20Backup21/plugins/kavya/GROUP/send%20money.js";
-const LIMIT_HANDLER = "file:///C:/Users/tegar/Downloads/File%20Backup21/plugins/kavya/GROUP/send%20limit.js";
+const HANDLER = new URL("../../../plugins/kavya/GROUP/send%20money.js", import.meta.url).href;
+const LIMIT_HANDLER = new URL("../../../plugins/kavya/GROUP/send%20limit.js", import.meta.url).href;
 
 const LID = "268053891793140@lid";
 const PHONE = "6282335408411@s.whatsapp.net";
@@ -62,11 +62,25 @@ async function loadHandler() {
   const previousCwd = process.cwd();
   process.chdir(root);
 
-  const { addUser, findUser } = await import(
-    "file:///C:/Users/tegar/Downloads/File%20Backup21/lib/users.js"
-  );
-  const handler = (await import(HANDLER)).default;
-  const limitHandler = (await import(LIMIT_HANDLER)).default;
+  const timers = [];
+  const originalSetInterval = globalThis.setInterval;
+  globalThis.setInterval = (...args) => {
+    const timer = originalSetInterval(...args);
+    timers.push(timer);
+    return timer;
+  };
+  let users;
+  let handler;
+  let limitHandler;
+  try {
+    users = await import(new URL("../../../lib/users.js", import.meta.url).href);
+    handler = (await import(HANDLER)).default;
+    limitHandler = (await import(LIMIT_HANDLER)).default;
+  } finally {
+    globalThis.setInterval = originalSetInterval;
+    for (const timer of timers) clearInterval(timer);
+  }
+  const { addUser, findUser, saveUsers, saveOwners } = users;
   // Both modules default-export a plugin descriptor, not the function itself.
   const run = handler.handle;
   const runLimit = limitHandler.handle;
@@ -95,7 +109,11 @@ async function loadHandler() {
     findUser,
     run,
     runLimit,
-    restore: () => process.chdir(previousCwd),
+    restore: async () => {
+      await saveUsers();
+      await saveOwners();
+      process.chdir(previousCwd);
+    },
   };
 }
 

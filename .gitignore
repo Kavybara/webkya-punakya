@@ -37,6 +37,9 @@ artifacts/**/*list*.json
 artifacts/**/rentals.json
 artifacts/**/sewa.json
 test-results/
+playwright-report/
+apps/dashboard/test-results/
+apps/dashboard/playwright-report/
 tmp/
 outputs/
 _zip_inspect/
@@ -63,3 +66,6 @@ Thumbs.db
 
 # Keep example env
 !.env.example
+
+# Local code-only release archives
+release/

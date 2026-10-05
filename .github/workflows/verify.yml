@@ -1,0 +1,37 @@
+name: Verify
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/dashboard/package-lock.json
+            apps/bot/package-lock.json
+      - run: npm ci
+      - run: npm ci --prefix apps/dashboard
+      - run: npm ci --prefix apps/bot
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm audit --prefix apps/dashboard --omit=dev --audit-level=high
+      - run: npm audit --prefix apps/bot --omit=dev --audit-level=high
+      - run: npm run test:all
+      - run: npm run dashboard:typecheck
+      - run: npm run lint --prefix apps/dashboard
+      - run: npm run whatsapp:check
+      - run: npm run app:build
+      - run: npx playwright install --with-deps chromium
+        working-directory: apps/dashboard
+      - run: npm run test:e2e --prefix apps/dashboard
+      - run: npm run release:code
