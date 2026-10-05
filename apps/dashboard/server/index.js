@@ -2260,29 +2260,94 @@ function resolveRentalGroupJid(db, options = {}) {
   return { groupJid: "", directory: null, source: "" };
 }
 
+/*
+ * Legacy rental writes are serialised, and each write is atomic.
+ *
+ * `upsertLegacyRental` is a read-modify-write over one whole JSON file, and it
+ * is reached from three different HTTP routes (`whatsapp-routes.js:281`, `:343`,
+ * `:394`). Two overlapping requests -- an owner adjusting one group's link while
+ * a second group's days-left is being edited, or simply two saves in flight --
+ * would each read the same base object and each write it back whole. The second
+ * write wins and silently discards the first request's group. Nothing errors;
+ * the group just reverts to its previous value later.
+ *
+ * The queue is the same shape as the one `store.js` uses for the main database
+ * (`store.js:32`), so the two stores serialise the same way and a failure in one
+ * task cannot poison the queue for the next.
+ *
+ * The write is atomic because these files are read by a separate process -- the
+ * bot, via `readDashboardRentalSources` -- and a plain `fs.writeFile` truncates
+ * the target before it writes. A bot read landing in that window sees invalid
+ * JSON, which is how a whole rental map reads as empty for one poll interval.
+ */
+let legacyRentalWriteQueue = Promise.resolve();
+
+function queueLegacyRentalMutation(task) {
+  // `then(task, task)`, not `then(task)`: a rejected predecessor must not
+  // reject the chain, or every later rental write fails too.
+  const run = legacyRentalWriteQueue.then(task, task);
+  legacyRentalWriteQueue = run.catch(() => undefined);
+  return run;
+}
+
+async function renameWithRetry(source, target) {
+  let lastError;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      await fs.rename(source, target);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!["EACCES", "EBUSY", "EPERM"].includes(error.code) || attempt === 9) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 15 * (attempt + 1)));
+    }
+  }
+  throw lastError;
+}
+
+async function writeJsonFileAtomic(filePath, value) {
+  const directory = path.dirname(filePath);
+  await fs.mkdir(directory, { recursive: true });
+  const tempPath = path.join(
+    directory,
+    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
+  );
+  try {
+    await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+    await renameWithRetry(tempPath, filePath);
+  } catch (error) {
+    await fs.rm(tempPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
 async function writeLegacyRentals(rentals) {
   const targets = [whatsappDatabasePath("rentals.json"), legacySewaPath()];
   for (const targetPath of targets) {
-    await fs.mkdir(path.dirname(targetPath), { recursive: true });
-    await fs.writeFile(targetPath, `${JSON.stringify(rentals, null, 2)}\n`, "utf8");
+    await writeJsonFileAtomic(targetPath, rentals);
   }
 }
 
 async function upsertLegacyRental(groupJid, patch) {
   if (!String(groupJid || "").endsWith("@g.us")) return null;
-  const rentals = await readLegacyRentals();
-  const current = rentals[groupJid] || {};
-  const status = String(patch.status ?? current.status ?? "").trim().toLowerCase();
-  const next = {
-    ...current,
-    ...(patch.linkGrub ? { linkGrub: patch.linkGrub } : {}),
-    start: patch.start || current.start || legacyTodayText(),
-    expired: Number(patch.expired ?? current.expired ?? expirationFromDays(patch.daysLeft || 0)),
-    ...(status ? { status } : {}),
-  };
-  rentals[groupJid] = next;
-  await writeLegacyRentals(rentals);
-  return next;
+  // The read has to be inside the queue. Reading outside it and only queueing
+  // the write would serialise the writes while still letting two requests
+  // build from the same stale base -- the exact race being fixed here.
+  return queueLegacyRentalMutation(async () => {
+    const rentals = await readLegacyRentals();
+    const current = rentals[groupJid] || {};
+    const status = String(patch.status ?? current.status ?? "").trim().toLowerCase();
+    const next = {
+      ...current,
+      ...(patch.linkGrub ? { linkGrub: patch.linkGrub } : {}),
+      start: patch.start || current.start || legacyTodayText(),
+      expired: Number(patch.expired ?? current.expired ?? expirationFromDays(patch.daysLeft || 0)),
+      ...(status ? { status } : {}),
+    };
+    rentals[groupJid] = next;
+    await writeLegacyRentals(rentals);
+    return next;
+  });
 }
 
 async function joinGroupThroughBot(inviteLink) {
