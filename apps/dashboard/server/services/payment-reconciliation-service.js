@@ -1,5 +1,7 @@
 import { LATE_PAYMENT_RECHECK_MS, orderIsExpired } from "./late-payment-recovery.js";
 
+const PAID_STATUSES = new Set(["paid", "success", "settlement", "settled", "completed", "complete", "berhasil", "sukses"]);
+
 export function createPaymentReconciliationService(deps) {
   const {
     activeResellerByWhatsapp,
@@ -15,8 +17,7 @@ export function createPaymentReconciliationService(deps) {
   } = deps;
 
   function pakasirStatusIsPaid(status = "") {
-    const text = String(status || "").toLowerCase();
-    return ["paid", "success", "settlement", "settled", "completed", "complete", "berhasil", "sukses"].some((word) => text.includes(word));
+    return PAID_STATUSES.has(String(status || "").toLowerCase().trim());
   }
 
   function paymentPaidAmount(payment = {}, order = {}) {

@@ -26,7 +26,7 @@
     "wa:import-backup": "node ./scripts/deploy/import-legacy-wa-backup.mjs",
     "whatsapp:repair-auth": "node ./scripts/maintenance/repair-whatsapp-auth.mjs",
     "release:code": "node ./scripts/deploy/create-code-release.mjs",
-    "test:bot": "node --test apps/bot/tests/",
+    "test:bot": "node --test \"apps/bot/tests/*.test.mjs\"",
     "test:all": "npm run test:bot && npm run test:all --prefix apps/dashboard",
     "runtime:backup": "node ./scripts/maintenance/runtime-backup.mjs",
     "runtime:backup:send": "node ./scripts/maintenance/runtime-backup.mjs --send-whatsapp",
